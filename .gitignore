@@ -1,0 +1,8 @@
+.DS_Store
+Directioner/
+church-accounting/
+weakness-app/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+.build/
