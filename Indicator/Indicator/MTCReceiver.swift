@@ -22,6 +22,9 @@ class MTCReceiver {
 
     // MIDI Clock
     private var clockPulses = 0   // 0..<24, 24펄스 = 1박자
+    private(set) var iacConnected = false
+    private(set) var clockReceived = false
+    private(set) var mtcReceived = false
 
     func start() {
         MIDIClientCreate("IndicatorMTC" as CFString, nil, nil, &client)
@@ -38,6 +41,7 @@ class MTCReceiver {
             if srcName.lowercased().contains("iac") {
                 MIDIPortConnectSource(port, src, nil)
                 connectedAny = true
+                iacConnected = true
             }
         }
         // IAC 소스가 없으면 전체 연결 (fallback)
@@ -82,6 +86,7 @@ class MTCReceiver {
                 switch byte {
                 case 0xF8:
                     // MIDI Timing Clock — 24펄스/박자
+                    clockReceived = true
                     clockPulses += 1
                     if clockPulses >= 24 {
                         clockPulses = 0
@@ -108,6 +113,7 @@ class MTCReceiver {
                     qfBits[nibbleType] = data & 0x0F
                     qfCount += 1
 
+                    mtcReceived = true
                     if qfCount >= 8 {
                         let frames   = Int(qfBits[0]) | (Int(qfBits[1]) << 4)
                         let secs     = Int(qfBits[2]) | (Int(qfBits[3]) << 4)

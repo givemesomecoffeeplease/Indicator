@@ -4,7 +4,7 @@ import Darwin
 import CoreMIDI
 import UniformTypeIdentifiers
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
@@ -107,6 +107,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu Bar
 
+    // MARK: - Setup status tags
+    private let tagAX      = 100
+    private let tagLogic   = 101
+    private let tagIAC     = 102
+    private let tagMTC     = 103
+    private let tagClock   = 104
+    private let tagMarkers = 105
+
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
@@ -115,6 +123,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let ip = localIP()
         let menu = NSMenu()
+        menu.delegate = self
+
+        // ── 설정 상태 체크리스트 ──
+        menu.addItem(makeStatusItem("손쉬운 사용 권한", tag: tagAX, action: #selector(openAccessibilitySettings)))
+        menu.addItem(makeStatusItem("Logic Pro 실행 중", tag: tagLogic, action: nil))
+        menu.addItem(makeStatusItem("IAC Driver 연결됨", tag: tagIAC, action: #selector(openAudioMIDISetup)))
+        menu.addItem(makeStatusItem("MTC 수신 중", tag: tagMTC, action: #selector(openLogicSyncSettings)))
+        menu.addItem(makeStatusItem("MIDI Clock 수신 중", tag: tagClock, action: #selector(openLogicSyncSettings)))
+        menu.addItem(makeStatusItem("마커 목록 창 열림", tag: tagMarkers, action: nil))
+        menu.addItem(.separator())
+
         let addrItem = NSMenuItem(title: "http://\(ip):8888", action: #selector(copyAddress), keyEquivalent: "")
         addrItem.representedObject = "http://\(ip):8888"
         menu.addItem(addrItem)
@@ -135,6 +154,71 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "종료", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
+    }
+
+    private func makeStatusItem(_ title: String, tag: Int, action: Selector?) -> NSMenuItem {
+        let item = NSMenuItem(title: "", action: action, keyEquivalent: "")
+        item.tag = tag
+        item.target = self
+        // 초기 상태는 menuWillOpen에서 채워짐
+        updateStatusItem(item, ok: false, title: title)
+        return item
+    }
+
+    private func updateStatusItem(_ item: NSMenuItem, ok: Bool, title: String) {
+        let dot   = ok ? "● " : "○ "
+        let color = ok ? NSColor.systemGreen : NSColor.systemRed
+        let attrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: color,
+            .font: NSFont.menuFont(ofSize: 0)
+        ]
+        let base  = NSAttributedString(string: dot, attributes: attrs)
+        let rest  = NSAttributedString(string: title,
+                                       attributes: [.font: NSFont.menuFont(ofSize: 0)])
+        let full  = NSMutableAttributedString(attributedString: base)
+        full.append(rest)
+        item.attributedTitle = full
+        item.action = ok ? nil : item.action  // ok면 클릭 불필요
+    }
+
+    // NSMenuDelegate — 메뉴 열릴 때마다 상태 갱신
+    func menuWillOpen(_ menu: NSMenu) {
+        let axOk      = AXIsProcessTrusted()
+        let logicOk   = NSRunningApplication.runningApplications(withBundleIdentifier: LogicPoller.bundleID).first != nil
+        let iacOk     = mtcReceiver.iacConnected
+        let mtcOk     = mtcReceiver.mtcReceived
+        let clockOk   = mtcReceiver.clockReceived
+        let markersOk = !(logicPoller.lastSnapshot?.markers.isEmpty ?? true)
+
+        let checks: [(Int, Bool, String)] = [
+            (tagAX,      axOk,      "손쉬운 사용 권한"),
+            (tagLogic,   logicOk,   "Logic Pro 실행 중"),
+            (tagIAC,     iacOk,     "IAC Driver 연결됨"),
+            (tagMTC,     mtcOk,     "MTC 수신 중"),
+            (tagClock,   clockOk,   "MIDI Clock 수신 중"),
+            (tagMarkers, markersOk, "마커 목록 창 열림"),
+        ]
+        for (tag, ok, title) in checks {
+            if let item = menu.item(withTag: tag) {
+                updateStatusItem(item, ok: ok, title: title)
+            }
+        }
+    }
+
+    @objc private func openAccessibilitySettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+    }
+
+    @objc private func openAudioMIDISetup() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Audio MIDI Setup.app"))
+    }
+
+    @objc private func openLogicSyncSettings() {
+        let alert = NSAlert()
+        alert.messageText = "Logic Pro 동기화 설정"
+        alert.informativeText = "Logic Pro → 파일 → 프로젝트 설정 → 동기화 → MIDI 탭\n\nIAC Driver Bus 1 행에서 MTC와 클락(Clock) 체크박스를 모두 활성화하세요."
+        alert.addButton(withTitle: "확인")
+        alert.runModal()
     }
 
     @objc private func copyAddress(_ sender: NSMenuItem) {

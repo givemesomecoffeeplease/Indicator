@@ -42,7 +42,7 @@ Indicator/Indicator/
 | 마커 위치 파악 | AX (미리 읽어둠) |
 | 현재 대략 위치 보정 | AX (250ms, 앵커용) |
 | 섹션 전환 타이밍 예측 | AX 위치 + MTC 시간으로 계산 |
-| 섹션 전환 실행 | MTC 임계 도달 → MIDI Clock beat에 스냅 |
+| 섹션 전환 실행 | MIDI Clock beat (countdownBeats 1→0인 순간) |
 | 진행률 바 | MTC 경과 시간 (`currentMTC - sectionEntryMTC`) |
 | 카운트다운 | MIDI Clock beat마다 -1 |
 
@@ -52,12 +52,22 @@ Indicator/Indicator/
 - `StateEngine.swift`: 완전 재작성
   - `sectionEntryMTC`: 섹션 진입 시점 MTC 기록
   - `transitionMTC`: 다음 섹션 전환 예상 MTC (AX 위치 + 마커 정보로 계산)
-  - `transitionPending`: MIDI Clock beat 대기 플래그
+  - `transitionPending` 제거 — countdownBeats 1→0 beat에서 직접 전환 실행
   - MTC 0.5초 이상 점프 감지 → 되감기/점프 자동 리셋
   - AX 전환 감지 시 bar 위치가 현재보다 뒤면 무시 (MIDI Clock 전환 후 AX 역행 방지)
 - `MTCReceiver.swift`: IAC Driver 소스만 연결 (다른 앱 MIDI Clock 반사 방지), MIDI Clock(0xF8) 수신
-- `AppDelegate.swift`: `mtcReceiver.onBeat` → `stateEngine.onBeat()` 연결
+- `AppDelegate.swift`: `mtcReceiver.onBeat` → `stateEngine.onBeat()` 연결, 메뉴바 온보딩 체크리스트 추가
+- `MTCReceiver.swift`: `iacConnected`, `mtcReceived`, `clockReceived` 플래그 노출 (온보딩용)
 - `dev-run.sh`: 설치 후 `tccutil reset Accessibility` 자동 호출
+
+#### 온보딩 체크리스트 (메뉴바)
+메뉴바 클릭 시 6가지 항목을 실시간으로 표시. ● 초록 = 정상, ○ 빨강 = 미설정 (클릭 시 해당 설정 화면으로 이동):
+1. 손쉬운 사용 권한 → 시스템 설정
+2. Logic Pro 실행 중
+3. IAC Driver 연결됨 → 오디오 MIDI 설정
+4. MTC 수신 중 → Logic 동기화 설정 안내
+5. MIDI Clock 수신 중 → Logic 동기화 설정 안내
+6. 마커 목록 창 열림
 
 #### Logic Pro 설정
 - **동기화 → MIDI → IAC 드라이버**: 클락(MIDI Clock) + MTC 둘 다 체크 필요

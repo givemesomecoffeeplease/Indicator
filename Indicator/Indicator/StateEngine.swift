@@ -23,7 +23,6 @@ class StateEngine {
 
     // ── 다음 섹션 전환 예측 ───────────────────────────────
     private var transitionMTC: TimeInterval = 0      // 전환이 일어날 예상 MTC
-    private var transitionPending = false             // MIDI Clock beat에서 실행 대기 중
 
     // ── 카운트다운 ─────────────────────────────────────────
     private var countdownBeats: Int = 0              // 남은 박자 수
@@ -72,25 +71,19 @@ class StateEngine {
         // 점프 감지 (되감기 / 재생헤드 이동)
         if mtcIsPlaying && abs(time - prevMTCTime) > 0.5 {
             currentSectionName = ""
-            transitionPending  = false
             transitionMTC      = 0
         }
         prevMTCTime  = mtcTime
         mtcTime      = time
         mtcIsPlaying = true
 
-        // 전환 시점 반 박자 전부터 대기
-        if transitionMTC > 0 && mtcTime >= transitionMTC - beatDuration() * 0.5 {
-            transitionPending = true
-        }
-
         recompute()
     }
 
     func mtcStopped() {
-        mtcIsPlaying      = false
-        transitionPending = false
-        countdownBeats    = 0
+        mtcIsPlaying   = false
+        transitionMTC  = 0
+        countdownBeats = 0
         let state = compute()
         lastState    = state
         lastBroadcast = 0
@@ -105,13 +98,12 @@ class StateEngine {
         guard wall - lastBeatWall >= 0.1 else { return }
         lastBeatWall = wall
 
-        if transitionPending {
-            transitionPending = false
+        if countdownBeats > 1 {
+            countdownBeats -= 1
+        } else if countdownBeats == 1 {
+            countdownBeats = 0
             executeTransition()
-            return
         }
-
-        if countdownBeats > 1 { countdownBeats -= 1 }
         recompute()
     }
 
