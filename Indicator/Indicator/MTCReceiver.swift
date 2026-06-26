@@ -79,7 +79,9 @@ class MTCReceiver {
     private func process(_ pkt: MIDIPacket) {
         withUnsafeBytes(of: pkt.data) { raw in
             var idx = 0
-            let count = Int(pkt.length)
+            // pkt.length는 실제 메시지 길이지만 버퍼(raw)는 최대 256바이트
+            // SysEx 등 긴 메시지가 오면 length > 256이 되어 크래시 → 버퍼 크기로 제한
+            let count = min(Int(pkt.length), raw.count)
             while idx < count {
                 let byte = raw[idx]
 

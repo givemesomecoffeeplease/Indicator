@@ -156,7 +156,7 @@ class WebServer {
         for song in songs {
             rows += "<tr><td colspan='4' class='song-header'>\(esc(song.name))</td></tr>\n"
             for sec in song.sections {
-                let d = getLyric?(song.name, sec)
+                let d  = getLyric?(song.name, sec)
                 let lc = esc(d?.lyricCue ?? "")
                 let nt = esc(d?.note ?? "")
                 rows += """
@@ -187,6 +187,7 @@ class WebServer {
           .sec { color: #555; min-width: 80px; }
           input { width: 100%; border: 1px solid #d1d1d6; border-radius: 6px; padding: 6px 10px; font-size: 14px; outline: none; }
           input:focus { border-color: #007aff; }
+
           .btn { display: inline-block; margin-top: 16px; padding: 10px 28px; background: #007aff; color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; }
           .btn:active { background: #0062cc; }
           #msg { margin-top: 12px; color: #34c759; font-weight: 600; font-size: 14px; display: none; }

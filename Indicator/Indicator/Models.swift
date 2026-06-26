@@ -5,6 +5,12 @@ struct SectionData: Codable {
     var note: String
 }
 
+struct TimeSigEvent {
+    let bar: Int        // 변경 시작 마디
+    let beatsPerBar: Int  // 분자 (3, 4, 5, 6 …)
+    let beatUnit: Int     // 분모 (4, 8 …)
+}
+
 struct ChordEvent {
     let name: String  // formatted, e.g. "Am7", "G/B"
     let bar: Int
@@ -23,6 +29,7 @@ struct Marker: Equatable {
 struct LogicSnapshot {
     var markers: [Marker] = []
     var chords: [ChordEvent] = []
+    var timeSigEvents: [TimeSigEvent] = []   // 조표 및 박자표 목록에서 읽어온 박자 변경 이벤트
     var transportBar: Int = 1
     var transportBeat: Int = 1
     var bpm: Double = 120.0

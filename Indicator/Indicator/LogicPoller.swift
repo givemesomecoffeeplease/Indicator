@@ -9,24 +9,26 @@ class LogicPoller {
     var dumpAXTree = false
     private(set) var lastSnapshot: LogicSnapshot?
 
-    private var timer: Timer?
+    private var timer: DispatchSourceTimer?
+    private let queue = DispatchQueue(label: "com.indicator.poller", qos: .userInitiated)
+    private var lastTimeSigRead: Date = .distantPast
+    private var cachedTimeSigEvents: [TimeSigEvent] = []
 
     func start() {
-        poll()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            self?.poll()
-        }
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now(), repeating: .milliseconds(250))
+        t.setEventHandler { [weak self] in self?.poll() }
+        t.resume()
+        timer = t
     }
 
     func stop() {
-        timer?.invalidate()
+        timer?.cancel()
         timer = nil
     }
 
     func forceUpdate() {
-        if let snap = lastSnapshot {
-            DispatchQueue.main.async { self.onSnapshot?(snap) }
-        }
+        queue.async { [weak self] in self?.poll() }
     }
 
     // MARK: - Poll
@@ -51,6 +53,14 @@ class LogicPoller {
 
         readTransport(axApp: axApp, into: &snapshot)
         readMarkers(axApp: axApp, into: &snapshot)
+        // 변박 이벤트는 1초마다만 읽음 (AX 트리 탐색 비용)
+        if Date().timeIntervalSince(lastTimeSigRead) >= 1.0 {
+            readTimeSigs(axApp: axApp, into: &snapshot)
+            if !snapshot.timeSigEvents.isEmpty { cachedTimeSigEvents = snapshot.timeSigEvents }
+            lastTimeSigRead = Date()
+        } else {
+            snapshot.timeSigEvents = cachedTimeSigEvents
+        }
 
         DispatchQueue.main.async {
             self.lastSnapshot = snapshot
@@ -155,6 +165,71 @@ class LogicPoller {
             markers.append(Marker(name: nameText, bar: pos.bar, beat: pos.beat))
         }
         return markers
+    }
+
+    // MARK: - Time Signatures
+    // Window title contains "조표 및 박자표 목록"
+    // Row structure:
+    //   cells[0] = position → AXGroup desc = "55 1 1 1 "
+    //   cells[1] = type     → AXCell  desc = "박자" or "키"
+    //   cells[2] = value    → AXSlider (분자) + AXPopUpButton val="/4" (분모)
+
+    private func readTimeSigs(axApp: AXUIElement, into snapshot: inout LogicSnapshot) {
+        guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return }
+        for window in windows {
+            let title = axString(window, key: kAXTitleAttribute) ?? ""
+            guard title.contains("조표 및 박자표 목록") else { continue }
+            guard let table = findByRole(window, "AXTable") else { continue }
+            let events = extractTimeSigs(from: table)
+            if !events.isEmpty { snapshot.timeSigEvents = events }
+            return
+        }
+    }
+
+    private func extractTimeSigs(from table: AXUIElement) -> [TimeSigEvent] {
+        let rows = axArray(of: table, key: kAXRowsAttribute)
+                ?? axArray(of: table, key: kAXChildrenAttribute)
+                ?? []
+
+        var events: [TimeSigEvent] = []
+        for row in rows {
+            let cells = axArray(of: row, key: kAXChildrenAttribute) ?? []
+            guard cells.count >= 3 else { continue }
+
+            // 위치: cells[0] → AXGroup child
+            guard let posChildren = axArray(of: cells[0], key: kAXChildrenAttribute),
+                  let posGroup = posChildren.first(where: {
+                      (axString($0, key: kAXRoleAttribute) ?? "") == "AXGroup"
+                  }) else { continue }
+            let posText = axString(posGroup, key: kAXDescriptionAttribute) ?? ""
+            guard let pos = parseBarBeat(posText) else { continue }
+
+            // 타입: cells[1] → AXCell child → desc == "박자" 만 처리 (키 이벤트 스킵)
+            guard let typeChildren = axArray(of: cells[1], key: kAXChildrenAttribute),
+                  let typeCell = typeChildren.first(where: {
+                      (axString($0, key: kAXRoleAttribute) ?? "") == "AXCell"
+                  }),
+                  (axString(typeCell, key: kAXDescriptionAttribute) ?? "") == "박자"
+            else { continue }
+
+            // 값: cells[2] → AXSlider (분자) + AXPopUpButton val="/N" (분모)
+            let valueChildren = axArray(of: cells[2], key: kAXChildrenAttribute) ?? []
+            guard let slider = valueChildren.first(where: {
+                      (axString($0, key: kAXRoleAttribute) ?? "") == "AXSlider"
+                  }),
+                  let numerator = axNumber(slider).map({ Int(round($0)) }),
+                  numerator > 0
+            else { continue }
+
+            let denomStr = valueChildren.compactMap { el -> String? in
+                guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXPopUpButton" else { return nil }
+                return axString(el, key: kAXValueAttribute)
+            }.first ?? "/4"
+            let beatUnit = Int(denomStr.replacingOccurrences(of: "/", with: "")) ?? 4
+
+            events.append(TimeSigEvent(bar: pos.bar, beatsPerBar: numerator, beatUnit: beatUnit))
+        }
+        return events.sorted { $0.bar < $1.bar }
     }
 
     // MARK: - Parsers
