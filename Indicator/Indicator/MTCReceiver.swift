@@ -25,6 +25,8 @@ class MTCReceiver {
     private(set) var iacConnected = false
     private(set) var clockReceived = false
     private(set) var mtcReceived = false
+    private var mtcTimeoutTimer:   DispatchWorkItem?
+    private var clockTimeoutTimer: DispatchWorkItem?
 
     func start() {
         MIDIClientCreate("IndicatorMTC" as CFString, nil, nil, &client)
@@ -38,7 +40,7 @@ class MTCReceiver {
             var name: Unmanaged<CFString>?
             MIDIObjectGetStringProperty(src, kMIDIPropertyName, &name)
             let srcName = (name?.takeRetainedValue() as String?) ?? ""
-            if srcName.lowercased().contains("iac") {
+            if srcName.lowercased().contains("iac") || srcName.contains("버스") {
                 MIDIPortConnectSource(port, src, nil)
                 connectedAny = true
                 iacConnected = true
@@ -66,6 +68,20 @@ class MTCReceiver {
         }
     }
 
+    private func resetMTCTimeout() {
+        mtcTimeoutTimer?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.mtcReceived = false }
+        mtcTimeoutTimer = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60.0, execute: item)
+    }
+
+    private func resetClockTimeout() {
+        clockTimeoutTimer?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.clockReceived = false }
+        clockTimeoutTimer = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60.0, execute: item)
+    }
+
     private func resetSilenceTimer() {
         silenceTimer?.cancel()
         let item = DispatchWorkItem { [weak self] in
@@ -89,6 +105,7 @@ class MTCReceiver {
                 case 0xF8:
                     // MIDI Timing Clock — 24펄스/박자
                     clockReceived = true
+                    resetClockTimeout()
                     clockPulses += 1
                     if clockPulses >= 24 {
                         clockPulses = 0
@@ -116,6 +133,7 @@ class MTCReceiver {
                     qfCount += 1
 
                     mtcReceived = true
+                    resetMTCTimeout()
                     if qfCount >= 8 {
                         let frames   = Int(qfBits[0]) | (Int(qfBits[1]) << 4)
                         let secs     = Int(qfBits[2]) | (Int(qfBits[3]) << 4)

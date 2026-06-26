@@ -154,7 +154,7 @@ class WebServer {
 
         var rows = ""
         for song in songs {
-            rows += "<tr><td colspan='4' class='song-header'>\(esc(song.name))</td></tr>\n"
+            rows += "<tr><td colspan='3' class='song-header'>\(esc(song.name))</td></tr>\n"
             for sec in song.sections {
                 let d  = getLyric?(song.name, sec)
                 let lc = esc(d?.lyricCue ?? "")
@@ -234,7 +234,6 @@ class WebServer {
             const song = el.dataset.song, sec = el.dataset.sec;
             if (!payload[song]) payload[song] = {};
             if (!payload[song][sec]) payload[song][sec] = { lyricCue: '', note: '' };
-            // 중복 섹션명이 있을 때 빈 값이 기존 값을 덮어쓰지 않도록
             if (el.value || !payload[song][sec].lyricCue) payload[song][sec].lyricCue = el.value;
           });
           document.querySelectorAll('input[name=nt]').forEach(el => {

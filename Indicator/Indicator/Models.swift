@@ -58,7 +58,14 @@ struct IndicatorState: Codable, Equatable {
     var note: String = ""
     var nextLyricCue: String = ""
     var nextNote: String = ""
+    var nextSectionIsSong: Bool = false
+    var currentBarFloat: Double = 0
+    var nextChordInMs: Double = 0
+    var broadcastTimestampMs: Double = 0
     var chords: [String] = []
+    var chordBars: [Int] = []
+    var chordBeats: [Int] = []
     var currentChordIndex: Int = -1
     var nextSectionChords: [String] = []
+    var nextSectionChordBars: [Int] = []
 }

@@ -31,6 +31,43 @@ Indicator/Indicator/
 └── Resources/index.html  # 브라우저 표시 화면
 ```
 
+## 2026-06-27 작업 내역 (3차)
+
+### 상태 메뉴 체크리스트 개선
+
+- `AppDelegate.swift`: `menuWillOpen`에서 IAC Driver 실시간 재확인 (시작 시 1회 체크 → 매번 MIDI 소스 목록 스캔)
+- `AppDelegate.swift`: IAC 소스 이름 한국어 대응 — `"버스"` 포함 여부 추가 체크 (한국어 macOS에서 "IAC Driver Bus 1" → "버스 1"로 표시됨)
+- `MTCReceiver.swift`: 동일 한국어 대응 — `start()`의 IAC 연결 로직에도 적용
+- `MTCReceiver.swift`: MTC / MIDI Clock 수신 타임아웃 추가 — 마지막 수신 후 60초 경과 시 자동으로 빨간색 전환 (곡 사이 일시 정지는 초록 유지)
+- GitHub Releases v1.0.0: 코드 화면 제거 + 상태 메뉴 수정된 빌드로 `Indicator.zip` 교체
+
+---
+
+## 2026-06-27 작업 내역 (2차)
+
+### 코드 스트립 표시 방식 개선 + 타이밍 보정 시도
+
+#### 코드 표시 방식 변경 (index.html)
+- 전체 코드 배열 슬라이딩 → **5칸 고정 윈도우** 방식으로 전환
+  - `prev2 / prev1 / current / next1 / next2` 5칸, 현재 코드는 항상 가운데
+  - 섹션 변경 시 `snapStrip(idx)` 즉시 이동, 1칸 전진 시 `slideLeft(idx)` 슬라이드
+  - `sliding` 플래그로 중복 애니메이션 방지
+- `#chord-now` 마커 div 제거, `justify-content: center`로 항상 중앙 정렬
+
+#### 타이밍 보정 시도 (StateEngine.swift)
+- 코드 변경 브로드캐스트 rate limit 우회: `onBeat()`에서 `chordPending` 소모 시 즉시 브로드캐스트
+- `compute()` 내 파이프라인 보정: `chordPending = true` + `nextChordMTC`까지 80ms 이내면 `displayChordIdx = currentChordIdx + 1` 미리 노출
+- `recalcNextChord()` 기준 변경: `anchorMTC`(AX 기반, 250ms 오차) → `sectionEntryMTC`(비트 정확, 10ms) 기준으로 `nextChordMTC` 계산
+
+#### ⚠️ 미해결 — 코드 타이밍 이슈 보류
+- 전반적으로 코드 전환이 실제 비트보다 늦게 표시됨
+- 섹션 전환 직후 첫 코드 변경이 한 박자 더 느림
+- 근본 원인: MTC 10ms + AX 250ms + SSE rate limit 50ms + 네트워크 지연의 누적
+- 브라우저 타이머(`setTimeout`) 방식도 시도했으나 Mac/iPad 클락 비동기 문제로 무의미
+- **추후 해결 방향**: MIDI Clock beat 기반으로 코드 인덱스를 완전히 재설계하거나, 브라우저에 BPM + anchorBar + sectionEntryMTC를 넘겨 로컬에서 직접 계산하는 방식 필요
+
+---
+
 ## 2026-06-27 작업 내역
 
 ### 앱 아이콘 + GitHub Releases 배포

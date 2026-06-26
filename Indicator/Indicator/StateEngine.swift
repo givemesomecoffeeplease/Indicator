@@ -1,11 +1,11 @@
 import Foundation
 
-private let debugLogURL = URL(fileURLWithPath: NSHomeDirectory() + "/Desktop/indicator_debug.txt")
-private var debugLogHandle: FileHandle? = {
+let debugLogURL = URL(fileURLWithPath: NSHomeDirectory() + "/Desktop/indicator_debug.txt")
+var debugLogHandle: FileHandle? = {
     FileManager.default.createFile(atPath: debugLogURL.path, contents: nil)
     return try? FileHandle(forWritingTo: debugLogURL)
 }()
-private func debugLog(_ msg: String) {
+func debugLog(_ msg: String) {
     let line = "\(Date()) \(msg)\n"
     debugLogHandle?.write(line.data(using: .utf8) ?? Data())
 }
@@ -27,11 +27,12 @@ class StateEngine {
     private var anchorMTC: TimeInterval = 0
 
     // ── 섹션 감지 안정화 (연속 2회 동일해야 전환) ───────────
-    private var pendingSectionName: String = ""
+    private var pendingSectionIdx: Int = -1
     private var pendingCount: Int = 0
 
     // ── 현재 섹션 상태 ─────────────────────────────────────
-    private var currentSectionName: String = ""
+    private var currentSectionIdx: Int = -1
+    private var currentSectionName: String = ""  // 표시용
     private var sectionEntryMTC: TimeInterval = 0   // 이 섹션 시작 시점의 MTC
     private var sectionDurationSec: Double = 0       // 이 섹션 총 길이(초)
 
@@ -66,28 +67,37 @@ class StateEngine {
 
         debugLog("[AX] bar=\(String(format:"%.2f",bar)) mtcTime=\(String(format:"%.3f",mtcTime)) markers=\(snapshot.markers.count) bpm=\(snapshot.bpm) playing=\(mtcIsPlaying)")
 
-        // 어느 섹션인지 감지 — 연속 2회 동일해야 전환 (1회짜리 AX 오독 방지)
-        let detected = detectSectionName(at: anchorBar)
+        // 어느 섹션인지 감지 — 이름 대신 인덱스로 추적 (중복 섹션명 오류 방지)
+        let detectedIdx = detectSectionIdx(at: anchorBar)
 
-        if detected == pendingSectionName {
+        if detectedIdx == pendingSectionIdx {
             pendingCount += 1
         } else {
-            pendingSectionName = detected
+            let dName = sectionName(at: detectedIdx)
+            let pName = sectionName(at: pendingSectionIdx)
+            debugLog("[Section] pending change: \(pName) → \(dName) @ bar=\(String(format:"%.2f",anchorBar)) (count reset)")
+            pendingSectionIdx = detectedIdx
             pendingCount = 1
         }
 
-        // 재생 중엔 2회 연속 확인 (AX 오독 방지), 정지 상태엔 즉시 반영
-        let confirmedSection = (mtcIsPlaying && pendingCount < 2) ? currentSectionName : detected
+        // 거리 기반 확인 횟수: 인접 섹션은 2회, 먼 섹션은 4회 (AX 순간 오독 방지)
+        let detectedStart = sectionBounds(idx: detectedIdx)?.start ?? 0
+        let currentStart  = sectionBounds(idx: currentSectionIdx)?.start ?? 0
+        let barDistance   = abs(detectedStart - currentStart)
+        let requiredCount = barDistance > 8 ? 4 : 2
+        let confirmedIdx  = (pendingCount < requiredCount) ? currentSectionIdx : detectedIdx
 
-        if confirmedSection != currentSectionName {
-            let detectedStart = sectionBounds(name: confirmedSection)?.start ?? 0
-            let currentStart  = sectionBounds(name: currentSectionName)?.start ?? -1
-            if detectedStart >= currentStart {
-                applySection(name: confirmedSection, retroactive: true)
+        debugLog("[Section] detected=\(sectionName(at:detectedIdx)) current=\(currentSectionName) pending=\(pendingCount)/\(requiredCount) dist=\(String(format:"%.0f",barDistance))")
+
+        if confirmedIdx != currentSectionIdx {
+            let confirmedStart = sectionBounds(idx: confirmedIdx)?.start ?? 0
+            debugLog("[Section] TRANSITION → \(sectionName(at:confirmedIdx)) (bar \(String(format:"%.0f",confirmedStart)))")
+            if confirmedStart >= currentStart {
+                applySection(idx: confirmedIdx, retroactive: true)
             }
         } else {
             // 같은 섹션인데 anchorBar가 섹션 끝을 지나쳤으면 강제 전환
-            if let bounds = sectionBounds(name: currentSectionName), anchorBar >= bounds.end - 0.1 {
+            if let bounds = sectionBounds(idx: currentSectionIdx), anchorBar >= bounds.end - 0.1 {
                 executeTransition()
             } else {
                 recalcTransition()
@@ -105,11 +115,12 @@ class StateEngine {
         // 점프 감지 (되감기 / 재생헤드 이동)
         if mtcIsPlaying && abs(time - prevMTCTime) > 2.0 {
             currentSectionName = ""
+            currentSectionIdx  = -1
             transitionMTC      = 0
             currentChordIdx    = -1
             chordPending       = false
             nextChordMTC       = 0
-            pendingSectionName = ""
+            pendingSectionIdx  = -1
             pendingCount       = 0
         }
         prevMTCTime  = mtcTime
@@ -128,7 +139,7 @@ class StateEngine {
         mtcIsPlaying       = false
         transitionMTC      = 0
         countdownBeats     = 0
-        pendingSectionName = ""
+        pendingSectionIdx  = -1
         pendingCount       = 0
         let state = compute()
         lastState    = state
@@ -156,6 +167,12 @@ class StateEngine {
             chordPending = false
             currentChordIdx += 1
             recalcNextChord()
+            // 코드 변경은 rate limit 우회하여 즉시 브로드캐스트
+            let state = compute()
+            lastState     = state
+            lastBroadcast = Date().timeIntervalSinceReferenceDate
+            onStateChange?(state)
+            return
         }
 
         recompute()
@@ -164,13 +181,15 @@ class StateEngine {
     // MARK: - 섹션 적용
 
     // retroactive: AX가 이미 섹션 중간에서 감지한 경우 → sectionEntryMTC를 역산
-    private func applySection(name: String, retroactive: Bool) {
-        guard let (startBar, endBar) = sectionBounds(name: name) else {
-            debugLog("[Apply] sectionBounds nil for '\(name)'")
+    private func applySection(idx: Int, retroactive: Bool) {
+        guard let (startBar, endBar) = sectionBounds(idx: idx) else {
+            debugLog("[Apply] sectionBounds nil for idx=\(idx)")
             return
         }
-        debugLog("[Apply] section='\(name)' start=\(startBar) end=\(endBar) retro=\(retroactive)")
+        let name = sectionName(at: idx)
+        debugLog("[Apply] section='\(name)' idx=\(idx) start=\(startBar) end=\(endBar) retro=\(retroactive)")
 
+        currentSectionIdx  = idx
         currentSectionName = name
         currentChordIdx    = -1
         chordPending       = false
@@ -193,13 +212,13 @@ class StateEngine {
     // MARK: - 전환 예측 재계산
 
     private func recalcTransition() {
-        let markers  = markersInCurrentSong()
-        guard let idx = markers.firstIndex(where: { $0.displayName == currentSectionName }),
-              idx + 1 < markers.count else {
+        let markers = markersInCurrentSong()
+        guard currentSectionIdx >= 0,
+              currentSectionIdx + 1 < markers.count else {
             transitionMTC = 0
             return
         }
-        let nextBar = markerBarFloat(markers[idx + 1])
+        let nextBar = markerBarFloat(markers[currentSectionIdx + 1])
         transitionMTC = anchorMTC + calcDuration(from: anchorBar, to: nextBar)
     }
 
@@ -207,11 +226,10 @@ class StateEngine {
 
     private func executeTransition() {
         let markers = markersInCurrentSong()
-        guard let idx = markers.firstIndex(where: { $0.displayName == currentSectionName }),
-              idx + 1 < markers.count else { return }
+        guard currentSectionIdx >= 0,
+              currentSectionIdx + 1 < markers.count else { return }
 
-        let nextMarker = markers[idx + 1]
-        applySection(name: nextMarker.displayName, retroactive: false)
+        applySection(idx: currentSectionIdx + 1, retroactive: false)
         recompute()
     }
 
@@ -228,13 +246,21 @@ class StateEngine {
         return Array(all[si..<ei])
     }
 
-    private func detectSectionName(at bar: Double) -> String {
-        markersInCurrentSong().last { markerBarFloat($0) <= bar + 0.1 }?.displayName ?? ""
+    private func detectSectionIdx(at bar: Double) -> Int {
+        let markers = markersInCurrentSong()
+        guard let last = markers.indices.last(where: { markerBarFloat(markers[$0]) <= bar + 0.1 }) else { return -1 }
+        return last
     }
 
-    private func sectionBounds(name: String) -> (start: Double, end: Double)? {
+    private func sectionName(at idx: Int) -> String {
         let markers = markersInCurrentSong()
-        guard let idx = markers.firstIndex(where: { $0.displayName == name }) else { return nil }
+        guard idx >= 0, idx < markers.count else { return "" }
+        return markers[idx].displayName
+    }
+
+    private func sectionBounds(idx: Int) -> (start: Double, end: Double)? {
+        let markers = markersInCurrentSong()
+        guard idx >= 0, idx < markers.count else { return nil }
         let start = markerBarFloat(markers[idx])
         let end   = idx + 1 < markers.count ? markerBarFloat(markers[idx + 1]) : start + 8
         return (start, end)
@@ -285,17 +311,23 @@ class StateEngine {
 
     // ── 코드 beat-snap 헬퍼 ──────────────────────────────
 
-    private func chordsInSection(name: String) -> [ChordEvent] {
-        guard let bounds = sectionBounds(name: name) else { return [] }
+    private func chordsInCurrentSection() -> [ChordEvent] {
+        guard let bounds = sectionBounds(idx: currentSectionIdx) else {
+            debugLog("[ChordSec] sectionBounds nil, idx=\(currentSectionIdx)")
+            return []
+        }
         let bpb = Double(max(1, snapshot.beatsPerBar))
-        return snapshot.chords.filter { ch in
+        let result = snapshot.chords.filter { ch in
             let bar = Double(ch.bar) + Double(ch.beat - 1) / bpb
             return bar >= bounds.start && bar < bounds.end
         }
-    }
-
-    private func chordsInCurrentSection() -> [ChordEvent] {
-        chordsInSection(name: currentSectionName)
+        if result.isEmpty {
+            let allBars = snapshot.chords.map { $0.bar }
+            let minBar = allBars.min() ?? 0
+            let maxBar = allBars.max() ?? 0
+            debugLog("[ChordSec] empty! bounds=\(bounds.start)–\(bounds.end) chords=\(snapshot.chords.count) barRange=\(minBar)–\(maxBar)")
+        }
+        return result
     }
 
     private func chordBarFloat(_ ch: ChordEvent) -> Double {
@@ -314,12 +346,16 @@ class StateEngine {
         }
 
         // 다음 코드 MTC 예측
+        // sectionEntryMTC(비트 정확, 10ms) + 섹션 시작부터의 오프셋으로 계산
+        // anchorMTC(AX 기반, 250ms 오차) 대신 사용
         let nextIdx = currentChordIdx + 1
         guard nextIdx < chords.count else { nextChordMTC = 0; return }
+        let bpb      = Double(max(1, snapshot.beatsPerBar))
+        let sectionStartBar = chordBarFloat(chords[0])
         let nextBar  = chordBarFloat(chords[nextIdx])
-        let barsLeft = nextBar - anchorBar
-        let secsLeft = barsLeft * Double(snapshot.beatsPerBar) * beatDuration()
-        nextChordMTC = anchorMTC + secsLeft
+        let barsFromSectionStart = nextBar - sectionStartBar
+        let secsFromSectionStart = barsFromSectionStart * bpb * beatDuration()
+        nextChordMTC = sectionEntryMTC + secsFromSectionStart
     }
 
     // MTC 경과 시간으로 보간한 현재 bar 위치
@@ -359,29 +395,39 @@ class StateEngine {
         let sections = inSong.filter { !$0.isSong }
         state.currentSongSections = sections.map { $0.displayName }
 
-        guard let idx = inSong.firstIndex(where: { $0.displayName == currentSectionName }) else {
+        guard currentSectionIdx >= 0, currentSectionIdx < inSong.count else {
             return state
         }
+        let idx = currentSectionIdx
 
         let cm = inSong[idx]
         let nm = idx + 1 < inSong.count ? inSong[idx + 1] : nil
 
         let songName = currentSong?.displayName ?? ""
         state.currentSection = cm.displayName
-        state.nextSection    = nm?.displayName
+        if let nm = nm {
+            state.nextSection = nm.displayName
+        } else {
+            // 마지막 섹션 — 다음 곡 마커 찾기
+            let all = snapshot.markers
+            if let nextSong = all.first(where: { $0.isSong && markerBarFloat($0) > anchorBar + 0.5 }) {
+                state.nextSection       = nextSong.displayName
+                state.nextSectionIsSong = true
+            }
+        }
 
         if let d = LyricsStore.shared.get(song: songName, section: cm.displayName) {
-            state.lyricCue = d.lyricCue ?? ""
-            state.note     = d.note     ?? ""
+            state.lyricCue = d.lyricCue
+            state.note     = d.note
         }
         if let nm = nm, let d = LyricsStore.shared.get(song: songName, section: nm.displayName) {
-            state.nextLyricCue = d.lyricCue ?? ""
-            state.nextNote     = d.note     ?? ""
+            state.nextLyricCue = d.lyricCue
+            state.nextNote     = d.note
         }
         state.currentSectionIndexInSong = sections.firstIndex(of: cm) ?? -1
 
         // ── 진행률: MTC 있으면 MTC 기반, 없으면 AX 위치 기반 ──
-        if sectionDurationSec > 0, let bounds = sectionBounds(name: currentSectionName) {
+        if sectionDurationSec > 0, let bounds = sectionBounds(idx: currentSectionIdx) {
             let elapsed: Double
             if mtcIsPlaying {
                 elapsed = mtcTime - sectionEntryMTC
@@ -397,7 +443,7 @@ class StateEngine {
         let displayBeats: Int
         if mtcIsPlaying {
             displayBeats = countdownBeats
-        } else if let bounds = sectionBounds(name: currentSectionName) {
+        } else if let bounds = sectionBounds(idx: currentSectionIdx) {
             displayBeats = calcBeats(from: anchorBar, to: bounds.end)
         } else {
             displayBeats = 0
@@ -406,19 +452,44 @@ class StateEngine {
 
         // ── 코드: beat-snap으로 타이밍 고정 ──
         let sectionChords = chordsInCurrentSection()
-        state.chords = sectionChords.map { $0.name }
-        state.currentChordIndex = (currentChordIdx >= 0 && currentChordIdx < sectionChords.count)
-            ? currentChordIdx : -1
+        state.chords      = sectionChords.map { $0.name }
+        state.chordBars   = sectionChords.map { $0.bar }
+        state.chordBeats  = sectionChords.map { $0.beat }
+        // 코드 변경이 80ms 이내로 임박하면 미리 다음 인덱스 노출 (파이프라인 지연 보정)
+        let displayChordIdx: Int
+        if chordPending, nextChordMTC > 0, (nextChordMTC - mtcTime) * 1000 < 80 {
+            displayChordIdx = currentChordIdx + 1
+        } else {
+            displayChordIdx = currentChordIdx
+        }
+        state.currentChordIndex = (displayChordIdx >= 0 && displayChordIdx < sectionChords.count)
+            ? displayChordIdx : -1
         // 다음 섹션 코드 (현재 섹션 마지막 그룹에서 미리 보기용)
-        if let nm = nm {
-            state.nextSectionChords = chordsInSection(name: nm.displayName).map { $0.name }
+        if nm != nil {
+            let nextIdx = currentSectionIdx + 1
+            if let bounds = sectionBounds(idx: nextIdx) {
+                let bpb = Double(max(1, snapshot.beatsPerBar))
+                let nextChords = snapshot.chords.filter { ch in
+                    let bar = Double(ch.bar) + Double(ch.beat - 1) / bpb
+                    return bar >= bounds.start && bar < bounds.end
+                }
+                state.nextSectionChords    = nextChords.map { $0.name }
+                state.nextSectionChordBars = nextChords.map { $0.bar }
+            }
         }
 
-        state.isPlaying     = mtcIsPlaying
-        state.bpm           = snapshot.bpm
-        state.beatsPerBar   = snapshot.beatsPerBar
-        state.timeSignature = snapshot.timeSignature
-        state.key           = snapshot.key
+        state.isPlaying       = mtcIsPlaying
+        state.currentBarFloat = anchorBar
+        state.bpm             = snapshot.bpm
+        state.beatsPerBar     = snapshot.beatsPerBar
+        state.timeSignature   = snapshot.timeSignature
+        state.key             = snapshot.key
+
+        // 브라우저 타이밍 동기화용
+        if nextChordMTC > 0 && mtcIsPlaying {
+            state.nextChordInMs = max(0, (nextChordMTC - mtcTime) * 1000)
+        }
+        state.broadcastTimestampMs = Date().timeIntervalSince1970 * 1000
 
         return state
     }

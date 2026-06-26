@@ -150,6 +150,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "리더용 템플릿 내보내기", action: #selector(exportLyrics), keyEquivalent: "e"))
         menu.addItem(NSMenuItem(title: "리더 파일 가져오기", action: #selector(importLyrics), keyEquivalent: "i"))
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "마커/코드 새로고침", action: #selector(refreshMarkers), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: "AX 트리 덤프 (디버그)", action: #selector(dumpAXTree), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "종료", action: #selector(quit), keyEquivalent: "q"))
@@ -185,7 +186,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         let axOk      = AXIsProcessTrusted()
         let logicOk   = NSRunningApplication.runningApplications(withBundleIdentifier: LogicPoller.bundleID).first != nil
-        let iacOk     = mtcReceiver.iacConnected
+        // IAC 연결 여부: 현재 MIDI 소스 목록에서 실시간 재확인
+        var iacOk = false
+        let srcCount = MIDIGetNumberOfSources()
+        var srcNames: [String] = []
+        for i in 0..<srcCount {
+            let src = MIDIGetSource(i)
+            var cfName: Unmanaged<CFString>?
+            MIDIObjectGetStringProperty(src, kMIDIPropertyName, &cfName)
+            let name = (cfName?.takeRetainedValue() as String?) ?? ""
+            srcNames.append(name)
+            // 한국어 macOS: "버스 1" / 영어: "IAC Driver Bus 1"
+            if name.lowercased().contains("iac") || name.contains("버스") { iacOk = true }
+        }
+        debugLog("[MIDI Sources] \(srcNames)")
         let mtcOk     = mtcReceiver.mtcReceived
         let clockOk   = mtcReceiver.clockReceived
         let markersOk = !(logicPoller.lastSnapshot?.markers.isEmpty ?? true)
@@ -295,6 +309,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Force recompute so browsers get updated state immediately
             self?.logicPoller.forceUpdate()
         }
+    }
+
+    @objc private func refreshMarkers() {
+        logicPoller.refreshMarkers()
     }
 
     @objc private func dumpAXTree() {
