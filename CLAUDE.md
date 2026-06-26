@@ -31,6 +31,20 @@ Indicator/Indicator/
 └── Resources/index.html  # 브라우저 표시 화면
 ```
 
+## 2026-06-27 작업 내역
+
+### 앱 아이콘 + GitHub Releases 배포
+
+- `Assets.xcassets/AppIcon.appiconset`: 앱 아이콘 신규 추가
+  - 배경 `#14141a`, 민트 세리프 대문자 I `#5DCAA5` (Georgia 폰트)
+  - 전체 사이즈 생성 (16~1024px, @2x 포함)
+- `project.pbxproj`: Deployment Target 26.0 → 14.0 (macOS Sonoma+)
+- Universal Binary: arm64 + x86_64 동시 지원
+- GitHub Releases v1.0.0: `Indicator.zip` 직접 다운로드 가능
+  - 설치: `/Applications`로 이동 → 오른쪽 클릭 → 열기 (보안 경고 우회 1회)
+
+---
+
 ## 2026-06-26 작업 내역 (3차)
 
 ### AX+MTC+MIDI Clock 하이브리드 싱크 아키텍처 완성
