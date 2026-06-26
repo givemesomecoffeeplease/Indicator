@@ -27,6 +27,11 @@ class StateEngine {
     // ── 카운트다운 ─────────────────────────────────────────
     private var countdownBeats: Int = 0              // 남은 박자 수
 
+    // ── 코드 beat-snap ────────────────────────────────────
+    private var currentChordIdx: Int = -1
+    private var nextChordMTC: TimeInterval = 0
+    private var chordPending = false
+
     // ── 브로드캐스트 rate limit ────────────────────────────
     private var lastState = IndicatorState()
     private var lastBroadcast: TimeInterval = 0
@@ -62,6 +67,7 @@ class StateEngine {
             recalcTransition()
         }
 
+        recalcNextChord()
         recompute()
     }
 
@@ -72,10 +78,18 @@ class StateEngine {
         if mtcIsPlaying && abs(time - prevMTCTime) > 0.5 {
             currentSectionName = ""
             transitionMTC      = 0
+            currentChordIdx    = -1
+            chordPending       = false
+            nextChordMTC       = 0
         }
         prevMTCTime  = mtcTime
         mtcTime      = time
         mtcIsPlaying = true
+
+        // 코드 전환 예약
+        if nextChordMTC > 0 && mtcTime >= nextChordMTC - beatDuration() * 0.5 && !chordPending {
+            chordPending = true
+        }
 
         recompute()
     }
@@ -104,6 +118,13 @@ class StateEngine {
             countdownBeats = 0
             executeTransition()
         }
+
+        if chordPending {
+            chordPending = false
+            currentChordIdx += 1
+            recalcNextChord()
+        }
+
         recompute()
     }
 
@@ -114,6 +135,9 @@ class StateEngine {
         guard let (startBar, endBar) = sectionBounds(name: name) else { return }
 
         currentSectionName = name
+        currentChordIdx    = -1
+        chordPending       = false
+        nextChordMTC       = 0
 
         let totalBars      = endBar - startBar
         sectionDurationSec = totalBars * Double(snapshot.beatsPerBar) * beatDuration()
@@ -193,6 +217,53 @@ class StateEngine {
         60.0 / max(1, snapshot.bpm)
     }
 
+    // ── 코드 beat-snap 헬퍼 ──────────────────────────────
+
+    private func chordsInSection(name: String) -> [ChordEvent] {
+        guard let bounds = sectionBounds(name: name) else { return [] }
+        let bpb = Double(max(1, snapshot.beatsPerBar))
+        return snapshot.chords.filter { ch in
+            let bar = Double(ch.bar) + Double(ch.beat - 1) / bpb
+            return bar >= bounds.start && bar < bounds.end
+        }
+    }
+
+    private func chordsInCurrentSection() -> [ChordEvent] {
+        chordsInSection(name: currentSectionName)
+    }
+
+    private func chordBarFloat(_ ch: ChordEvent) -> Double {
+        Double(ch.bar) + Double(ch.beat - 1) / Double(max(1, snapshot.beatsPerBar))
+    }
+
+    private func recalcNextChord() {
+        let chords = chordsInCurrentSection()
+        guard !chords.isEmpty else { currentChordIdx = -1; nextChordMTC = 0; return }
+
+        // 처음 진입 시 현재 위치에서 코드 인덱스 계산
+        if currentChordIdx == -1 {
+            currentChordIdx = chords.indices.last(where: { i in
+                chordBarFloat(chords[i]) <= anchorBar + 0.1
+            }) ?? 0
+        }
+
+        // 다음 코드 MTC 예측
+        let nextIdx = currentChordIdx + 1
+        guard nextIdx < chords.count else { nextChordMTC = 0; return }
+        let nextBar  = chordBarFloat(chords[nextIdx])
+        let barsLeft = nextBar - anchorBar
+        let secsLeft = barsLeft * Double(snapshot.beatsPerBar) * beatDuration()
+        nextChordMTC = anchorMTC + secsLeft
+    }
+
+    // MTC 경과 시간으로 보간한 현재 bar 위치
+    private func realtimeBar() -> Double {
+        guard anchorMTC > 0 else { return anchorBar }
+        let elapsed = mtcTime - anchorMTC
+        guard elapsed >= 0, elapsed < 5 else { return anchorBar }
+        return anchorBar + elapsed / beatDuration() / Double(max(1, snapshot.beatsPerBar))
+    }
+
     // MARK: - 계산 & 브로드캐스트
 
     private func recompute() {
@@ -253,6 +324,16 @@ class StateEngine {
         // ── 카운트다운: MIDI Clock beat 기반, 임계값 내에서만 표시 ──
         let threshold = countdownThresholdBars * max(1, snapshot.beatsPerBar)
         state.countdownBars = (countdownBeats > 0 && countdownBeats <= threshold) ? countdownBeats : 0
+
+        // ── 코드: beat-snap으로 타이밍 고정 ──
+        let sectionChords = chordsInCurrentSection()
+        state.chords = sectionChords.map { $0.name }
+        state.currentChordIndex = (currentChordIdx >= 0 && currentChordIdx < sectionChords.count)
+            ? currentChordIdx : -1
+        // 다음 섹션 코드 (현재 섹션 마지막 그룹에서 미리 보기용)
+        if let nm = nm {
+            state.nextSectionChords = chordsInSection(name: nm.displayName).map { $0.name }
+        }
 
         state.isPlaying     = mtcIsPlaying
         state.bpm           = snapshot.bpm

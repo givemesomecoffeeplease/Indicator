@@ -5,6 +5,12 @@ struct SectionData: Codable {
     var note: String
 }
 
+struct ChordEvent {
+    let name: String  // formatted, e.g. "Am7", "G/B"
+    let bar: Int
+    let beat: Int
+}
+
 struct Marker: Equatable {
     let name: String
     let bar: Int
@@ -16,6 +22,7 @@ struct Marker: Equatable {
 
 struct LogicSnapshot {
     var markers: [Marker] = []
+    var chords: [ChordEvent] = []
     var transportBar: Int = 1
     var transportBeat: Int = 1
     var bpm: Double = 120.0
@@ -44,4 +51,7 @@ struct IndicatorState: Codable, Equatable {
     var note: String = ""
     var nextLyricCue: String = ""
     var nextNote: String = ""
+    var chords: [String] = []
+    var currentChordIndex: Int = -1
+    var nextSectionChords: [String] = []
 }

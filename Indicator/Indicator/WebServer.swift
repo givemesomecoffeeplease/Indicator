@@ -45,30 +45,68 @@ class WebServer {
     private func receiveRequest(_ conn: NWConnection) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
             guard let self, let data, error == nil else { conn.cancel(); return }
-            let raw = String(data: data, encoding: .utf8) ?? ""
-            let lines = raw.components(separatedBy: "\r\n")
-            let firstLine = lines.first ?? ""
-            let parts = firstLine.split(separator: " ")
-            let method = parts.count >= 1 ? String(parts[0]) : "GET"
-            let path   = parts.count >= 2 ? String(parts[1]) : "/"
 
-            // Parse body for POST (after blank line)
-            var body = Data()
-            if method == "POST", let sepRange = raw.range(of: "\r\n\r\n") {
-                let bodyStr = String(raw[sepRange.upperBound...])
-                body = bodyStr.data(using: .utf8) ?? Data()
-            }
+            // Split header / body on \r\n\r\n (binary-safe)
+            let sep = Data("\r\n\r\n".utf8)
+            guard let sepRange = data.range(of: sep) else { conn.cancel(); return }
+            let headerData = data[data.startIndex..<sepRange.lowerBound]
+            let bodyData   = data[sepRange.upperBound...]
 
-            switch (method, path) {
-            case ("GET", "/events"):                    self.handleSSE(conn)
-            case ("GET", "/edit"):                      self.handleEdit(conn)
-            case ("POST", "/save"):                     self.handleSave(conn, body: body)
-            case ("GET", "/export/setlist"):            self.handleExportSetlist(conn)
-            case _ where path.hasPrefix("/export/song/"): self.handleExportSong(conn, path: path)
-            case ("GET", "/export.csv"):    self.handleExportCSV(conn)
-            case ("POST", "/import.csv"):   self.handleImportCSV(conn, body: body)
-            default:                        self.handleHTML(conn)
+            let headerStr  = String(data: headerData, encoding: .utf8) ?? ""
+            let firstLine  = headerStr.components(separatedBy: "\r\n").first ?? ""
+            let parts      = firstLine.split(separator: " ")
+            let method     = parts.count >= 1 ? String(parts[0]) : "GET"
+            let path       = parts.count >= 2 ? String(parts[1]) : "/"
+
+            // Content-Length로 바디가 더 있으면 추가 수신
+            let contentLength: Int = {
+                for line in headerStr.components(separatedBy: "\r\n") {
+                    let lower = line.lowercased()
+                    if lower.hasPrefix("content-length:") {
+                        return Int(line.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) ?? 0
+                    }
+                }
+                return 0
+            }()
+
+            let alreadyHave = bodyData.count
+            if method == "POST", contentLength > alreadyHave {
+                // 남은 바디 추가 수신
+                let remaining = contentLength - alreadyHave
+                var accumulated = Data(bodyData)
+                self.receiveRemaining(conn, accumulated: accumulated, remaining: remaining) { fullBody in
+                    self.dispatch(conn, method: method, path: path, body: fullBody)
+                }
+            } else {
+                self.dispatch(conn, method: method, path: path, body: Data(bodyData))
             }
+        }
+    }
+
+    private func receiveRemaining(_ conn: NWConnection, accumulated: Data, remaining: Int, completion: @escaping (Data) -> Void) {
+        guard remaining > 0 else { completion(accumulated); return }
+        conn.receive(minimumIncompleteLength: 1, maximumLength: remaining) { [weak self] data, _, _, _ in
+            var acc = accumulated
+            if let data { acc.append(data) }
+            let stillNeeded = remaining - (data?.count ?? 0)
+            if stillNeeded <= 0 {
+                completion(acc)
+            } else {
+                self?.receiveRemaining(conn, accumulated: acc, remaining: stillNeeded, completion: completion)
+            }
+        }
+    }
+
+    private func dispatch(_ conn: NWConnection, method: String, path: String, body: Data) {
+        switch (method, path) {
+        case ("GET", "/events"):                      handleSSE(conn)
+        case ("GET", "/edit"):                        handleEdit(conn)
+        case ("POST", "/save"):                       handleSave(conn, body: body)
+        case ("GET", "/export/setlist"):              handleExportSetlist(conn)
+        case _ where path.hasPrefix("/export/song/"): handleExportSong(conn, path: path)
+        case ("GET", "/export.csv"):                  handleExportCSV(conn)
+        case ("POST", "/import.csv"):                 handleImportCSV(conn, body: body)
+        default:                                      handleHTML(conn)
         }
     }
 
@@ -195,13 +233,14 @@ class WebServer {
             const song = el.dataset.song, sec = el.dataset.sec;
             if (!payload[song]) payload[song] = {};
             if (!payload[song][sec]) payload[song][sec] = { lyricCue: '', note: '' };
-            payload[song][sec].lyricCue = el.value;
+            // 중복 섹션명이 있을 때 빈 값이 기존 값을 덮어쓰지 않도록
+            if (el.value || !payload[song][sec].lyricCue) payload[song][sec].lyricCue = el.value;
           });
           document.querySelectorAll('input[name=nt]').forEach(el => {
             const song = el.dataset.song, sec = el.dataset.sec;
             if (!payload[song]) payload[song] = {};
             if (!payload[song][sec]) payload[song][sec] = { lyricCue: '', note: '' };
-            payload[song][sec].note = el.value;
+            if (el.value || !payload[song][sec].note) payload[song][sec].note = el.value;
           });
           fetch('/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
             .then(() => { const m = document.getElementById('msg'); m.style.display='block'; setTimeout(()=>m.style.display='none', 2000); });
@@ -224,9 +263,14 @@ class WebServer {
     // MARK: - /save  (POST JSON)
 
     private func handleSave(_ conn: NWConnection, body: Data) {
+        print("[Save] body bytes: \(body.count)")
+        print("[Save] body: \(String(data: body, encoding: .utf8) ?? "<invalid utf8>")")
         if let decoded = try? JSONDecoder().decode([String: [String: SectionData]].self, from: body) {
+            print("[Save] decoded OK: \(decoded)")
             saveLyrics?(decoded)
             onLyricsSaved?()
+        } else {
+            print("[Save] decode FAILED")
         }
         send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")
     }
