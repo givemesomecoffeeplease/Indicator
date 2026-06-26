@@ -31,6 +31,33 @@ Indicator/Indicator/
 └── Resources/index.html  # 브라우저 표시 화면
 ```
 
+## 2026-06-26 작업 내역 (3차)
+
+### AX+MTC+MIDI Clock 하이브리드 싱크 아키텍처 완성
+
+#### 주요 변경
+- `StateEngine.swift` 전면 재설계 — AX(섹션 감지) + MTC(부드러운 진행률) + MIDI Clock(박자 카운트다운) 3-레이어 구조
+- `LogicPoller.swift`: AX 폴링 백그라운드 스레드(`DispatchSourceTimer`)로 이동 — 메인 스레드 블로킹/멈춤 해결
+- `MTCReceiver.swift`: SysEx 크래시 수정 (pkt.length > 256 → 버퍼 오버플로), IAC Driver 전용 연결
+- `Models.swift`: `TimeSigEvent` 구조체 추가, `LogicSnapshot.timeSigEvents` 필드 추가
+
+#### 변박(박자 변경) 지원
+- `LogicPoller`: '조표 및 박자표 목록' AX 창에서 변박 이벤트 읽기 (1초 캐시)
+- `StateEngine`: `calcDuration(from:to:)` / `calcBeats(from:to:)` — 구간 내 변박 경계마다 분리 합산
+- `beatsPerBarAt(bar:)` — timeSigEvents 기반 특정 마디의 박자 조회
+
+#### 섹션 감지 안정화
+- 재생 중: 같은 섹션 2회 연속 감지 시에만 전환 (AX 순간 오독 방지)
+- 정지 상태 / seek 감지: 즉시 반영 (재생헤드 이동 빠른 캐치)
+- seek 감지 임계값 0.5s → 2.0s (일시적 MIDI 글리치 오탐 방지)
+
+#### 진행률 / 카운트다운 fallback
+- MTC 수신 중: MTC 경과 시간 기반 (부드러움)
+- MTC 없음(Logic 동기화 미설정): AX bar 위치 기반 (250ms 해상도)
+- Logic 동기화 설정 필수: 환경설정 → 동기화 → MIDI → IAC Driver에 MTC + MIDI Clock 체크
+
+---
+
 ## 2026-06-26 작업 내역 (2차)
 
 ### 코드 beat-snap, 레이아웃 재설계, POST 저장 버그 수정
