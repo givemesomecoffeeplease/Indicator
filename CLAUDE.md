@@ -31,7 +31,43 @@ Indicator/Indicator/
 └── Resources/index.html  # 브라우저 표시 화면
 ```
 
-## 2026-06-26 작업 내역
+## 2026-06-26 작업 내역 (2차)
+
+### 코드 beat-snap, 레이아웃 재설계, POST 저장 버그 수정
+
+#### 코드(Chord) 타이밍 — beat-snap
+섹션 전환과 동일한 방식으로 코드 전환도 MIDI Clock beat에 스냅.
+
+| 역할 | 담당 |
+|------|------|
+| 다음 코드 전환 시점 예측 | `nextChordMTC` (anchorMTC + 남은 bar × beatDuration) |
+| 전환 예약 | MTC가 nextChordMTC - 0.5beat 이내 진입 시 `chordPending = true` |
+| 전환 실행 | `onBeat()`에서 `chordPending` 소모 → `currentChordIdx += 1` |
+| 섹션 변경 시 리셋 | `applySection()`에서 `currentChordIdx = -1`, `recalcNextChord()` 재호출 |
+
+- 다음 섹션 코드 미리보기: `IndicatorState.nextSectionChords` 추가 — 현재 섹션 마지막 그룹일 때 next row에 다음 섹션 첫 4개 표시
+- JS `renderChords`: `chords.join(',') + groupIdx` 키로 섹션 변경 감지 → group 번호 동일해도 재빌드
+
+#### 레이아웃 — CSS Grid 공유 행
+`#main`을 6행 Grid로 재설계해 지금/다음 컬럼이 동일 행을 공유:
+
+| 행 | 내용 |
+|----|------|
+| row 1 | sec-label ("지금" / "다음") |
+| row 2 | 섹션명 (big text) |
+| row 3 | 메타 필 (키·박자·BPM) — 곡 이름 마커일 때만 표시 |
+| row 4 | 가사 |
+| row 5 | 노트 |
+| row 6 | 코드 + 진행률 바 (지금 컬럼 전용) |
+
+→ 한쪽에 가사/노트가 있어도 섹션명이 항상 같은 높이에 정렬됨
+
+#### POST /save 버그 수정
+- HTTP 헤더와 바디가 별도 TCP 패킷으로 올 때 바디를 못 받던 문제 수정
+- `Content-Length` 헤더 파싱 후 바이트가 부족하면 추가 수신
+- JS save 함수: 중복 섹션명(e.g. Verse1 × 2)이 있을 때 빈 값이 기존 값을 덮어쓰지 않도록 수정
+
+---
 
 ### 진행률 바 & 카운트다운 & 섹션 전환 완전 재설계
 
