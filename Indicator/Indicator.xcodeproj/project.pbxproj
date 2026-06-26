@@ -7,32 +7,34 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		BB00020000000000000000AA /* Models.swift in Sources */        = {isa = PBXBuildFile; fileRef = BB00010000000000000000AA /* Models.swift */; };
-		BB00020100000000000000AA /* IndicatorApp.swift in Sources */  = {isa = PBXBuildFile; fileRef = BB00010100000000000000AA /* IndicatorApp.swift */; };
-		BB00020200000000000000AA /* AppDelegate.swift in Sources */   = {isa = PBXBuildFile; fileRef = BB00010200000000000000AA /* AppDelegate.swift */; };
-		BB00020300000000000000AA /* MTCReceiver.swift in Sources */   = {isa = PBXBuildFile; fileRef = BB00010300000000000000AA /* MTCReceiver.swift */; };
-		BB00020400000000000000AA /* LogicPoller.swift in Sources */   = {isa = PBXBuildFile; fileRef = BB00010400000000000000AA /* LogicPoller.swift */; };
-		BB00020500000000000000AA /* StateEngine.swift in Sources */   = {isa = PBXBuildFile; fileRef = BB00010500000000000000AA /* StateEngine.swift */; };
-		BB00020600000000000000AA /* WebServer.swift in Sources */     = {isa = PBXBuildFile; fileRef = BB00010600000000000000AA /* WebServer.swift */; };
-		BB00020700000000000000AA /* SSEBroadcaster.swift in Sources */= {isa = PBXBuildFile; fileRef = BB00010700000000000000AA /* SSEBroadcaster.swift */; };
-		BB00020800000000000000AA /* SettingsView.swift in Sources */  = {isa = PBXBuildFile; fileRef = BB00010800000000000000AA /* SettingsView.swift */; };
-		BB00020A00000000000000AA /* Assets.xcassets in Resources */  = {isa = PBXBuildFile; fileRef = BB00010A00000000000000AA /* Assets.xcassets */; };
-		BB00020B00000000000000AA /* index.html in Resources */       = {isa = PBXBuildFile; fileRef = BB00010B00000000000000AA /* index.html */; };
+		BB00020000000000000000AA /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010000000000000000AA /* Models.swift */; };
+		BB00020100000000000000AA /* IndicatorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010100000000000000AA /* IndicatorApp.swift */; };
+		BB00020200000000000000AA /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010200000000000000AA /* AppDelegate.swift */; };
+		BB00020300000000000000AA /* MTCReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010300000000000000AA /* MTCReceiver.swift */; };
+		BB00020400000000000000AA /* LogicPoller.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010400000000000000AA /* LogicPoller.swift */; };
+		BB00020500000000000000AA /* StateEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010500000000000000AA /* StateEngine.swift */; };
+		BB00020600000000000000AA /* WebServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010600000000000000AA /* WebServer.swift */; };
+		BB00020700000000000000AA /* SSEBroadcaster.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010700000000000000AA /* SSEBroadcaster.swift */; };
+		BB00020800000000000000AA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010800000000000000AA /* SettingsView.swift */; };
+		BB00020A00000000000000AA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB00010A00000000000000AA /* Assets.xcassets */; };
+		BB00020B00000000000000AA /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010B00000000000000AA /* index.html */; };
+		F808FA292FEDAB0700C36F76 /* LyricsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA282FEDAB0700C36F76 /* LyricsStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		BB00010000000000000000AA /* Models.swift */         = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		BB00010100000000000000AA /* IndicatorApp.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndicatorApp.swift; sourceTree = "<group>"; };
-		BB00010200000000000000AA /* AppDelegate.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		BB00010300000000000000AA /* MTCReceiver.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTCReceiver.swift; sourceTree = "<group>"; };
-		BB00010400000000000000AA /* LogicPoller.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogicPoller.swift; sourceTree = "<group>"; };
-		BB00010500000000000000AA /* StateEngine.swift */    = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateEngine.swift; sourceTree = "<group>"; };
-		BB00010600000000000000AA /* WebServer.swift */      = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebServer.swift; sourceTree = "<group>"; };
+		BB00001200000000000000AA /* Indicator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Indicator.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB00010000000000000000AA /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		BB00010100000000000000AA /* IndicatorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndicatorApp.swift; sourceTree = "<group>"; };
+		BB00010200000000000000AA /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		BB00010300000000000000AA /* MTCReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTCReceiver.swift; sourceTree = "<group>"; };
+		BB00010400000000000000AA /* LogicPoller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogicPoller.swift; sourceTree = "<group>"; };
+		BB00010500000000000000AA /* StateEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateEngine.swift; sourceTree = "<group>"; };
+		BB00010600000000000000AA /* WebServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebServer.swift; sourceTree = "<group>"; };
 		BB00010700000000000000AA /* SSEBroadcaster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEBroadcaster.swift; sourceTree = "<group>"; };
-		BB00010800000000000000AA /* SettingsView.swift */   = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		BB00010A00000000000000AA /* Assets.xcassets */      = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		BB00010B00000000000000AA /* index.html */           = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
-		BB00001200000000000000AA /* Indicator.app */        = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Indicator.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB00010800000000000000AA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		BB00010A00000000000000AA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		BB00010B00000000000000AA /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
+		F808FA282FEDAB0700C36F76 /* LyricsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -49,6 +51,7 @@
 		BB00000100000000000000AA = {
 			isa = PBXGroup;
 			children = (
+				F808FA282FEDAB0700C36F76 /* LyricsStore.swift */,
 				BB00000300000000000000AA /* Indicator */,
 				BB00000200000000000000AA /* Products */,
 			);
@@ -166,6 +169,7 @@
 				BB00020200000000000000AA /* AppDelegate.swift in Sources */,
 				BB00020300000000000000AA /* MTCReceiver.swift in Sources */,
 				BB00020400000000000000AA /* LogicPoller.swift in Sources */,
+				F808FA292FEDAB0700C36F76 /* LyricsStore.swift in Sources */,
 				BB00020500000000000000AA /* StateEngine.swift in Sources */,
 				BB00020600000000000000AA /* WebServer.swift in Sources */,
 				BB00020700000000000000AA /* SSEBroadcaster.swift in Sources */,

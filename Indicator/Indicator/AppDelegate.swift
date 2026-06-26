@@ -1,6 +1,8 @@
 import Cocoa
 import SwiftUI
 import Darwin
+import CoreMIDI
+import UniformTypeIdentifiers
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
@@ -15,6 +17,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         requestAccessibilityIfNeeded()
+        setupIACDriver()
         setupMenuBar()
 
         logicPoller.onSnapshot = { [weak self] snapshot in
@@ -23,8 +26,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         mtcReceiver.onTimeUpdate = { [weak self] time in
             self?.stateEngine.updateMTC(time: time)
         }
+        mtcReceiver.onStop = { [weak self] in
+            self?.stateEngine.mtcStopped()
+        }
+        mtcReceiver.onBeat = { [weak self] in
+            self?.stateEngine.onBeat()
+        }
         stateEngine.onStateChange = { [weak self] state in
             self?.webServer.broadcast(state: state)
+        }
+
+        webServer.getMarkers = { [weak self] in
+            self?.logicPoller.lastSnapshot?.markers ?? []
+        }
+        webServer.getLyric = { song, section in
+            LyricsStore.shared.get(song: song, section: section)
+        }
+        webServer.saveLyrics = { dict in
+            LyricsStore.shared.merge(dict)
+        }
+        webServer.exportSetlist = { [weak self] markers in
+            LyricsStore.shared.exportSetlist(markers: markers)
+        }
+        webServer.exportSong = { name in
+            LyricsStore.shared.exportSong(name: name)
+        }
+        webServer.getSongNames = {
+            LyricsStore.shared.songNames()
+        }
+        webServer.onLyricsSaved = { [weak self] in
+            self?.logicPoller.forceUpdate()
         }
 
         logicPoller.start()
@@ -36,6 +67,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logicPoller.stop()
         mtcReceiver.stop()
         webServer.stop()
+    }
+
+    // MARK: - IAC Driver
+
+    private func setupIACDriver() {
+        var deviceList: Unmanaged<CFPropertyList>?
+        MIDIObjectGetProperties(MIDIGetDevice(0), &deviceList, true)
+
+        let deviceCount = MIDIGetNumberOfDevices()
+        for i in 0..<deviceCount {
+            let device = MIDIGetDevice(i)
+            var name: Unmanaged<CFString>?
+            MIDIObjectGetStringProperty(device, kMIDIPropertyName, &name)
+            guard let deviceName = name?.takeRetainedValue() as String?,
+                  deviceName == "IAC Driver" else { continue }
+
+            // 온라인 상태로 설정
+            MIDIObjectSetIntegerProperty(device, kMIDIPropertyOffline, 0)
+
+            // 포트가 없으면 추가할 수 없으므로 엔티티(포트 그룹) 확인
+            let entityCount = MIDIDeviceGetNumberOfEntities(device)
+            if entityCount == 0 { break }
+
+            let entity = MIDIDeviceGetEntity(device, 0)
+            // 엔티티도 온라인으로
+            MIDIObjectSetIntegerProperty(entity, kMIDIPropertyOffline, 0)
+            break
+        }
     }
 
     // MARK: - Accessibility
@@ -60,7 +119,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         addrItem.representedObject = "http://\(ip):8888"
         menu.addItem(addrItem)
         menu.addItem(.separator())
+        let editItem = NSMenuItem(title: "가사·노트 편집 열기", action: #selector(openEditPage), keyEquivalent: "")
+        editItem.representedObject = "http://\(ip):8888/edit"
+        menu.addItem(editItem)
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "설정...", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Master 저장 (전체 내보내기)", action: #selector(saveMaster), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(title: "Master 불러오기", action: #selector(loadMaster), keyEquivalent: "o"))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "리더용 템플릿 내보내기", action: #selector(exportLyrics), keyEquivalent: "e"))
+        menu.addItem(NSMenuItem(title: "리더 파일 가져오기", action: #selector(importLyrics), keyEquivalent: "i"))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "AX 트리 덤프 (디버그)", action: #selector(dumpAXTree), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "종료", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
@@ -70,6 +141,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let addr = sender.representedObject as? String {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(addr, forType: .string)
+        }
+    }
+
+    @objc private func openEditPage(_ sender: NSMenuItem) {
+        if let addr = sender.representedObject as? String,
+           let url = URL(string: addr) {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -89,6 +167,54 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func saveMaster() {
+        guard let data = LyricsStore.shared.exportAll() else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "master.json"
+        panel.allowedContentTypes = [.json]
+        panel.begin { resp in
+            guard resp == .OK, let url = panel.url else { return }
+            try? data.write(to: url)
+        }
+    }
+
+    @objc private func loadMaster() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.begin { [weak self] resp in
+            guard resp == .OK, let url = panel.url else { return }
+            LyricsStore.shared.importJSON(from: url)
+            self?.logicPoller.forceUpdate()
+        }
+    }
+
+    @objc private func exportLyrics() {
+        let markers = logicPoller.lastSnapshot?.markers ?? []
+        guard let data = LyricsStore.shared.exportTemplate(markers: markers) else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "lyrics.json"
+        panel.allowedContentTypes = [.json]
+        panel.begin { resp in
+            guard resp == .OK, let url = panel.url else { return }
+            try? data.write(to: url)
+        }
+    }
+
+    @objc private func importLyrics() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.begin { [weak self] resp in
+            guard resp == .OK, let url = panel.url else { return }
+            LyricsStore.shared.importJSON(from: url)
+            // Force recompute so browsers get updated state immediately
+            self?.logicPoller.forceUpdate()
+        }
+    }
+
+    @objc private func dumpAXTree() {
+        logicPoller.dumpAXTree = true
     }
 
     @objc private func quit() {

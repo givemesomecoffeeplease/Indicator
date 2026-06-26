@@ -6,7 +6,7 @@ class SettingsStore {
     static let shared = SettingsStore()
     private init() {}
 
-    var countdownBars: Int = UserDefaults.standard.integer(forKey: "countdownBars").nonZero ?? 1 {
+    var countdownBars: Int = UserDefaults.standard.integer(forKey: "countdownBars").nonZero ?? 3 {
         didSet { UserDefaults.standard.set(countdownBars, forKey: "countdownBars") }
     }
 }

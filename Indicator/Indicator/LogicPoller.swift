@@ -7,6 +7,7 @@ class LogicPoller {
 
     var onSnapshot: ((LogicSnapshot) -> Void)?
     var dumpAXTree = false
+    private(set) var lastSnapshot: LogicSnapshot?
 
     private var timer: Timer?
 
@@ -20,6 +21,12 @@ class LogicPoller {
     func stop() {
         timer?.invalidate()
         timer = nil
+    }
+
+    func forceUpdate() {
+        if let snap = lastSnapshot {
+            DispatchQueue.main.async { self.onSnapshot?(snap) }
+        }
     }
 
     // MARK: - Poll
@@ -45,7 +52,10 @@ class LogicPoller {
         readTransport(axApp: axApp, into: &snapshot)
         readMarkers(axApp: axApp, into: &snapshot)
 
-        DispatchQueue.main.async { self.onSnapshot?(snapshot) }
+        DispatchQueue.main.async {
+            self.lastSnapshot = snapshot
+            self.onSnapshot?(snapshot)
+        }
     }
 
     // MARK: - Transport
@@ -77,9 +87,17 @@ class LogicPoller {
 
             // Time signature  (val = "4/4")
             if let tsButton = findByDesc(innerBar, "박자표"),
-               let val = axString(tsButton, key: kAXValueAttribute),
-               let num = parseTimeSigNumerator(val) {
-                snapshot.beatsPerBar = num
+               let val = axString(tsButton, key: kAXValueAttribute) {
+                snapshot.timeSignature = val
+                if let num = parseTimeSigNumerator(val) {
+                    snapshot.beatsPerBar = num
+                }
+            }
+
+            // Key signature  (val = "C 메이저", "G 메이저", "A 마이너" …)
+            if let keyButton = findByDesc(innerBar, "조표"),
+               let val = axString(keyButton, key: kAXValueAttribute) {
+                snapshot.key = parseKey(val)
             }
 
             return
@@ -145,6 +163,14 @@ class LogicPoller {
         let nums = s.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
         guard nums.count >= 2, nums[0] > 0, nums[0] < 10000, nums[1] > 0 else { return nil }
         return (nums[0], nums[1])
+    }
+
+    // "C 메이저" → "C",  "A 마이너" → "Am",  "F# 메이저" → "F#"
+    private func parseKey(_ s: String) -> String {
+        let parts = s.split(separator: " ")
+        guard let root = parts.first.map(String.init) else { return s }
+        let isMinor = s.contains("마이너")
+        return isMinor ? root + "m" : root
     }
 
     private func parseTimeSigNumerator(_ s: String) -> Int? {

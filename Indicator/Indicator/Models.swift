@@ -1,5 +1,10 @@
 import Foundation
 
+struct SectionData: Codable {
+    var lyricCue: String
+    var note: String
+}
+
 struct Marker: Equatable {
     let name: String
     let bar: Int
@@ -15,6 +20,8 @@ struct LogicSnapshot {
     var transportBeat: Int = 1
     var bpm: Double = 120.0
     var beatsPerBar: Int = 4
+    var timeSignature: String = "4/4"
+    var key: String = ""
     var capturedMTCTime: TimeInterval = 0
 }
 
@@ -30,5 +37,11 @@ struct IndicatorState: Codable, Equatable {
     var isPlaying: Bool = false
     var bpm: Double = 120.0
     var beatsPerBar: Int = 4
+    var timeSignature: String = "4/4"
+    var key: String = ""
     var sectionLengthBars: Double = 0
+    var lyricCue: String = ""
+    var note: String = ""
+    var nextLyricCue: String = ""
+    var nextNote: String = ""
 }

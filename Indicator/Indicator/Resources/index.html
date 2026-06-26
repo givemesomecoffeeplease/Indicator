@@ -7,18 +7,9 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  :root {
-    --bg:      #14141a;
-    --surface: #1e1e28;
-    --green:   #5DCAA5;
-    --white:   #f0f0f0;
-    --gray:    #555566;
-    --dim:     #33333f;
-  }
-
   body {
-    background: var(--bg);
-    color: var(--white);
+    background: #14141a;
+    color: #f0f0f0;
     font-family: -apple-system, 'Helvetica Neue', sans-serif;
     height: 100dvh;
     display: flex;
@@ -27,174 +18,173 @@
     user-select: none;
   }
 
-  /* ── TOP: Setlist ── */
-  #setlist {
+  /* ── TOP ── */
+  #top {
+    position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 14px 20px 10px;
-    overflow-x: auto;
-    scrollbar-width: none;
+    padding: 10px 0 5px;
     flex-shrink: 0;
+    gap: 5px;
   }
-  #setlist::-webkit-scrollbar { display: none; }
+  #clock {
+    position: absolute;
+    top: 12px; right: 14px;
+    font-size: 11px; font-weight: 600;
+    color: #555566;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+  }
 
-  .song-chip {
-    padding: 5px 14px;
-    border-radius: 20px;
-    font-size: 13px;
-    font-weight: 600;
+  /* 곡 휠 */
+  #song-vp { width: 100%; overflow: hidden; }
+  #song-track {
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
     white-space: nowrap;
-    color: var(--gray);
-    background: var(--dim);
-    transition: all .3s;
-    letter-spacing: 0.02em;
+    padding: 0 50%;
+    transition: transform 0.4s cubic-bezier(0.4,0,0.2,1);
   }
-  .song-chip.active { color: var(--white); background: var(--green); }
+  .s-name {
+    font-size: 11px; font-weight: 600; color: #1e1e32;
+    white-space: nowrap; flex-shrink: 0;
+    transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
+  }
+  .s-name.p2 { font-size: 13px; color: #28283e; }
+  .s-name.p1 { font-size: 18px; color: #36365a; }
+  .s-name.active { font-size: 34px; font-weight: 800; color: #f0f0f0; }
+  .s-name.n1 { font-size: 18px; color: #36365a; }
+  .s-name.n2 { font-size: 13px; color: #28283e; }
 
-  /* ── MIDDLE ── */
-  #middle {
-    flex: 1;
+  /* 메타 */
+  #meta-row { display: flex; align-items: center; gap: 7px; }
+  .meta-pill {
+    font-size: 11px; font-weight: 700;
+    color: #888899; background: #1e1e28;
+    padding: 2px 10px; border-radius: 20px;
+  }
+
+  /* ── MAIN ── */
+  #main {
+    flex: 1; min-height: 0;
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    padding: 0 28px;
-    gap: 16px;
-    min-height: 0;
+    grid-template-columns: 1fr 64px 1fr;
+  }
+  .col {
+    position: relative;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    padding: 8px 14px 22px;
+    gap: 6px; overflow: hidden;
+  }
+  .sec-label {
+    font-size: 9px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: #555566;
+  }
+  #cur-name {
+    font-size: clamp(26px, 5.5vw, 44px);
+    font-weight: 800; color: #f0f0f0;
+    line-height: 1; letter-spacing: -0.02em;
+  }
+  #nxt-name {
+    font-size: clamp(20px, 4.5vw, 34px);
+    font-weight: 800; color: #44445a;
+    line-height: 1; letter-spacing: -0.02em;
+  }
+  .lyric {
+    font-size: 15px; font-style: italic;
+    line-height: 1.3;
+  }
+  #cur-lyric { color: #888899; }
+  #nxt-lyric { color: #55556a; }
+  .note {
+    display: flex; align-items: flex-start;
+    gap: 4px; font-size: 10px;
+    color: #E8A840; line-height: 1.3;
+    text-align: left;
+  }
+  .note.hidden { display: none; }
+  .ndot {
+    width: 4px; height: 4px; border-radius: 50%;
+    background: #E8A840; flex-shrink: 0; margin-top: 3px;
   }
 
-  .section-block { display: flex; flex-direction: column; gap: 10px; }
-  #current-block { align-items: flex-start; }
-  #next-block    { align-items: flex-end; }
-
-  .label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--gray);
-  }
-
-  #current-name {
-    font-size: clamp(36px, 8vw, 80px);
-    font-weight: 800;
-    color: var(--white);
-    line-height: 1.05;
-    letter-spacing: -0.02em;
-  }
-
-  #next-name {
-    font-size: clamp(28px, 6vw, 60px);
-    font-weight: 700;
-    color: #44445a;
-    line-height: 1.05;
-    text-align: right;
-    letter-spacing: -0.02em;
-  }
-
-  /* Progress bar */
+  /* 진행률 바 — 항상 하단 고정 */
   #progress-wrap {
-    width: 100%;
-    height: 5px;
-    background: var(--dim);
-    border-radius: 3px;
-    overflow: hidden;
+    position: absolute; bottom: 8px; left: 14px; right: 14px;
+    height: 3px; background: #2a2a36;
+    border-radius: 2px; overflow: hidden;
   }
   #progress-fill {
-    height: 100%;
-    background: var(--green);
-    border-radius: 3px;
-    width: 0%;
-    /* No CSS transition — JS drives this via rAF */
+    height: 100%; width: 0%;
+    background: #5DCAA5; border-radius: 2px;
   }
 
-  /* ── Countdown ── */
-  #countdown-wrap {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  /* 카운트다운 */
+  #col-center {
+    display: flex; align-items: center; justify-content: center;
     position: relative;
-    width: clamp(80px, 18vw, 200px);
-    height: clamp(80px, 18vw, 200px);
   }
-
-  /* Pulse ring behind the number */
-  #countdown-ring {
+  #divider { width: 1px; height: 80%; background: #2a2a36; transition: opacity 0.2s; }
+  #cd-wrap {
     position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    background: rgba(93,202,165,0.08);
-    transform: scale(0);
-    opacity: 0;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.2s;
   }
-  #countdown-ring.pulse {
-    animation: ring-pulse 0.35s ease-out forwards;
+  #cd-wrap.visible { opacity: 1; }
+  #cd-wrap.visible ~ #divider { opacity: 0; }
+  #cd-num {
+    font-size: clamp(44px, 10vw, 72px);
+    font-weight: 900; color: #5DCAA5;
+    line-height: 1; letter-spacing: -0.04em;
   }
-  @keyframes ring-pulse {
-    0%   { transform: scale(0.4); opacity: 0.7; }
-    100% { transform: scale(1.5); opacity: 0; }
+  #cd-num.beat-pop {
+    animation: beatpop 0.18s cubic-bezier(0.2,0,0.4,1) forwards;
   }
-
-  #countdown {
-    position: relative;
-    z-index: 1;
-    font-size: clamp(64px, 16vw, 180px);
-    font-weight: 900;
-    color: var(--green);
-    letter-spacing: -0.04em;
-    line-height: 1;
-    opacity: 0;
-    transform: scale(0.6);
-    transition: opacity .15s, transform .15s;
-    text-shadow: 0 0 40px rgba(93,202,165,0.5);
-  }
-  #countdown.visible {
-    opacity: 1;
-    transform: scale(1);
-  }
-  #countdown.beat {
-    animation: beat-pop 0.2s ease-out forwards;
-  }
-  @keyframes beat-pop {
-    0%   { transform: scale(1.3); color: #fff; text-shadow: 0 0 60px rgba(93,202,165,1); }
-    100% { transform: scale(1.0); color: var(--green); text-shadow: 0 0 40px rgba(93,202,165,0.5); }
+  @keyframes beatpop {
+    0%   { transform: scale(1.45); color: #fff; }
+    60%  { transform: scale(0.95); color: #5DCAA5; }
+    100% { transform: scale(1.0);  color: #5DCAA5; }
   }
 
-  /* ── BOTTOM: Section timeline ── */
-  #timeline {
-    padding: 10px 20px 16px;
-    display: flex;
-    gap: 6px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    flex-shrink: 0;
+  /* 섹션 전환 애니메이션 */
+  .sec-fade {
+    animation: secFade 0.3s ease forwards;
   }
-  #timeline::-webkit-scrollbar { display: none; }
+  @keyframes secFade {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
 
-  .sec-block {
-    flex: 1;
-    min-width: 48px;
-    max-width: 120px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    background: var(--dim);
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    color: var(--gray);
+  /* ── BOTTOM: 섹션 휠 ── */
+  #tl-vp { overflow: hidden; padding: 4px 0 10px; flex-shrink: 0; }
+  #tl-track {
+    display: flex; align-items: center; gap: 6px;
+    white-space: nowrap; padding: 0 50%;
+    transition: transform 0.4s cubic-bezier(0.4,0,0.2,1);
+  }
+  .sb {
+    flex-shrink: 0; padding: 6px 12px; border-radius: 7px;
+    font-size: 10px; font-weight: 700;
+    color: #555566; background: #2a2a36;
     white-space: nowrap;
-    transition: all .3s;
+    transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
   }
-  .sec-block.active { background: var(--green); color: #0d0d12; }
+  .sb.done     { background: #1a1a24; color: #2a2a3a; }
+  .sb.active   { background: #5DCAA5; color: #0d0d12; font-size: 11px; padding: 7px 16px; }
+  .sb.upcoming { color: #888899; }
 
-  /* Offline overlay */
+  /* 오프라인 오버레이 */
   #offline {
     position: fixed; inset: 0;
     background: rgba(20,20,26,.92);
     display: flex; align-items: center; justify-content: center;
-    font-size: 18px; color: var(--gray);
-    letter-spacing: 0.04em;
-    z-index: 99;
+    font-size: 18px; color: #555566;
+    letter-spacing: 0.04em; z-index: 99;
   }
   #offline.hidden { display: none; }
 </style>
@@ -203,34 +193,55 @@
 
 <div id="offline">연결 중...</div>
 
-<div id="setlist"></div>
-
-<div id="middle">
-  <div class="section-block" id="current-block">
-    <span class="label">현재</span>
-    <div id="current-name">--</div>
-    <div id="progress-wrap"><div id="progress-fill"></div></div>
-  </div>
-
-  <div id="countdown-wrap">
-    <div id="countdown-ring"></div>
-    <div id="countdown">1</div>
-  </div>
-
-  <div class="section-block" id="next-block">
-    <span class="label">다음</span>
-    <div id="next-name">--</div>
+<div id="top">
+  <div id="clock"></div>
+  <div id="song-vp"><div id="song-track"></div></div>
+  <div id="meta-row">
+    <div class="meta-pill" id="key-pill">--</div>
+    <div class="meta-pill" id="ts-pill">4/4</div>
+    <div class="meta-pill" id="bpm-pill">-- BPM</div>
   </div>
 </div>
 
-<div id="timeline"></div>
+<div id="main">
+  <div class="col">
+    <div class="sec-label">지금</div>
+    <div id="cur-name">--</div>
+    <div class="lyric" id="cur-lyric"></div>
+    <div class="note hidden" id="cur-note-wrap"><div class="ndot"></div><span id="cur-note"></span></div>
+    <div id="progress-wrap"><div id="progress-fill"></div></div>
+  </div>
+
+  <div id="col-center">
+    <div id="divider"></div>
+    <div id="cd-wrap"><div id="cd-num">--</div></div>
+  </div>
+
+  <div class="col">
+    <div class="sec-label">다음</div>
+    <div id="nxt-name">--</div>
+    <div class="lyric" id="nxt-lyric"></div>
+    <div class="note hidden" id="nxt-note-wrap"><div class="ndot"></div><span id="nxt-note"></span></div>
+  </div>
+</div>
+
+<div id="tl-vp"><div id="tl-track"></div></div>
 
 <script>
   const $ = id => document.getElementById(id);
 
+  // ── 시계 ──
+  function updateClock() {
+    const n = new Date();
+    const h = String(n.getHours()).padStart(2,'0');
+    const m = String(n.getMinutes()).padStart(2,'0');
+    $('clock').textContent = h + ':' + m;
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
   // ── SSE ──
   let es, reconnectDelay = 1000;
-
   function connect() {
     es = new EventSource('/events');
     es.onopen = () => { $('offline').classList.add('hidden'); reconnectDelay = 1000; };
@@ -243,100 +254,194 @@
     };
   }
 
-  // ── Smooth progress ──
-  let prog = { from: 0, to: 0, rate: 0, lastTs: 0, rafId: null };
+  // ── 진행률 RAF ──
+  // RAF는 섹션이 바뀌거나 재생 시작될 때만 재시작.
+  // SSE 업데이트는 rate(속도)만 보정, 애니메이션은 건드리지 않음.
+  let prog = { rafId: null, rate: 0, startTs: 0, startVal: 0, isPlaying: false, section: '' };
 
-  function startProgressRaf(progress, bpm, beatsPerBar, sectionLengthBars) {
-    const now = performance.now();
+  function updateProgress(progress, bpm, beatsPerBar, sectionLengthBars, isPlaying, section) {
+    const wasPlaying   = prog.isPlaying;
+    const secChanged   = section !== prog.section;
+    prog.isPlaying     = isPlaying;
+    prog.section       = section;
 
-    // Exact rate from section length: progress per second = 1 / sectionDurationSeconds
+    // 속도 보정 (매 SSE마다 업데이트)
     if (sectionLengthBars > 0 && bpm > 0) {
-      const sectionBeats = sectionLengthBars * beatsPerBar;
-      const sectionSecs  = sectionBeats / (bpm / 60);
-      prog.rate = 1.0 / sectionSecs;
+      const secs = (sectionLengthBars * beatsPerBar) / (bpm / 60);
+      prog.rate = 1.0 / secs;
     }
 
-    prog.from   = progress;
-    prog.lastTs = now;
+    if (!isPlaying) {
+      if (prog.rafId) { cancelAnimationFrame(prog.rafId); prog.rafId = null; }
+      $('progress-fill').style.width = (progress * 100).toFixed(2) + '%';
+      return;
+    }
 
-    if (prog.rafId) cancelAnimationFrame(prog.rafId);
-    tick(now);
+    // 재생 시작 or 섹션 전환 시에만 RAF 리셋
+    if (!wasPlaying || secChanged || !prog.rafId) {
+      if (prog.rafId) { cancelAnimationFrame(prog.rafId); prog.rafId = null; }
+      prog.startVal = progress;
+      prog.startTs  = performance.now();
+      rafLoop();
+    }
   }
 
-  function tick(startTs) {
-    prog.rafId = requestAnimationFrame(ts => {
-      const dt   = (ts - prog.lastTs) / 1000;
-      const est  = Math.min(1, prog.from + prog.rate * (ts - startTs) / 1000);
+  function rafLoop() {
+    prog.rafId = requestAnimationFrame(() => {
+      const elapsed = (performance.now() - prog.startTs) / 1000;
+      const est = Math.min(1, prog.startVal + prog.rate * elapsed);
       $('progress-fill').style.width = (est * 100).toFixed(2) + '%';
-      if (est < 1) tick(startTs);
+      if (est < 1 && prog.isPlaying) rafLoop();
+      else prog.rafId = null;
     });
   }
 
-  // ── Countdown beat animation ──
-  let lastCountdownVal = null;
-
+  // ── 카운트다운 ──
+  let lastCD = null;
   function showCountdown(val) {
-    const cd   = $('countdown');
-    const ring = $('countdown-ring');
-
-    if (val !== lastCountdownVal) {
-      lastCountdownVal = val;
-      // Trigger beat pop
-      cd.classList.remove('beat');
-      ring.classList.remove('pulse');
-      void cd.offsetWidth; // reflow
-      cd.textContent = val;
-      cd.classList.add('visible', 'beat');
-      ring.classList.add('pulse');
-    }
+    if (val === lastCD) return;
+    lastCD = val;
+    const el = $('cd-num');
+    el.textContent = val;
+    el.classList.remove('beat-pop');
+    void el.offsetWidth;
+    el.classList.add('beat-pop');
+    $('cd-wrap').classList.add('visible');
   }
-
   function hideCountdown() {
-    $('countdown').classList.remove('visible', 'beat');
-    lastCountdownVal = null;
+    $('cd-wrap').classList.remove('visible');
+    lastCD = null;
   }
 
-  // ── State application ──
+  // ── 곡 휠 ──
+  let lastSongIdx = -1, lastSongCount = 0;
+  function renderSongWheel(songs, idx) {
+    const track = $('song-track');
+    track.innerHTML = '';
+    songs.forEach((name, i) => {
+      const d = i - idx;
+      const el = document.createElement('span');
+      el.className = 's-name' + (d===0?' active':d===-1?' p1':d===1?' n1':d===-2?' p2':d===2?' n2':'');
+      el.textContent = name;
+      if (Math.abs(d) > 2) el.style.visibility = 'hidden';
+      track.appendChild(el);
+    });
+    requestAnimationFrame(() => {
+      const ch = track.children;
+      let off = 0;
+      for (let i = 0; i < idx; i++) off += ch[i].offsetWidth + 24;
+      off += ch[idx].offsetWidth / 2;
+      track.style.transform = `translateX(calc(50% - ${off}px - 50%))`;
+    });
+  }
+
+  // ── 섹션 타임라인 휠 ──
+  let lastSecIdx = -1, lastSecCount = 0;
+  function renderTimeline(secs, idx) {
+    const track = $('tl-track');
+    track.innerHTML = '';
+    secs.forEach((name, i) => {
+      const el = document.createElement('div');
+      el.className = 'sb' + (i < idx ? ' done' : i === idx ? ' active' : ' upcoming');
+      el.textContent = name;
+      track.appendChild(el);
+    });
+    requestAnimationFrame(() => {
+      const ch = track.children;
+      if (!ch[idx]) return;
+      let off = 0;
+      for (let i = 0; i < idx; i++) off += ch[i].offsetWidth + 6;
+      off += ch[idx].offsetWidth / 2;
+      track.style.transform = `translateX(calc(50% - ${off}px - 50%))`;
+    });
+  }
+
+  // ── 섹션 이름 전환 애니메이션 ──
+  function animText(id, text) {
+    const el = $(id);
+    if (el.textContent === text) return;
+    el.classList.remove('sec-fade');
+    void el.offsetWidth;
+    el.textContent = text;
+    el.classList.add('sec-fade');
+  }
+
+  // ── 상태 적용 ──
   function applyState(s) {
-    // Setlist chips
-    const sl = $('setlist');
-    if (sl.children.length !== s.songs.length) {
-      sl.innerHTML = s.songs.map((n, i) =>
-        `<span class="song-chip" data-i="${i}">${n}</span>`).join('');
+    // 곡 휠
+    const songs = s.songs || [];
+    const songIdx = s.currentSongIndex ?? -1;
+    if (songIdx !== lastSongIdx || songs.length !== lastSongCount) {
+      renderSongWheel(songs, songIdx);
+      lastSongIdx = songIdx; lastSongCount = songs.length;
     }
-    sl.querySelectorAll('.song-chip').forEach(el =>
-      el.classList.toggle('active', +el.dataset.i === s.currentSongIndex));
-    const activeChip = sl.querySelector('.song-chip.active');
-    if (activeChip) activeChip.scrollIntoView({ inline: 'center', behavior: 'smooth' });
 
-    // Section names
-    $('current-name').textContent = s.currentSection || '--';
-    $('next-name').textContent    = s.nextSection    || '';
+    // 메타
+    $('bpm-pill').textContent = Math.round(s.bpm || 0) + ' BPM';
+    $('ts-pill').textContent  = (s.beatsPerBar || 4) + '/4';
+    $('key-pill').textContent = s.key || '--';
 
-    // Smooth progress
-    startProgressRaf(s.sectionProgress, s.bpm || 120, s.beatsPerBar || 4, s.sectionLengthBars || 0);
+    // 현재/다음 섹션
+    animText('cur-name', s.currentSection || '--');
+    animText('nxt-name', s.nextSection    || '--');
 
-    // Countdown
+    // 가사 큐
+    $('cur-lyric').textContent = s.lyricCue     || '';
+    $('nxt-lyric').textContent = s.nextLyricCue || '';
+
+    // 노트
+    const curNote = s.note || '';
+    $('cur-note').textContent = curNote;
+    $('cur-note-wrap').classList.toggle('hidden', !curNote);
+
+    const nxtNote = s.nextNote || '';
+    $('nxt-note').textContent = nxtNote;
+    $('nxt-note-wrap').classList.toggle('hidden', !nxtNote);
+
+    // 진행률
+    updateProgress(s.sectionProgress || 0, s.bpm || 120, s.beatsPerBar || 4, s.sectionLengthBars || 0, s.isPlaying, s.currentSection || '');
+
+    // 카운트다운
     if (s.countdownBars != null && s.countdownBars > 0) {
       showCountdown(s.countdownBars);
     } else {
       hideCountdown();
     }
 
-    // Timeline
-    const tl   = $('timeline');
+    // 타임라인 휠
     const secs = s.currentSongSections || [];
-    if (tl.children.length !== secs.length) {
-      tl.innerHTML = secs.map((n, i) =>
-        `<div class="sec-block" data-i="${i}">${n}</div>`).join('');
+    const secIdx = s.currentSectionIndexInSong ?? -1;
+    if (secIdx !== lastSecIdx || secs.length !== lastSecCount) {
+      renderTimeline(secs, secIdx);
+      lastSecIdx = secIdx; lastSecCount = secs.length;
     }
-    tl.querySelectorAll('.sec-block').forEach(el =>
-      el.classList.toggle('active', +el.dataset.i === s.currentSectionIndexInSong));
-    const activeSec = tl.querySelector('.sec-block.active');
-    if (activeSec) activeSec.scrollIntoView({ inline: 'center', behavior: 'smooth' });
   }
 
-  connect();
+  // ── 더미 데이터 (브라우저 직접 열기용) ──
+  if (window.location.protocol === 'file:') {
+    $('offline').classList.add('hidden');
+    applyState({
+      songs: ['은혜', '찬양해', '주님만', '할렐루야', '영광'],
+      currentSongIndex: 1,
+      currentSection: 'Chorus',
+      nextSection: 'Bridge',
+      sectionProgress: 0.4,
+      countdownBars: 3,
+      currentSongSections: ['Intro','Verse 1','Pre-Ch','Chorus','Verse 2','Pre-Ch 2','Chorus 2','Bridge','Chorus 3','Outro'],
+      currentSectionIndexInSong: 3,
+      isPlaying: true,
+      bpm: 120,
+      beatsPerBar: 4,
+      sectionLengthBars: 8,
+      key: 'G',
+      lyricCue: '"찬양해 찬양해 온 맘 다해"',
+      nextLyricCue: '"주님 앞에 나아가..."',
+      note: '건반 오른손만, 드럼 빌드업 3마디 전',
+      nextNote: '다이나믹 내리고 시작'
+    });
+  } else {
+    connect();
+  }
 </script>
 </body>
 </html>
