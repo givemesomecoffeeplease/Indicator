@@ -18,6 +18,7 @@
 		BB00020800000000000000AA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010800000000000000AA /* SettingsView.swift */; };
 		BB00020A00000000000000AA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB00010A00000000000000AA /* Assets.xcassets */; };
 		BB00020B00000000000000AA /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010B00000000000000AA /* index.html */; };
+		BB00020C00000000000000AA /* singer.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010C00000000000000AA /* singer.html */; };
 		F808FA292FEDAB0700C36F76 /* LyricsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA282FEDAB0700C36F76 /* LyricsStore.swift */; };
 /* End PBXBuildFile section */
 
@@ -34,6 +35,7 @@
 		BB00010800000000000000AA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		BB00010A00000000000000AA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BB00010B00000000000000AA /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
+		BB00010C00000000000000AA /* singer.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = singer.html; sourceTree = "<group>"; };
 		F808FA282FEDAB0700C36F76 /* LyricsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -87,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				BB00010B00000000000000AA /* index.html */,
+				BB00010C00000000000000AA /* singer.html */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -154,6 +157,7 @@
 			files = (
 				BB00020A00000000000000AA /* Assets.xcassets in Resources */,
 				BB00020B00000000000000AA /* index.html in Resources */,
+				BB00020C00000000000000AA /* singer.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

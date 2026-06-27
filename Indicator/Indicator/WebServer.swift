@@ -5,7 +5,8 @@ class WebServer {
 
     private var listener: NWListener?
     private let broadcaster = SSEBroadcaster()
-    private var htmlContent: String = ""
+    private var bandContent: String = ""
+    private var singerContent: String = ""
 
     // Wired up by AppDelegate after init
     var getMarkers: (() -> [Marker])? = nil
@@ -100,20 +101,70 @@ class WebServer {
     private func dispatch(_ conn: NWConnection, method: String, path: String, body: Data) {
         switch (method, path) {
         case ("GET", "/events"):                      handleSSE(conn)
+        case ("GET", "/band"):                        handleBand(conn)
+        case ("GET", "/singer"):                      handleSinger(conn)
+        case ("GET", "/api/sections"):                handleSections(conn)
         case ("GET", "/edit"):                        handleEdit(conn)
         case ("POST", "/save"):                       handleSave(conn, body: body)
         case ("GET", "/export/setlist"):              handleExportSetlist(conn)
         case _ where path.hasPrefix("/export/song/"): handleExportSong(conn, path: path)
         case ("GET", "/export.csv"):                  handleExportCSV(conn)
         case ("POST", "/import.csv"):                 handleImportCSV(conn, body: body)
-        default:                                      handleHTML(conn)
+        default:                                      handleLanding(conn)
         }
     }
 
-    // MARK: - Main page
+    // MARK: - Pages
 
-    private func handleHTML(_ conn: NWConnection) {
-        send(conn, body: htmlContent.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
+    private func handleLanding(_ conn: NWConnection) {
+        let html = """
+        <!DOCTYPE html><html lang='ko'><head>
+        <meta charset='UTF-8'>
+        <meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1'>
+        <meta name='apple-mobile-web-app-capable' content='yes'>
+        <meta name='apple-mobile-web-app-status-bar-style' content='black-translucent'>
+        <title>Indicator</title>
+        <style>
+          *{box-sizing:border-box;margin:0;padding:0}
+          body{background:#14141a;color:#f0f0f0;font-family:-apple-system,sans-serif;
+               height:100dvh;display:flex;flex-direction:column;align-items:center;
+               justify-content:center;gap:24px;user-select:none}
+          h1{font-size:28px;font-weight:700;letter-spacing:0.04em;color:#5dcaa5}
+          .btn{display:block;width:220px;padding:18px 0;border-radius:16px;border:none;
+               font-size:18px;font-weight:600;cursor:pointer;text-align:center;
+               text-decoration:none;transition:opacity .15s}
+          .btn:active{opacity:.7}
+          .band{background:#1e1e2e;color:#c0c0e0}
+          .singer{background:#5dcaa5;color:#14141a}
+          .sub{font-size:12px;color:#555;margin-top:-12px}
+        </style></head><body>
+        <h1>Indicator</h1>
+        <a class='btn singer' href='/singer'>싱어</a>
+        <a class='btn band' href='/band'>밴드</a>
+        <p class='sub'>선택 후 홈 화면에 추가하면 다음엔 바로 열려요</p>
+        </body></html>
+        """
+        send(conn, body: html.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
+    }
+
+    private func handleBand(_ conn: NWConnection) {
+        send(conn, body: bandContent.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
+    }
+
+    private func handleSinger(_ conn: NWConnection) {
+        send(conn, body: singerContent.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
+    }
+
+    private func handleSections(_ conn: NWConnection) {
+        let markers = getMarkers?() ?? []
+        var result: [[String: Any]] = []
+        var currentSong = ""
+        for m in markers {
+            if m.isSong { currentSong = m.displayName }
+            else { result.append(["song": currentSong, "section": m.displayName, "bar": m.bar]) }
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: result)) ?? Data()
+        send(conn, body: data, contentType: "application/json; charset=utf-8")
     }
 
     // MARK: - SSE
@@ -140,123 +191,295 @@ class WebServer {
     }
 
     private func buildEditHTML(markers: [Marker]) -> String {
-        // Build song→sections structure
-        var songs: [(name: String, sections: [String])] = []
-        var currentSong: String? = nil
+        // Helper: LyricToken array → editable [chord]text string
+        func tokenText(_ tokens: [LyricToken]) -> String {
+            tokens.map { t in
+                switch t.type {
+                case .br:    return "\n"
+                case .ghost: return t.chord.map { "[\($0)]" } ?? ""
+                case .char:
+                    let pfx = t.chord.map { "[\($0)]" } ?? ""
+                    return pfx + (t.char ?? "")
+                }
+            }.joined()
+        }
+
+        // JSON string escape
+        func j(_ s: String) -> String {
+            s.replacingOccurrences(of: "\\", with: "\\\\")
+             .replacingOccurrences(of: "\"", with: "\\\"")
+             .replacingOccurrences(of: "\n", with: "\\n")
+             .replacingOccurrences(of: "\r", with: "")
+             .replacingOccurrences(of: "\t", with: "\\t")
+        }
+
+        // Build songs data with existing lyrics
+        var songs: [(name: String, sections: [(sec: String, text: String, note: String)])] = []
+        var curSong = ""
         for m in markers {
             if m.isSong {
-                currentSong = m.displayName
-                songs.append((name: m.displayName, sections: []))
-            } else if currentSong != nil {
-                songs[songs.count - 1].sections.append(m.displayName)
+                curSong = m.displayName
+                songs.append((name: curSong, sections: []))
+            } else if !curSong.isEmpty {
+                let d = getLyric?(curSong, m.displayName)
+                var text = ""
+                if let tokens = d?.slides.first?.tokens, !tokens.isEmpty {
+                    text = tokenText(tokens)
+                } else {
+                    text = d?.lyricCue ?? ""
+                }
+                songs[songs.count - 1].sections.append((m.displayName, text, d?.note ?? ""))
             }
         }
 
-        var rows = ""
-        for song in songs {
-            rows += "<tr><td colspan='3' class='song-header'>\(esc(song.name))</td></tr>\n"
-            for sec in song.sections {
-                let d  = getLyric?(song.name, sec)
-                let lc = esc(d?.lyricCue ?? "")
-                let nt = esc(d?.note ?? "")
-                rows += """
-                <tr>
-                  <td class='sec'>\(esc(sec))</td>
-                  <td><input name='lc' data-song='\(esc(song.name))' data-sec='\(esc(sec))' value='\(lc)' placeholder='가사 첫 줄'></td>
-                  <td><input name='nt' data-song='\(esc(song.name))' data-sec='\(esc(sec))' value='\(nt)' placeholder='연주 노트'></td>
-                </tr>\n
-                """
-            }
-        }
+        // Embed as JSON
+        let songsJson = "[" + songs.map { song in
+            let secs = "[" + song.sections.map { sec in
+                "{\"sec\":\"\(j(sec.sec))\",\"text\":\"\(j(sec.text))\",\"note\":\"\(j(sec.note))\"}"
+            }.joined(separator: ",") + "]"
+            return "{\"song\":\"\(j(song.name))\",\"sections\":\(secs)}"
+        }.joined(separator: ",") + "]"
+
+        let exportBtns = buildSongExportButtons(songs: songs.map { ($0.name, $0.sections.map { $0.sec }) })
 
         return """
         <!DOCTYPE html>
-        <html lang='ko'>
+        <html lang="ko">
         <head>
-        <meta charset='UTF-8'>
-        <meta name='viewport' content='width=device-width, initial-scale=1'>
-        <title>Indicator 편집</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Indicator 가사 편집</title>
         <style>
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body { font-family: -apple-system, sans-serif; background: #f5f5f7; padding: 20px; }
-          h1 { font-size: 20px; margin-bottom: 16px; color: #1d1d1f; }
-          table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
-          th { background: #1d1d1f; color: #fff; padding: 10px 12px; text-align: left; font-size: 13px; }
-          td { padding: 8px 12px; border-bottom: 1px solid #e5e5ea; font-size: 14px; }
-          .song-header { background: #e5e5ea; font-weight: 700; font-size: 15px; color: #1d1d1f; }
-          .sec { color: #555; min-width: 80px; }
-          input { width: 100%; border: 1px solid #d1d1d6; border-radius: 6px; padding: 6px 10px; font-size: 14px; outline: none; }
-          input:focus { border-color: #007aff; }
-
-          .btn { display: inline-block; margin-top: 16px; padding: 10px 28px; background: #007aff; color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; }
-          .btn:active { background: #0062cc; }
-          #msg { margin-top: 12px; color: #34c759; font-weight: 600; font-size: 14px; display: none; }
-          .csv-section { margin-top: 24px; background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
-          .csv-section h2 { font-size: 15px; margin-bottom: 12px; color: #1d1d1f; }
-          .csv-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-          .btn-sm { padding: 8px 18px; font-size: 14px; background: #5856d6; }
-          .btn-sm.green { background: #34c759; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root { --accent: #007aff; --bg: #f2f2f7; --card: #fff; --border: #d1d1d6; --text: #1d1d1f; --sub: #6e6e73; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        #hdr { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--card); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+        #hdr h1 { font-size: 17px; font-weight: 700; flex: 1; }
+        #save-msg { font-size: 13px; color: #34c759; font-weight: 600; opacity: 0; transition: opacity .3s; }
+        .btn { padding: 7px 18px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }
+        .btn:active { opacity: .8; }
+        .btn-sec { background: #5856d6; }
+        #layout { display: flex; flex: 1; overflow: hidden; }
+        #sidebar { width: 220px; flex-shrink: 0; overflow-y: auto; background: var(--card); border-right: 1px solid var(--border); padding: 8px 0; }
+        .song-hd { padding: 10px 14px 3px; font-size: 11px; font-weight: 700; color: var(--sub); letter-spacing: .5px; text-transform: uppercase; }
+        .sec-row { padding: 7px 14px 7px 22px; font-size: 14px; color: var(--text); cursor: pointer; border-left: 3px solid transparent; }
+        .sec-row:hover { background: #f0f0f5; }
+        .sec-row.active { background: #e5eeff; color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
+        .sec-row.dirty::after { content: "●"; font-size: 8px; color: var(--accent); margin-left: 5px; vertical-align: middle; }
+        #main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+        #empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--sub); font-size: 15px; }
+        #panel { display: none; padding: 24px; flex-direction: column; gap: 18px; }
+        #panel.show { display: flex; }
+        #panel-title { font-size: 22px; font-weight: 700; }
+        .lbl { font-size: 11px; font-weight: 700; color: var(--sub); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 6px; }
+        #ta { width: 100%; min-height: 160px; border: 1.5px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 17px; line-height: 1.8; font-family: -apple-system, sans-serif; outline: none; resize: vertical; }
+        #ta:focus { border-color: var(--accent); }
+        .hint { font-size: 12px; color: var(--sub); margin-top: 5px; }
+        #preview { background: #1c1c1e; border-radius: 10px; padding: 16px 18px; min-height: 56px; }
+        .pv-line { display: flex; flex-wrap: wrap; align-items: flex-end; min-height: 44px; }
+        .cc { display: inline-flex; flex-direction: column; align-items: center; }
+        .ca { font-size: 13px; color: #5DCAA5; font-weight: 700; min-height: 16px; line-height: 1; white-space: nowrap; padding: 0 2px; }
+        .ct { font-size: 22px; color: #e8e8ed; line-height: 1.3; }
+        #ni { width: 100%; border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 15px; font-family: -apple-system, sans-serif; outline: none; }
+        #ni:focus { border-color: var(--accent); }
+        #export-box { border-top: 1px solid var(--border); padding: 20px 24px; flex-shrink: 0; }
+        #export-box h2 { font-size: 11px; font-weight: 700; color: var(--sub); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
+        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
         </style>
         </head>
         <body>
-        <h1>가사 · 연주 노트 편집</h1>
-        <table>
-          <thead><tr><th>섹션</th><th>가사 (첫 줄)</th><th>연주 노트</th></tr></thead>
-          <tbody>\(rows)</tbody>
-        </table>
-        <button class='btn' onclick='save()'>저장</button>
-        <div id='msg'>✓ 저장됐어요!</div>
-
-        <div class='csv-section'>
-          <h2>내보내기</h2>
-          <div class='csv-row'>
-            <a href='/export/setlist' class='btn btn-sm'>이번 세트리스트</a>
-            \(buildSongExportButtons(songs: songs))
+        <div id="hdr">
+          <h1>가사 편집</h1>
+          <span id="save-msg"></span>
+          <button class="btn" onclick="saveAll()">저장</button>
+        </div>
+        <div id="layout">
+          <div id="sidebar"></div>
+          <div id="main">
+            <div id="empty">← 섹션을 선택하세요</div>
+            <div id="panel">
+              <div id="panel-title"></div>
+              <div>
+                <div class="lbl">가사 (코드 포함)</div>
+                <textarea id="ta" placeholder="[G]찬양해 [D]찬양해&#10;[Em]온 맘 다해 [C]주를"></textarea>
+                <div class="hint">[코드명]글자 형식으로 코드를 삽입하세요. Enter = 줄바꿈.</div>
+              </div>
+              <div>
+                <div class="lbl">미리보기</div>
+                <div id="preview"><span style="color:#555;font-size:13px">가사를 입력하면 여기에 표시됩니다</span></div>
+              </div>
+              <div>
+                <div class="lbl">연주 노트</div>
+                <input id="ni" type="text" placeholder="예: 키 G, 템포 72">
+              </div>
+            </div>
+            <div id="export-box">
+              <h2>내보내기</h2>
+              <div class="btn-row">
+                <a href="/export/setlist" class="btn btn-sec" style="text-decoration:none">이번 세트리스트</a>
+                \(exportBtns)
+              </div>
+            </div>
           </div>
         </div>
-
-        <div class='csv-section'>
-          <h2>Google Sheets 연동</h2>
-          <div class='csv-row'>
-            <a href='/export.csv' class='btn btn-sm'>CSV 내보내기 (Sheets용)</a>
-            <span style='color:#888;font-size:13px'>→ Google Sheets에서 편집 후 CSV로 다운로드 →</span>
-            <label class='btn btn-sm green' style='cursor:pointer'>
-              CSV 가져오기
-              <input type='file' accept='.csv' style='display:none' onchange='importCSV(this)'>
-            </label>
-          </div>
-        </div>
-
         <script>
-        function save() {
-          const payload = {};
-          document.querySelectorAll('input[name=lc]').forEach(el => {
-            const song = el.dataset.song, sec = el.dataset.sec;
-            if (!payload[song]) payload[song] = {};
-            if (!payload[song][sec]) payload[song][sec] = { lyricCue: '', note: '' };
-            if (el.value || !payload[song][sec].lyricCue) payload[song][sec].lyricCue = el.value;
-          });
-          document.querySelectorAll('input[name=nt]').forEach(el => {
-            const song = el.dataset.song, sec = el.dataset.sec;
-            if (!payload[song]) payload[song] = {};
-            if (!payload[song][sec]) payload[song][sec] = { lyricCue: '', note: '' };
-            if (el.value || !payload[song][sec].note) payload[song][sec].note = el.value;
-          });
-          fetch('/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) })
-            .then(() => { const m = document.getElementById('msg'); m.style.display='block'; setTimeout(()=>m.style.display='none', 2000); });
+        const DATA = \(songsJson);
+        let curSong = null, curSec = null;
+        const dirty = {};
+
+        function renderSidebar() {
+          const sb = document.getElementById('sidebar');
+          sb.innerHTML = '';
+          for (const song of DATA) {
+            const hd = document.createElement('div');
+            hd.className = 'song-hd';
+            hd.textContent = song.song;
+            sb.appendChild(hd);
+            for (const sec of song.sections) {
+              const key = song.song + '|||' + sec.sec;
+              const row = document.createElement('div');
+              row.className = 'sec-row' + (curSong === song.song && curSec === sec.sec ? ' active' : '') + (dirty[key] ? ' dirty' : '');
+              row.textContent = sec.sec;
+              row.addEventListener('click', () => selectSec(song.song, sec.sec));
+              sb.appendChild(row);
+            }
+          }
         }
 
-        function importCSV(input) {
-          const file = input.files[0]; if (!file) return;
-          const reader = new FileReader();
-          reader.onload = e => {
-            fetch('/import.csv', { method:'POST', headers:{'Content-Type':'text/plain'}, body: e.target.result })
-              .then(() => location.reload());
-          };
-          reader.readAsText(file);
+        function selectSec(song, sec) {
+          flushCurrent();
+          curSong = song; curSec = sec;
+          const key = song + '|||' + sec;
+          const sd = DATA.find(s => s.song === song)?.sections.find(s => s.sec === sec) || {};
+          const state = dirty[key] || { text: sd.text || '', note: sd.note || '' };
+          document.getElementById('panel-title').textContent = sec;
+          document.getElementById('ta').value = state.text;
+          document.getElementById('ni').value = state.note;
+          document.getElementById('empty').style.display = 'none';
+          document.getElementById('panel').classList.add('show');
+          updatePreview();
+          renderSidebar();
+          document.getElementById('ta').focus();
         }
+
+        function flushCurrent() {
+          if (!curSong || !curSec) return;
+          const key = curSong + '|||' + curSec;
+          const text = document.getElementById('ta').value;
+          const note = document.getElementById('ni').value;
+          const sd = DATA.find(s => s.song === curSong)?.sections.find(s => s.sec === curSec) || {};
+          if (text !== (sd.text || '') || note !== (sd.note || '')) {
+            dirty[key] = { text, note };
+          } else {
+            delete dirty[key];
+          }
+        }
+
+        function markDirty() {
+          if (!curSong || !curSec) return;
+          dirty[curSong + '|||' + curSec] = { text: document.getElementById('ta').value, note: document.getElementById('ni').value };
+          document.querySelectorAll('.sec-row.active').forEach(r => r.classList.add('dirty'));
+        }
+
+        document.getElementById('ta').addEventListener('input', () => { markDirty(); updatePreview(); });
+        document.getElementById('ni').addEventListener('input', markDirty);
+
+        function parseLyric(text) {
+          const tokens = [];
+          const chars = [...text];
+          let i = 0;
+          while (i < chars.length) {
+            const c = chars[i];
+            if (c === '\\n') {
+              tokens.push({ type: 'br' });
+              i++;
+            } else if (c === '[') {
+              i++;
+              let chord = '';
+              while (i < chars.length && chars[i] !== ']' && chars[i] !== '\\n') chord += chars[i++];
+              if (chars[i] === ']') i++;
+              if (i < chars.length && chars[i] !== '[' && chars[i] !== '\\n') {
+                const tok = { type: 'char', char: chars[i] };
+                if (chord) tok.chord = chord;
+                tokens.push(tok); i++;
+              } else {
+                const tok = { type: 'ghost' };
+                if (chord) tok.chord = chord;
+                tokens.push(tok);
+              }
+            } else {
+              tokens.push({ type: 'char', char: c });
+              i++;
+            }
+          }
+          return tokens;
+        }
+
+        function updatePreview() {
+          const tokens = parseLyric(document.getElementById('ta').value);
+          const pv = document.getElementById('preview');
+          if (!tokens.length) {
+            pv.innerHTML = '<span style="color:#555;font-size:13px">가사를 입력하면 여기에 표시됩니다</span>';
+            return;
+          }
+          const lines = [[]];
+          for (const t of tokens) {
+            if (t.type === 'br') lines.push([]);
+            else lines[lines.length - 1].push(t);
+          }
+          pv.innerHTML = lines.map(line => {
+            if (!line.length) return '<div class="pv-line" style="height:10px"></div>';
+            return '<div class="pv-line">' + line.map(t => {
+              const ca = '<span class="ca">' + (t.chord ? esc(t.chord) : '') + '</span>';
+              const ch = t.char === ' ' ? '&ensp;' : esc(t.char || '');
+              return '<span class="cc">' + ca + '<span class="ct">' + ch + '</span></span>';
+            }).join('') + '</div>';
+          }).join('');
+        }
+
+        function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+        function saveAll() {
+          flushCurrent();
+          if (!Object.keys(dirty).length) { showMsg('변경사항 없음'); return; }
+          const payload = {};
+          for (const [key, state] of Object.entries(dirty)) {
+            const sep = key.indexOf('|||');
+            const song = key.slice(0, sep), sec = key.slice(sep + 3);
+            if (!payload[song]) payload[song] = {};
+            const tokens = parseLyric(state.text);
+            const plain = tokens.map(t => t.type === 'br' ? '\\n' : (t.type === 'char' ? (t.char || '') : '')).join('');
+            payload[song][sec] = {
+              lyricCue: plain.split('\\n')[0] || '',
+              note: state.note,
+              slides: [{ startBar: 0, barCount: 0, isInstrumental: false, tokens: tokens, instChords: [], singerNote: '' }]
+            };
+          }
+          fetch('/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+            .then(r => r.json())
+            .then(() => {
+              for (const [key, state] of Object.entries(dirty)) {
+                const sep = key.indexOf('|||'), song = key.slice(0, sep), sec = key.slice(sep + 3);
+                const s = DATA.find(s => s.song === song)?.sections.find(s => s.sec === sec);
+                if (s) { s.text = state.text; s.note = state.note; }
+              }
+              for (const k in dirty) delete dirty[k];
+              renderSidebar();
+              showMsg('저장됐어요!');
+            }).catch(() => showMsg('저장 실패'));
+        }
+
+        function showMsg(m) {
+          const el = document.getElementById('save-msg');
+          el.textContent = m;
+          el.style.opacity = '1';
+          setTimeout(() => el.style.opacity = '0', 2200);
+        }
+
+        renderSidebar();
         </script>
-        </body></html>
+        </body>
+        </html>
         """
     }
 
@@ -388,9 +611,15 @@ class WebServer {
     private func loadHTML() {
         if let url = Bundle.main.url(forResource: "index", withExtension: "html"),
            let content = try? String(contentsOf: url, encoding: .utf8) {
-            htmlContent = content
+            bandContent = content
         } else {
-            htmlContent = "<html><body><h1>index.html not found</h1></body></html>"
+            bandContent = "<html><body><h1>index.html not found</h1></body></html>"
+        }
+        if let url = Bundle.main.url(forResource: "singer", withExtension: "html"),
+           let content = try? String(contentsOf: url, encoding: .utf8) {
+            singerContent = content
+        } else {
+            singerContent = "<html><body><h1>singer.html not found</h1></body></html>"
         }
     }
 }

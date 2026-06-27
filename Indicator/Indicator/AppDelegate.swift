@@ -24,13 +24,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.stateEngine.update(snapshot: snapshot)
         }
         mtcReceiver.onTimeUpdate = { [weak self] time in
+            self?.logicPoller.mtcActive = true
             self?.stateEngine.updateMTC(time: time)
         }
         mtcReceiver.onStop = { [weak self] in
+            self?.logicPoller.mtcActive = false
             self?.stateEngine.mtcStopped()
         }
         mtcReceiver.onBeat = { [weak self] in
             self?.stateEngine.onBeat()
+        }
+        stateEngine.onJump = { [weak self] in
+            self?.logicPoller.syncBarBeat()
         }
         stateEngine.onStateChange = { [weak self] state in
             self?.webServer.broadcast(state: state)

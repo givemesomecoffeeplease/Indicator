@@ -31,6 +31,45 @@ Indicator/Indicator/
 └── Resources/index.html  # 브라우저 표시 화면
 ```
 
+## 2026-06-28 작업 내역
+
+### AX 폴링 재설계 + 싱어 뷰 + 가사 편집기
+
+#### LogicPoller 완전 재설계 (Logic Pro CPU 폭주 방지)
+- `fullScan()` — 앱 시작 시 1회 전체 스캔 (마커, 변박, BPM, 키, bar/beat)
+- `driftTimer` — MTC 정지 시에만 500ms마다 bar/beat만 읽는 경량 드리프트 보정
+- `mtcActive` 플래그 — MTC 재생 중이면 AX 드리프트 읽기 완전 스킵
+- `syncBarBeat()` — StateEngine에서 점프 감지 시 호출, 100ms 후 강제 읽기
+- `readBarBeatForced()` — `cachedMarkers` 비어있으면 `fullScan()` fallback (race condition 수정)
+
+#### StateEngine 점프 감지
+- `onJump` 클로저 추가 → AppDelegate에서 `logicPoller.syncBarBeat()` 호출
+- `requiredCount = 1` (currentSectionIdx == -1 일 때) — 점프 후 즉시 섹션 확정
+
+#### singer.html 신규 추가
+- 상단: 곡 휠(밴드 방식 슬라이딩) + 시계 + 키
+- 중간: 현재 섹션 카드(flex:3) / 다음 섹션 카드(flex:2) 상하 배치
+- 섹션명 좌상단 가로 배치, 민트 컬러(#5DCAA5) 테두리
+- 카운트다운 `#cd-overlap`: 두 카드 경계에 걸쳐 절대 위치
+- 다음 섹션이 곡 마커일 때 곡명을 키컬러로 크게 표시
+- `?demo` 파라미터: 더미 데이터로 SSE 없이 미리보기
+- LyricToken 기반 코드+가사 렌더링 (band view와 동일 데이터)
+
+#### /edit 가사 편집기 전면 개편 (WebServer.swift)
+- 기존 단순 테이블 입력 → 사이드바 + 리치 에디터 레이아웃
+- 왼쪽: 곡/섹션 트리 (수정된 섹션에 파란 점 표시)
+- 오른쪽: `[G]찬양해 [D]찬양해` 형식 textarea + 실시간 미리보기 + 연주 노트
+- 미리보기: 어두운 배경에 코드 민트색·가사 흰색, 코드-글자 수직 정렬
+- 저장 시 LyricToken 배열로 파싱해 `/save` POST → LyricsStore 반영
+- 변경된 섹션만 전송 (dirty 추적)
+
+#### ⚠️ 미구현 — 마디 선택 기반 슬라이드 편집
+- `LyricSlide.startBar / barCount`를 활용한 섹션 내 마디 범위 지정 편집 UI
+- 현재는 섹션당 슬라이드 1개, startBar/barCount = 0으로 저장
+- 추후: 섹션 총 마디 수 표시 + 드래그로 슬라이드 범위 지정
+
+---
+
 ## 2026-06-27 작업 내역 (4차) — 설계 확정 (미구현)
 
 ### 싱어 뷰 + 가사/코드 편집기 + 카포 기능 설계

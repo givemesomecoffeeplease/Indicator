@@ -9,39 +9,59 @@ class LogicPoller {
     var dumpAXTree = false
     private(set) var lastSnapshot: LogicSnapshot?
 
-    private var timer: DispatchSourceTimer?
-    private let queue = DispatchQueue(label: "com.indicator.poller", qos: .userInitiated)
-    private var lastTimeSigRead: Date = .distantPast
+    private var driftTimer: DispatchSourceTimer?
+    private let queue     = DispatchQueue(label: "com.indicator.poller", qos: .utility)
+    private let syncQueue = DispatchQueue(label: "com.indicator.poller.sync", qos: .userInitiated)
+
+    // MTC 재생 중 여부 — true면 AX 드리프트 읽기 스킵
+    var mtcActive: Bool = false
+
+    // 캐시 — 공연 중 바뀌지 않는 값들
     private var cachedTimeSigEvents: [TimeSigEvent] = []
     private var cachedMarkers: [Marker] = []
     private var cachedChords: [ChordEvent] = []
+    private var cachedInnerBar: AXUIElement? = nil
 
-    func refreshMarkers() { cachedMarkers = []; cachedChords = [] }
+    // MARK: - 시작 / 종료
 
     func start() {
-        let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now(), repeating: .milliseconds(250))
-        t.setEventHandler { [weak self] in self?.poll() }
+        // 앱 시작 시 풀스캔 1회
+        queue.async { [weak self] in self?.fullScan() }
+
+        // 500ms마다 bar/beat 보정 (정지 중 재생헤드 이동 포함)
+        let t = DispatchSource.makeTimerSource(queue: syncQueue)
+        t.schedule(deadline: .now() + 1, repeating: .milliseconds(500))
+        t.setEventHandler { [weak self] in self?.readBarBeatOnly() }
         t.resume()
-        timer = t
+        driftTimer = t
     }
 
     func stop() {
-        timer?.cancel()
-        timer = nil
+        driftTimer?.cancel()
+        driftTimer = nil
+    }
+
+    // 수동 새로고침 (메뉴 버튼)
+    func refreshMarkers() {
+        cachedMarkers = []; cachedChords = []; cachedInnerBar = nil
+        queue.async { [weak self] in self?.fullScan() }
+    }
+
+    // MTC 점프 감지 시 StateEngine이 호출 — 100ms 후 강제 읽기 (Logic AX 업데이트 대기)
+    func syncBarBeat() {
+        syncQueue.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.readBarBeatForced() }
     }
 
     func forceUpdate() {
-        queue.async { [weak self] in self?.poll() }
+        queue.async { [weak self] in self?.fullScan() }
     }
 
-    // MARK: - Poll
+    // MARK: - 풀스캔 (시작 1회 + 수동 새로고침)
 
-    private func poll() {
+    private func fullScan() {
         guard AXIsProcessTrusted() else { return }
         guard let app = NSRunningApplication
             .runningApplications(withBundleIdentifier: Self.bundleID).first else { return }
-
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
 
         if dumpAXTree {
@@ -53,31 +73,43 @@ class LogicPoller {
         }
 
         var snapshot = LogicSnapshot()
-        snapshot.capturedMTCTime = 0
+        readTransport(axApp: axApp, into: &snapshot)           // BPM·박자·조표·bar/beat
+        readMarkers(axApp: axApp, into: &snapshot)             // 마커
+        if !snapshot.markers.isEmpty { cachedMarkers = snapshot.markers }
+        readChords(axApp: axApp, into: &snapshot)              // 코드
+        if !snapshot.chords.isEmpty { cachedChords = snapshot.chords }
+        readTimeSigs(axApp: axApp, into: &snapshot)            // 변박
+        if !snapshot.timeSigEvents.isEmpty { cachedTimeSigEvents = snapshot.timeSigEvents }
 
+        DispatchQueue.main.async {
+            self.lastSnapshot = snapshot
+            self.onSnapshot?(snapshot)
+        }
+    }
+
+    // MARK: - bar/beat 보정만 (드리프트 + MTC 점프)
+
+    // 타이머 호출 — 재생 중엔 스킵
+    private func readBarBeatOnly() {
+        guard !mtcActive else { return }
+        readBarBeatForced()
+    }
+
+    // 점프 감지 호출 — 재생 중도 강제 실행
+    private func readBarBeatForced() {
+        // 마커가 아직 없으면 풀스캔으로 대체 (앱 시작 직후 race condition 방지)
+        guard !cachedMarkers.isEmpty else { fullScan(); return }
+
+        guard AXIsProcessTrusted() else { return }
+        guard let app = NSRunningApplication
+            .runningApplications(withBundleIdentifier: Self.bundleID).first else { return }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+
+        var snapshot = lastSnapshot ?? LogicSnapshot()
+        snapshot.markers        = cachedMarkers
+        snapshot.chords         = cachedChords
+        snapshot.timeSigEvents  = cachedTimeSigEvents
         readTransport(axApp: axApp, into: &snapshot)
-        // 마커는 캐시 없을 때만 읽음 (스크롤 탐색 비용) — 수동 새로고침: refreshMarkers()
-        if cachedMarkers.isEmpty {
-            readMarkers(axApp: axApp, into: &snapshot)
-            if !snapshot.markers.isEmpty { cachedMarkers = snapshot.markers }
-        } else {
-            snapshot.markers = cachedMarkers
-        }
-        // 코드는 캐시 없을 때만 읽음 (마커 새로고침과 함께 갱신)
-        if cachedChords.isEmpty {
-            readChords(axApp: axApp, into: &snapshot)
-            if !snapshot.chords.isEmpty { cachedChords = snapshot.chords }
-        } else {
-            snapshot.chords = cachedChords
-        }
-        // 변박 이벤트는 1초마다만 읽음 (AX 트리 탐색 비용)
-        if Date().timeIntervalSince(lastTimeSigRead) >= 1.0 {
-            readTimeSigs(axApp: axApp, into: &snapshot)
-            if !snapshot.timeSigEvents.isEmpty { cachedTimeSigEvents = snapshot.timeSigEvents }
-            lastTimeSigRead = Date()
-        } else {
-            snapshot.timeSigEvents = cachedTimeSigEvents
-        }
 
         DispatchQueue.main.async {
             self.lastSnapshot = snapshot
@@ -92,11 +124,23 @@ class LogicPoller {
     //   AXPopUpButton(desc=박자표)
 
     private func readTransport(axApp: AXUIElement, into snapshot: inout LogicSnapshot) {
+        // 캐시된 innerBar가 있으면 바로 사용 (윈도우 탐색 생략)
+        if let innerBar = cachedInnerBar {
+            readTransportValues(innerBar: innerBar, into: &snapshot)
+            return
+        }
         guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return }
         for window in windows {
             guard let outerBar = findByDesc(window, "컨트롤 막대"),
                   let innerBar = findByDescAmongChildren(of: outerBar, desc: "컨트롤 막대")
             else { continue }
+            cachedInnerBar = innerBar
+            readTransportValues(innerBar: innerBar, into: &snapshot)
+            return
+        }
+    }
+
+    private func readTransportValues(innerBar: AXUIElement, into snapshot: inout LogicSnapshot) {
 
             // Bar / Beat
             if let posGroup  = findByDesc(innerBar, "재생헤드 위치"),
@@ -126,9 +170,6 @@ class LogicPoller {
                let val = axString(keyButton, key: kAXValueAttribute) {
                 snapshot.key = parseKey(val)
             }
-
-            return
-        }
     }
 
     // MARK: - Chords

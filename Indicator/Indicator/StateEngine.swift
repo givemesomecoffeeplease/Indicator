@@ -13,6 +13,7 @@ func debugLog(_ msg: String) {
 class StateEngine {
 
     var onStateChange: ((IndicatorState) -> Void)?
+    var onJump: (() -> Void)?  // MTC 점프 시 LogicPoller에게 bar/beat 재읽기 요청
     var countdownThresholdBars: Int { SettingsStore.shared.countdownBars }
 
     // ── 입력 ──────────────────────────────────────────────
@@ -80,11 +81,11 @@ class StateEngine {
             pendingCount = 1
         }
 
-        // 거리 기반 확인 횟수: 인접 섹션은 2회, 먼 섹션은 4회 (AX 순간 오독 방지)
+        // 점프 직후(currentSectionIdx == -1)엔 즉시 확정, 그 외엔 거리 기반 확인
         let detectedStart = sectionBounds(idx: detectedIdx)?.start ?? 0
         let currentStart  = sectionBounds(idx: currentSectionIdx)?.start ?? 0
         let barDistance   = abs(detectedStart - currentStart)
-        let requiredCount = barDistance > 8 ? 4 : 2
+        let requiredCount = currentSectionIdx == -1 ? 1 : (barDistance > 8 ? 4 : 2)
         let confirmedIdx  = (pendingCount < requiredCount) ? currentSectionIdx : detectedIdx
 
         debugLog("[Section] detected=\(sectionName(at:detectedIdx)) current=\(currentSectionName) pending=\(pendingCount)/\(requiredCount) dist=\(String(format:"%.0f",barDistance))")
@@ -112,8 +113,9 @@ class StateEngine {
 
     func updateMTC(time: TimeInterval) {
         if Int(time * 10) % 10 == 0 { debugLog("[MTC] time=\(String(format:"%.3f",time))") } // 1초마다만
-        // 점프 감지 (되감기 / 재생헤드 이동)
-        if mtcIsPlaying && abs(time - prevMTCTime) > 2.0 {
+        // 점프 감지: ① 재생 중 2초 이상 이동, ② 정지 후 재시작
+        let jumped = (mtcIsPlaying && abs(time - prevMTCTime) > 2.0) || !mtcIsPlaying
+        if jumped {
             currentSectionName = ""
             currentSectionIdx  = -1
             transitionMTC      = 0
@@ -122,6 +124,7 @@ class StateEngine {
             nextChordMTC       = 0
             pendingSectionIdx  = -1
             pendingCount       = 0
+            onJump?()  // LogicPoller에게 bar/beat 즉시 재읽기 요청
         }
         prevMTCTime  = mtcTime
         mtcTime      = time
@@ -476,6 +479,12 @@ class StateEngine {
                 state.nextSectionChords    = nextChords.map { $0.name }
                 state.nextSectionChordBars = nextChords.map { $0.bar }
             }
+        }
+
+        // 싱어 뷰: 다음 곡 이름 + 키
+        if let nextSong = snapshot.markers.first(where: { $0.isSong && markerBarFloat($0) > anchorBar + 0.5 }) {
+            state.nextSongName = nextSong.displayName
+            // 다음 곡 키는 LyricsStore 접근 불가 → 브라우저가 처리
         }
 
         state.isPlaying       = mtcIsPlaying

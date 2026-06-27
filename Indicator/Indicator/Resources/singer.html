@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Indicator · Singer</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#14141a">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #14141a;
+    color: #f0f0f0;
+    font-family: -apple-system, 'Helvetica Neue', sans-serif;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── 상단 바 ── */
+  #top {
+    flex-shrink: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0 6px;
+    gap: 4px;
+  }
+
+  #clock {
+    position: absolute;
+    top: 12px; right: 14px;
+    font-size: 11px; font-weight: 600;
+    color: #555566;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 곡 휠 */
+  #song-vp { width: 100%; overflow: hidden; }
+  #song-track {
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    white-space: nowrap;
+    padding: 0 50%;
+    transition: transform 0.4s cubic-bezier(0.4,0,0.2,1);
+  }
+  .s-name {
+    font-size: 10px; font-weight: 600; color: #1e1e32;
+    white-space: nowrap; flex-shrink: 0;
+    transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
+  }
+  .s-name.p2 { font-size: 11px; color: #28283e; }
+  .s-name.p1 { font-size: 15px; color: #36365a; }
+  .s-name.active { font-size: 22px; font-weight: 800; color: #f0f0f0; }
+  .s-name.n1 { font-size: 15px; color: #36365a; }
+  .s-name.n2 { font-size: 11px; color: #28283e; }
+
+  /* 키 */
+  #key-label {
+    font-size: 11px; font-weight: 700;
+    color: #5DCAA5;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── 중간 영역 (현재+다음 카드) ── */
+  #middle {
+    flex: 1; min-height: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 0 10px 10px;
+    gap: 0;
+  }
+
+  /* ── 현재 섹션 카드 ── */
+  #cur-box {
+    flex: 3;
+    min-height: 0;
+    border: 2px solid #5DCAA5;
+    border-radius: 12px;
+    display: flex;
+    overflow: hidden;
+    margin-bottom: 0;
+  }
+
+  #cur-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 12px 14px;
+    min-width: 0;
+  }
+
+  #cur-section-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #5DCAA5;
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+    margin-bottom: 6px;
+  }
+
+  #cur-lyric-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    min-height: 0;
+  }
+
+  #cur-chords {
+    position: relative;
+    min-height: 20px;
+  }
+  .chord-above {
+    font-size: 13px; font-weight: 700;
+    color: #5DCAA5;
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  #cur-lyric {
+    font-size: clamp(18px, 4.5vw, 32px);
+    font-weight: 700;
+    line-height: 1.4;
+    color: #ffffff;
+    white-space: pre-wrap;
+    word-break: keep-all;
+  }
+
+  /* ── 카운트다운 (카드 경계에 오버랩) ── */
+  #cd-overlap {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    /* top은 JS로 cur-box 하단에 맞춤 */
+    pointer-events: none;
+  }
+
+  #cd-num {
+    font-size: clamp(32px, 7vw, 52px);
+    font-weight: 900;
+    color: #5DCAA5;
+    line-height: 1;
+    letter-spacing: -0.04em;
+    background: #14141a;
+    padding: 0 10px;
+  }
+  #cd-num.beat-pop {
+    animation: beatpop 0.18s cubic-bezier(0.2,0,0.4,1) forwards;
+  }
+  @keyframes beatpop {
+    0%   { transform: scale(1.3); color: #fff; }
+    60%  { transform: scale(0.95); color: #5DCAA5; }
+    100% { transform: scale(1.0);  color: #5DCAA5; }
+  }
+
+  /* ── 다음 섹션 카드 ── */
+  #nxt-box {
+    flex: 2;
+    min-height: 0;
+    border: 1.5px solid #2a2a3a;
+    border-radius: 10px;
+    display: flex;
+    overflow: hidden;
+  }
+
+  #nxt-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px;
+    min-width: 0;
+  }
+
+  #nxt-section-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #3a3a52;
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+    margin-bottom: 4px;
+  }
+
+  #nxt-lyric-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-height: 0;
+  }
+
+  /* 다음 섹션이 곡 전환일 때 — 키컬러로 크게 */
+  #nxt-song-display {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(18px, 4vw, 28px);
+    font-weight: 800;
+    color: #5DCAA5;
+    letter-spacing: -0.02em;
+  }
+
+  #nxt-chords {
+    position: relative;
+    min-height: 16px;
+  }
+  .nxt-chord {
+    font-size: 11px; font-weight: 700;
+    color: #3d7a6a;
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  #nxt-lyric {
+    font-size: clamp(13px, 3vw, 20px);
+    font-weight: 600;
+    color: #444;
+    white-space: pre-wrap;
+    word-break: keep-all;
+    line-height: 1.4;
+  }
+
+  /* 다음 곡 표시 */
+  #nxt-song-row {
+    font-size: 11px;
+    color: #555;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+
+  /* ── 오프라인 ── */
+  #offline {
+    position: fixed; inset: 0;
+    background: rgba(14,14,20,0.9);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: #888; z-index: 99;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="offline">연결 중…</div>
+
+<!-- 상단 바 -->
+<div id="top">
+  <div id="clock">--:--</div>
+  <div id="song-vp"><div id="song-track"></div></div>
+  <div id="key-label"></div>
+</div>
+
+<!-- 현재 + 다음 카드 -->
+<div id="middle">
+
+  <div id="cur-box">
+    <div id="cur-content">
+      <div id="cur-section-label">—</div>
+      <div id="cur-lyric-wrap">
+        <div id="cur-chords"></div>
+        <div id="cur-lyric"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 카운트: 카드 경계에 걸쳐 표시 -->
+  <div id="cd-overlap"><div id="cd-num"></div></div>
+
+  <div id="nxt-box">
+    <div id="nxt-content">
+      <div id="nxt-section-label"></div>
+      <div id="nxt-lyric-wrap">
+        <div id="nxt-chords"></div>
+        <div id="nxt-lyric"></div>
+      </div>
+      <div id="nxt-song-display" class="hidden"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  // ── SSE ──
+  let reconnectDelay = 1000;
+  function connect() {
+    const es = new EventSource('/events');
+    es.onopen = () => { reconnectDelay = 1000; $('offline').classList.add('hidden'); };
+    es.onmessage = e => { try { applyState(JSON.parse(e.data)); } catch {} };
+    es.onerror = () => { es.close(); setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 2, 10000); };
+  }
+  connect();
+
+  // ── 시계 ──
+  function updateClock() {
+    const d = new Date();
+    $('clock').textContent = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  }
+  updateClock();
+  setInterval(updateClock, 10000);
+
+  // ── 카운트다운 오버랩 위치 ──
+  function positionCountdown() {
+    const curBox = $('cur-box');
+    const middle = $('middle');
+    const cd     = $('cd-overlap');
+    const mRect  = middle.getBoundingClientRect();
+    const cRect  = curBox.getBoundingClientRect();
+    // cur-box 하단 = middle 기준 상대 위치
+    const topRelative = cRect.bottom - mRect.top;
+    cd.style.top = (topRelative - cd.offsetHeight / 2) + 'px';
+  }
+
+  // ── 곡 휠 ──
+  let lastSongIdx = -1, lastSongCount = 0;
+  function renderSongWheel(songs, idx) {
+    const track = $('song-track');
+    if (idx === lastSongIdx && songs.length === lastSongCount) return;
+    lastSongIdx = idx; lastSongCount = songs.length;
+    track.innerHTML = '';
+    songs.forEach((name, i) => {
+      const d = i - idx;
+      const el = document.createElement('span');
+      el.className = 's-name' + (d===0?' active':d===-1?' p1':d===1?' n1':d===-2?' p2':d===2?' n2':'');
+      el.textContent = name;
+      if (Math.abs(d) > 2) el.style.visibility = 'hidden';
+      track.appendChild(el);
+    });
+    requestAnimationFrame(() => {
+      const ch = track.children;
+      let off = 0;
+      for (let i = 0; i < idx; i++) off += ch[i].offsetWidth + 20;
+      off += ch[idx].offsetWidth / 2;
+      track.style.transform = `translateX(calc(50% - ${off}px - 50%))`;
+      positionCountdown();
+    });
+  }
+
+  // ── 가사+코드 렌더 ──
+  function renderLyric(chordsEl, lyricEl, chordClass, tokens, fallback) {
+    chordsEl.innerHTML = '';
+    if (tokens && tokens.length > 0) {
+      let text = '';
+      const chordPositions = [];
+      tokens.forEach(t => {
+        if (t.type === 'br') { text += '\n'; }
+        else if (t.type === 'char' || t.type === 'ghost') {
+          if (t.chord) chordPositions.push({ charIdx: text.length, chord: t.chord });
+          if (t.type === 'char') text += t.char || '';
+        }
+      });
+      lyricEl.textContent = text;
+      const firstLineLen = text.indexOf('\n') >= 0 ? text.indexOf('\n') : text.length;
+      chordPositions.forEach(({ charIdx, chord }) => {
+        const span = document.createElement('span');
+        span.className = chordClass;
+        span.textContent = chord;
+        span.style.left = firstLineLen > 0 ? `${(charIdx / firstLineLen) * 100}%` : '0%';
+        chordsEl.appendChild(span);
+      });
+    } else {
+      lyricEl.textContent = fallback || '';
+    }
+  }
+
+  // ── 카운트다운 ──
+  let lastCdBeats = null;
+  function renderCountdown(bars, bpb) {
+    const el = $('cd-num');
+    if (!bars || bars <= 0) {
+      el.textContent = '';
+      lastCdBeats = null;
+      return;
+    }
+    // bars는 실제로 남은 비트 수 — 그대로 표시 (8,7,6...1)
+    if (bars !== lastCdBeats) {
+      lastCdBeats = bars;
+      el.textContent = bars;
+      el.classList.remove('beat-pop');
+      void el.offsetWidth;
+      el.classList.add('beat-pop');
+    }
+    positionCountdown();
+  }
+
+  // ── 상태 적용 ──
+  function applyState(s) {
+    // 곡 휠
+    const songs = s.songs || [];
+    const idx   = s.currentSongIndex ?? -1;
+    renderSongWheel(songs, Math.max(0, idx));
+    $('key-label').textContent = s.key || '';
+
+    // 현재 섹션
+    const sec = s.currentSection || '';
+    $('cur-section-label').textContent = sec.startsWith('#') ? '' : (sec || '—');
+    renderLyric($('cur-chords'), $('cur-lyric'), 'chord-above',
+                s.currentSlideTokens, s.lyricCue);
+
+    // 다음 섹션
+    const nxtSec = s.nextSection || '';
+    const nxtIsSong = s.nextSectionIsSong || nxtSec.startsWith('#');
+    $('nxt-section-label').textContent = nxtIsSong ? '' : nxtSec;
+
+    if (nxtIsSong) {
+      const songName = s.nextSongName || nxtSec.replace(/^#/, '');
+      $('nxt-lyric-wrap').classList.add('hidden');
+      $('nxt-song-display').classList.remove('hidden');
+      $('nxt-song-display').textContent = songName;
+    } else {
+      $('nxt-lyric-wrap').classList.remove('hidden');
+      $('nxt-song-display').classList.add('hidden');
+      renderLyric($('nxt-chords'), $('nxt-lyric'), 'nxt-chord',
+                  s.nextSlideTokens, s.nextLyricCue);
+    }
+
+    // 카운트다운
+    renderCountdown(s.countdownBars || 0, s.beatsPerBar || 4);
+  }
+
+  // ── 더미 (?demo 또는 file:// 접속 시) ──
+  if (window.location.protocol === 'file:' || new URLSearchParams(location.search).has('demo')) {
+    $('offline').classList.add('hidden');
+    applyState({
+      currentSection: 'Chorus',
+      currentSlideTokens: [
+        {type:'char',char:'찬',chord:'G'},{type:'char',char:'양'},{type:'char',char:'해'},
+        {type:'ghost',chord:'D/F#'},{type:'char',char:' '},
+        {type:'char',char:'찬'},{type:'char',char:'양'},{type:'char',char:'해'},
+        {type:'br'},
+        {type:'char',char:'온',chord:'Em'},{type:'char',char:' '},{type:'char',char:'맘'},
+        {type:'char',char:' '},{type:'char',char:'다',chord:'C'},{type:'char',char:'해'},
+      ],
+      nextSection: 'Bridge',
+      nextSlideTokens: [
+        {type:'char',char:'주',chord:'Am'},{type:'char',char:'님'},{type:'char',char:' '},
+        {type:'char',char:'앞',chord:'F'},{type:'char',char:'에'},{type:'char',char:' '},
+        {type:'char',char:'나',chord:'C'},{type:'char',char:'아'},{type:'char',char:'가'},
+        {type:'br'},
+        {type:'char',char:'경',chord:'G'},{type:'char',char:'배'},{type:'char',char:'해'},
+      ],
+      countdownBars: 6,
+      beatsPerBar: 4,
+      songs: ['시온의 영광', 'I Thank God', '은혜의 비'],
+      currentSongIndex: 1,
+      key: 'G',
+      nextSongName: '은혜의 비',
+    });
+  }
+</script>
+</body>
+</html>

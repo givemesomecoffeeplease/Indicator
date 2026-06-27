@@ -71,9 +71,16 @@
     padding: 2px 10px; border-radius: 20px;
   }
 
-  /* ── MAIN ── */
-  #main {
+  /* ── CONTENT ROW (main + lyric panel) ── */
+  #content-row {
     flex: 1; min-height: 0;
+    display: flex;
+    flex-direction: row;
+  }
+
+  /* ── MAIN (지금/다음 섹션, 2/3) ── */
+  #main {
+    flex: 2; min-height: 0; min-width: 0;
     display: grid;
     grid-template-columns: 1fr 64px 1fr;
     grid-template-rows:
@@ -234,6 +241,40 @@
   .sb.active   { background: #5DCAA5; color: #0d0d12; font-size: 11px; padding: 7px 16px; }
   .sb.upcoming { color: #888899; }
 
+  /* ── LYRIC PANEL (오른쪽 1/3) ── */
+  #lyric-panel {
+    flex: 1; min-height: 0; min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 16px 16px 16px 0;
+    border-left: 1px solid #2a2a36;
+  }
+  #lyric-panel-label {
+    font-size: 9px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: #555566; margin-bottom: 8px;
+  }
+  #lyric-panel-text {
+    font-size: clamp(13px, 2.2vw, 20px);
+    font-weight: 600;
+    color: #888899;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: keep-all;
+  }
+  #lyric-panel-chords {
+    position: relative;
+    min-height: 18px;
+    margin-bottom: 4px;
+  }
+  .lp-chord {
+    font-size: 11px; font-weight: 700;
+    color: #5DCAA5;
+    position: absolute;
+    white-space: nowrap;
+  }
+
   /* 오프라인 오버레이 */
   #offline {
     position: fixed; inset: 0;
@@ -259,39 +300,49 @@
   </div>
 </div>
 
-<div id="main">
-  <div class="sec-label" id="cur-label">지금</div>
-  <div id="col-center-cell">
-    <div id="col-center">
-      <div id="divider"></div>
-      <div id="cd-wrap"><div id="cd-num">--</div></div>
+<div id="content-row">
+
+  <div id="lyric-panel">
+    <div id="lyric-panel-chords"></div>
+    <div id="lyric-panel-text"></div>
+  </div>
+
+  <div id="main">
+    <div class="sec-label" id="cur-label">지금</div>
+    <div id="col-center-cell">
+      <div id="col-center">
+        <div id="divider"></div>
+        <div id="cd-wrap"><div id="cd-num">--</div></div>
+      </div>
+    </div>
+    <div class="sec-label" id="nxt-label">다음</div>
+
+    <div id="cur-name">--</div>
+    <div id="nxt-name">--</div>
+
+    <div class="col-meta" id="cur-meta">
+      <span class="meta-sm" id="cur-key-sm"></span>
+      <span class="meta-sm" id="cur-ts-sm"></span>
+      <span class="meta-sm" id="cur-bpm-sm"></span>
+    </div>
+    <div class="col-meta" id="nxt-meta">
+      <span class="meta-sm" id="nxt-key-sm"></span>
+      <span class="meta-sm" id="nxt-ts-sm"></span>
+      <span class="meta-sm" id="nxt-bpm-sm"></span>
+    </div>
+
+    <div class="lyric" id="cur-lyric"></div>
+    <div class="lyric" id="nxt-lyric"></div>
+
+    <div class="note hidden" id="cur-note-wrap"><div class="ndot"></div><span id="cur-note"></span></div>
+    <div class="note hidden" id="nxt-note-wrap"><div class="ndot"></div><span id="nxt-note"></span></div>
+
+    <div id="bottom-col">
+      <div id="progress-wrap"><div id="progress-fill"></div></div>
     </div>
   </div>
-  <div class="sec-label" id="nxt-label">다음</div>
 
-  <div id="cur-name">--</div>
-  <div id="nxt-name">--</div>
 
-  <div class="col-meta" id="cur-meta">
-    <span class="meta-sm" id="cur-key-sm"></span>
-    <span class="meta-sm" id="cur-ts-sm"></span>
-    <span class="meta-sm" id="cur-bpm-sm"></span>
-  </div>
-  <div class="col-meta" id="nxt-meta">
-    <span class="meta-sm" id="nxt-key-sm"></span>
-    <span class="meta-sm" id="nxt-ts-sm"></span>
-    <span class="meta-sm" id="nxt-bpm-sm"></span>
-  </div>
-
-  <div class="lyric" id="cur-lyric"></div>
-  <div class="lyric" id="nxt-lyric"></div>
-
-  <div class="note hidden" id="cur-note-wrap"><div class="ndot"></div><span id="cur-note"></span></div>
-  <div class="note hidden" id="nxt-note-wrap"><div class="ndot"></div><span id="nxt-note"></span></div>
-
-  <div id="bottom-col">
-    <div id="progress-wrap"><div id="progress-fill"></div></div>
-  </div>
 </div>
 
 <div id="tl-vp"><div id="tl-track"></div></div>
@@ -496,7 +547,8 @@
       hideCountdown();
     }
 
-    // 코드
+    // 가사 패널
+    renderLyricPanel(s.currentSlideTokens, s.lyricCue);
 
     // 타임라인 휠
     const secs = s.currentSongSections || [];
@@ -507,6 +559,36 @@
     }
   }
 
+
+  // ── 가사 패널 렌더 ──
+  function renderLyricPanel(tokens, fallbackCue) {
+    const chordsEl = $('lyric-panel-chords');
+    const textEl   = $('lyric-panel-text');
+    chordsEl.innerHTML = '';
+
+    if (tokens && tokens.length > 0) {
+      let text = '';
+      const chordPositions = [];
+      tokens.forEach(t => {
+        if (t.type === 'br') { text += '\n'; }
+        else if (t.type === 'char' || t.type === 'ghost') {
+          if (t.chord) chordPositions.push({ charIdx: text.length, chord: t.chord });
+          if (t.type === 'char') text += t.char || '';
+        }
+      });
+      textEl.textContent = text;
+      const firstLineLen = text.indexOf('\n') >= 0 ? text.indexOf('\n') : text.length;
+      chordPositions.forEach(({ charIdx, chord }) => {
+        const span = document.createElement('span');
+        span.className = 'lp-chord';
+        span.textContent = chord;
+        span.style.left = firstLineLen > 0 ? `${(charIdx / firstLineLen) * 100}%` : '0%';
+        chordsEl.appendChild(span);
+      });
+    } else {
+      textEl.textContent = fallbackCue || '';
+    }
+  }
 
   // ── 더미 데이터 (브라우저 직접 열기용) ──
   if (window.location.protocol === 'file:') {
@@ -525,8 +607,8 @@
       beatsPerBar: 4,
       sectionLengthBars: 8,
       key: 'G',
-      lyricCue: '"찬양해 찬양해 온 맘 다해"',
-      nextLyricCue: '"주님 앞에 나아가..."',
+      lyricCue: '찬양해 찬양해\n온 맘 다해',
+      nextLyricCue: '주님 앞에 나아가',
       note: '건반 오른손만, 드럼 빌드업 3마디 전',
       nextNote: '다이나믹 내리고 시작',
       chords: ['C', 'G/B', 'Am', 'C/G', 'Dm7', 'G7sus4', 'C', 'Fmaj7'],
