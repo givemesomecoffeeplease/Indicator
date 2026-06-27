@@ -31,6 +31,63 @@ Indicator/Indicator/
 └── Resources/index.html  # 브라우저 표시 화면
 ```
 
+## 2026-06-27 작업 내역 (4차) — 설계 확정 (미구현)
+
+### 싱어 뷰 + 가사/코드 편집기 + 카포 기능 설계
+
+> 상세 플랜: `/Users/heehan/.claude/plans/immutable-discovering-patterson.md`
+
+#### 라우팅 변경
+- `GET /` → 역할 선택 랜딩 (localStorage 기억)
+- `GET /band` → 기존 index.html (경로만 변경)
+- `GET /singer` → 신규 singer.html
+- `GET /api/sections` → 현재 Logic 섹션 목록 + 마디 수 JSON
+
+#### 신규 데이터 모델 (`Models.swift`)
+```swift
+struct LyricToken: Codable, Equatable {
+    enum TokenType: String, Codable { case char, ghost, br }
+    var type: TokenType; var char: String?; var chord: String?
+}
+struct InstChordSlot: Codable, Equatable { var pos: Int; var name: String }
+struct LyricSlide: Codable, Equatable {
+    var startBar: Int; var barCount: Int; var isInstrumental: Bool
+    var tokens: [LyricToken]; var instChords: [[InstChordSlot]]; var singerNote: String
+}
+// SectionData에 slides: [LyricSlide] 추가 (기본값 [], 하위호환)
+// IndicatorState에 currentSlideTokens, nextSlideTokens, nextSongName, nextSongKey 추가
+```
+
+#### 코드 입력 정규화 규칙
+- 근음 뒤 `b` → 플랫 (`bb`→B♭, `eb`→E♭)
+- 근음 뒤 `s` → 샵, **단 다음 글자가 `u`이면 sus** (`cs7`→C#7, `csus4`→Csus4)
+- `#` 병행 지원
+- 카포: `localStorage['capo']` 기기별 독립, JS 렌더링 시 변환
+
+#### 가사 편집기 UX (`/edit`)
+- 마디 타임라인: **드래그 또는 Shift+클릭**으로 마디 범위 선택 → "슬라이드로 지정"
+- 2단계 편집: ① 가사 textarea → ② 코드 입력 (글자 클릭 후 직접 입력, Enter/Space 확정)
+- Tab → ghost 빈칸 추가 (가사 뒤 코드 삽입용) / × 또는 Backspace → ghost 삭제
+- 간주 모드: 8분음표 그리드 8칸 (`1, +, 2, +, 3, +, 4, +`), 4마디 한 행
+- 마커 이름 변경 시 연결 끊긴 섹션 표시 + 수동 재매핑 지원
+
+#### 싱어 뷰 레이아웃 (레퍼런스 확정)
+```
+┌─────────────────────────────────────────┐ ← 황금색 테두리
+│ [C]          [G]   ← 코드 글자 비례 위치│
+│ 현재 가사 (흰색 크게, 줄바꿈 보존)      │ ← 왼쪽에 섹션명 세로
+└─────────────────────────────────────────┘
+           [ 카운트다운 작게 · 중앙 ]
+┌─────────────────────────────────────────┐
+│ 다음 가사 (희미하게)                    │
+└─────────────────────────────────────────┘
+┌──────────┬──────────────────┬───────────┐
+│ 시계     │ 현재곡명 + 키    │ 다음곡+키 │
+└──────────┴──────────────────┴───────────┘
+```
+
+---
+
 ## 2026-06-27 작업 내역 (3차)
 
 ### 상태 메뉴 체크리스트 개선
