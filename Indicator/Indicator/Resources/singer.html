@@ -97,13 +97,30 @@
     min-width: 0;
   }
 
+  .card-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-shrink: 0;
+    margin-bottom: 6px;
+    gap: 8px;
+    min-width: 0;
+  }
   #cur-section-label {
     font-size: 13px;
     font-weight: 700;
     color: #5DCAA5;
     letter-spacing: 0.06em;
     flex-shrink: 0;
-    margin-bottom: 6px;
+  }
+  #cur-singer-note {
+    font-size: 12px;
+    font-weight: 700;
+    color: #E8A840;
+    text-align: right;
+    flex-shrink: 1;
+    min-width: 0;
+    line-height: 1.3;
   }
 
   #cur-lyric-wrap {
@@ -181,13 +198,30 @@
     min-width: 0;
   }
 
+  .nxt-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-shrink: 0;
+    margin-bottom: 4px;
+    gap: 6px;
+    min-width: 0;
+  }
   #nxt-section-label {
     font-size: 11px;
     font-weight: 700;
     color: #3a3a52;
     letter-spacing: 0.06em;
     flex-shrink: 0;
-    margin-bottom: 4px;
+  }
+  #nxt-singer-note {
+    font-size: 10px;
+    font-weight: 700;
+    color: #b07820;
+    text-align: right;
+    flex-shrink: 1;
+    min-width: 0;
+    line-height: 1.3;
   }
 
   #nxt-lyric-wrap {
@@ -265,7 +299,10 @@
 
   <div id="cur-box">
     <div id="cur-content">
-      <div id="cur-section-label">—</div>
+      <div class="card-top-row">
+        <div id="cur-section-label">—</div>
+        <div id="cur-singer-note" class="hidden"></div>
+      </div>
       <div id="cur-lyric-wrap">
         <div id="cur-chords"></div>
         <div id="cur-lyric"></div>
@@ -278,7 +315,10 @@
 
   <div id="nxt-box">
     <div id="nxt-content">
-      <div id="nxt-section-label"></div>
+      <div class="nxt-top-row">
+        <div id="nxt-section-label"></div>
+        <div id="nxt-singer-note" class="hidden"></div>
+      </div>
       <div id="nxt-lyric-wrap">
         <div id="nxt-chords"></div>
         <div id="nxt-lyric"></div>
@@ -407,11 +447,17 @@
     $('cur-section-label').textContent = sec.startsWith('#') ? '' : (sec || '—');
     renderLyric($('cur-chords'), $('cur-lyric'), 'chord-above',
                 s.currentSlideTokens, s.lyricCue);
+    const curNote = s.singerNote || '';
+    $('cur-singer-note').textContent = curNote;
+    $('cur-singer-note').classList.toggle('hidden', !curNote);
 
     // 다음 섹션
     const nxtSec = s.nextSection || '';
     const nxtIsSong = s.nextSectionIsSong || nxtSec.startsWith('#');
     $('nxt-section-label').textContent = nxtIsSong ? '' : nxtSec;
+    const nxtNote = s.nextSingerNote || '';
+    $('nxt-singer-note').textContent = nxtNote;
+    $('nxt-singer-note').classList.toggle('hidden', !nxtNote || nxtIsSong);
 
     if (nxtIsSong) {
       const songName = s.nextSongName || nxtSec.replace(/^#/, '');

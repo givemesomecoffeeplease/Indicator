@@ -191,19 +191,6 @@ class WebServer {
     }
 
     private func buildEditHTML(markers: [Marker]) -> String {
-        // Helper: LyricToken array → editable [chord]text string
-        func tokenText(_ tokens: [LyricToken]) -> String {
-            tokens.map { t in
-                switch t.type {
-                case .br:    return "\n"
-                case .ghost: return t.chord.map { "[\($0)]" } ?? ""
-                case .char:
-                    let pfx = t.chord.map { "[\($0)]" } ?? ""
-                    return pfx + (t.char ?? "")
-                }
-            }.joined()
-        }
-
         // JSON string escape
         func j(_ s: String) -> String {
             s.replacingOccurrences(of: "\\", with: "\\\\")
@@ -213,29 +200,40 @@ class WebServer {
              .replacingOccurrences(of: "\t", with: "\\t")
         }
 
-        // Build songs data with existing lyrics
-        var songs: [(name: String, sections: [(sec: String, text: String, note: String)])] = []
+        // Encode array to JSON string
+        func encodeJSON<T: Encodable>(_ val: T) -> String {
+            guard let data = try? JSONEncoder().encode(val),
+                  let s = String(data: data, encoding: .utf8) else { return "[]" }
+            return s
+        }
+
+        // Build songs data (with slides + totalBars)
+        struct SecInfo {
+            var sec: String; var startBar: Int; var totalBars: Int
+            var slidesJson: String; var sessionNote: String; var singerNote: String
+        }
+        var songs: [(name: String, sections: [SecInfo])] = []
         var curSong = ""
-        for m in markers {
+        for (i, m) in markers.enumerated() {
             if m.isSong {
                 curSong = m.displayName
                 songs.append((name: curSong, sections: []))
             } else if !curSong.isEmpty {
                 let d = getLyric?(curSong, m.displayName)
-                var text = ""
-                if let tokens = d?.slides.first?.tokens, !tokens.isEmpty {
-                    text = tokenText(tokens)
-                } else {
-                    text = d?.lyricCue ?? ""
-                }
-                songs[songs.count - 1].sections.append((m.displayName, text, d?.note ?? ""))
+                let slidesJson = encodeJSON(d?.slides ?? [LyricSlide]())
+                let nextBar = (i + 1 < markers.count) ? markers[i + 1].bar : m.bar
+                let totalBars = max(0, nextBar - m.bar)
+                songs[songs.count - 1].sections.append(
+                    SecInfo(sec: m.displayName, startBar: m.bar, totalBars: totalBars,
+                            slidesJson: slidesJson, sessionNote: d?.sessionNote ?? "", singerNote: d?.singerNote ?? "")
+                )
             }
         }
 
         // Embed as JSON
         let songsJson = "[" + songs.map { song in
             let secs = "[" + song.sections.map { sec in
-                "{\"sec\":\"\(j(sec.sec))\",\"text\":\"\(j(sec.text))\",\"note\":\"\(j(sec.note))\"}"
+                "{\"sec\":\"\(j(sec.sec))\",\"startBar\":\(sec.startBar),\"totalBars\":\(sec.totalBars),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\"}"
             }.joined(separator: ",") + "]"
             return "{\"song\":\"\(j(song.name))\",\"sections\":\(secs)}"
         }.joined(separator: ",") + "]"
@@ -247,44 +245,85 @@ class WebServer {
         <html lang="ko">
         <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Indicator 가사 편집</title>
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>가사 편집</title>
         <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        :root { --accent: #007aff; --bg: #f2f2f7; --card: #fff; --border: #d1d1d6; --text: #1d1d1f; --sub: #6e6e73; }
-        body { font-family: -apple-system, sans-serif; background: var(--bg); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        #hdr { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--card); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-        #hdr h1 { font-size: 17px; font-weight: 700; flex: 1; }
-        #save-msg { font-size: 13px; color: #34c759; font-weight: 600; opacity: 0; transition: opacity .3s; }
-        .btn { padding: 7px 18px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }
-        .btn:active { opacity: .8; }
-        .btn-sec { background: #5856d6; }
-        #layout { display: flex; flex: 1; overflow: hidden; }
-        #sidebar { width: 220px; flex-shrink: 0; overflow-y: auto; background: var(--card); border-right: 1px solid var(--border); padding: 8px 0; }
-        .song-hd { padding: 10px 14px 3px; font-size: 11px; font-weight: 700; color: var(--sub); letter-spacing: .5px; text-transform: uppercase; }
-        .sec-row { padding: 7px 14px 7px 22px; font-size: 14px; color: var(--text); cursor: pointer; border-left: 3px solid transparent; }
-        .sec-row:hover { background: #f0f0f5; }
-        .sec-row.active { background: #e5eeff; color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
-        .sec-row.dirty::after { content: "●"; font-size: 8px; color: var(--accent); margin-left: 5px; vertical-align: middle; }
-        #main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
-        #empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--sub); font-size: 15px; }
-        #panel { display: none; padding: 24px; flex-direction: column; gap: 18px; }
-        #panel.show { display: flex; }
-        #panel-title { font-size: 22px; font-weight: 700; }
-        .lbl { font-size: 11px; font-weight: 700; color: var(--sub); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 6px; }
-        #ta { width: 100%; min-height: 160px; border: 1.5px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 17px; line-height: 1.8; font-family: -apple-system, sans-serif; outline: none; resize: vertical; }
-        #ta:focus { border-color: var(--accent); }
-        .hint { font-size: 12px; color: var(--sub); margin-top: 5px; }
-        #preview { background: #1c1c1e; border-radius: 10px; padding: 16px 18px; min-height: 56px; }
-        .pv-line { display: flex; flex-wrap: wrap; align-items: flex-end; min-height: 44px; }
-        .cc { display: inline-flex; flex-direction: column; align-items: center; }
-        .ca { font-size: 13px; color: #5DCAA5; font-weight: 700; min-height: 16px; line-height: 1; white-space: nowrap; padding: 0 2px; }
-        .ct { font-size: 22px; color: #e8e8ed; line-height: 1.3; }
-        #ni { width: 100%; border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 15px; font-family: -apple-system, sans-serif; outline: none; }
-        #ni:focus { border-color: var(--accent); }
-        #export-box { border-top: 1px solid var(--border); padding: 20px 24px; flex-shrink: 0; }
-        #export-box h2 { font-size: 11px; font-weight: 700; color: var(--sub); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
-        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+        *{box-sizing:border-box;margin:0;padding:0}
+        :root{--accent:#007aff;--bg:#f2f2f7;--card:#fff;--border:#d1d1d6;--text:#1d1d1f;--sub:#6e6e73;--teal:#5DCAA5;--red:#ff453a;--purple:#5856d6;--orange:#ff9500}
+        body{font-family:-apple-system,sans-serif;background:var(--bg);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+        #hdr{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--card);border-bottom:1px solid var(--border);flex-shrink:0}
+        #hdr h1{font-size:17px;font-weight:700;flex:1}
+        #save-msg{font-size:13px;color:#34c759;font-weight:600;opacity:0;transition:opacity .3s}
+        .btn{padding:7px 18px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
+        .btn-sm{padding:5px 12px;font-size:13px;border-radius:7px}
+        .btn-ghost{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}
+        .btn-purple{background:var(--purple)}
+        .btn-red{background:transparent;color:var(--red);border:1.5px solid var(--red)}
+        .btn-red:hover{background:var(--red);color:#fff}
+        #layout{display:flex;flex:1;overflow:hidden}
+        #sidebar{width:190px;flex-shrink:0;overflow-y:auto;background:var(--card);border-right:1px solid var(--border);padding:8px 0}
+        .sb-hd{padding:10px 14px 3px;font-size:11px;font-weight:700;color:var(--sub);letter-spacing:.5px;text-transform:uppercase}
+        .sb-song{padding:9px 16px;font-size:14px;color:var(--text);cursor:pointer;border-left:3px solid transparent}
+        .sb-song:hover{background:#f0f0f5}
+        .sb-song.active{background:#e5eeff;color:var(--accent);border-left-color:var(--accent);font-weight:600}
+        .sb-song.dirty::after{content:"●";font-size:8px;color:var(--accent);margin-left:6px;vertical-align:middle}
+        #main{flex:1;overflow-y:auto}
+        #empty{display:flex;align-items:center;justify-content:center;height:100%;color:var(--sub);font-size:15px}
+        #song-view{display:none;padding:24px;flex-direction:column;gap:20px}
+        #song-title{font-size:22px;font-weight:700;color:var(--text)}
+        #export-box{border-top:1px solid var(--border);padding:16px 24px;flex-shrink:0;background:var(--card)}
+        #export-box h2{font-size:11px;font-weight:700;color:var(--sub);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
+        .btn-row{display:flex;gap:8px;flex-wrap:wrap}
+        .btn-sec{background:var(--purple)}
+        .sec-block{background:var(--card);border-radius:14px;overflow:hidden;border:1px solid var(--border)}
+        .sec-hdr{display:flex;align-items:center;gap:8px;padding:12px 18px;flex-wrap:wrap}
+        .sec-arrow{font-size:11px;color:var(--sub);flex-shrink:0;width:14px}
+        .sec-name{font-size:16px;font-weight:700;color:var(--text)}
+        .sec-bars-info{font-size:12px;color:var(--sub)}
+        .capo-wrap{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--sub);margin-left:auto}
+        .capo-inp{width:36px;border:1px solid var(--border);border-radius:5px;padding:3px 4px;font-size:12px;text-align:center;outline:none}
+        .capo-inp:focus{border-color:var(--accent)}
+        .note-pair{display:flex;gap:6px}
+        .note-inp-sm{border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;outline:none;width:130px}
+        .note-inp-sm:focus{border-color:var(--accent)}
+        .bar-tl-area{padding:10px 18px 8px;background:#f8f8fc;border-bottom:1px solid var(--border)}
+        .bar-tl{display:flex;align-items:center;overflow-x:auto;padding-bottom:4px;user-select:none}
+        .bar-box{width:34px;height:42px;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;position:relative}
+        .bar-box .bn{font-size:9px;color:rgba(0,0,0,.3);position:absolute;bottom:2px}
+        .bar-box.free{background:#e4e4ee;color:#aaa}
+        .bar-box.seg-owned{color:#fff}
+        .div-gap{width:10px;height:42px;display:flex;align-items:center;justify-content:center;cursor:col-resize;flex-shrink:0;position:relative}
+        .div-gap::after{content:'';width:2px;height:65%;background:transparent;border-radius:1px;transition:background .1s}
+        .div-gap:hover::after{background:rgba(0,122,255,.5)}
+        .div-gap.active::after{background:var(--orange);width:3px;height:85%}
+        .segs-area{padding:10px 18px 14px;display:flex;flex-direction:column;gap:10px}
+        .seg-card{border:1.5px solid var(--border);border-radius:10px;overflow:hidden}
+        .seg-hdr{display:flex;align-items:center;gap:8px;padding:7px 12px;background:#f8f8fc;border-bottom:1px solid var(--border)}
+        .seg-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+        .seg-info{flex:1;font-size:12px;font-weight:600;color:var(--text)}
+        .seg-ed{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+        .mode-row{display:flex;gap:6px}
+        .lyric-ta{width:100%;min-height:72px;border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;font-size:16px;line-height:1.8;font-family:-apple-system,sans-serif;outline:none;resize:vertical}
+        .lyric-ta:focus{border-color:var(--accent)}
+        .chord-grid{background:#1c1c1e;border-radius:10px;padding:14px 16px;min-height:60px}
+        .tok-line{display:flex;flex-wrap:wrap;align-items:flex-end;min-height:50px;margin-bottom:2px;gap:2px}
+        .tok{display:inline-flex;flex-direction:column;align-items:center;position:relative;border-radius:4px;padding:2px 4px;cursor:pointer;min-width:18px}
+        .tok:hover{background:rgba(255,255,255,.09)}
+        .tok.editing{background:rgba(93,202,165,.15);outline:1.5px solid var(--teal)}
+        .tok-ca{font-size:13px;color:var(--teal);font-weight:700;line-height:1;white-space:nowrap;min-height:16px;text-align:center}
+        .tok-ch{font-size:22px;color:#e8e8ed;line-height:1.3;text-align:center}
+        .tok-ghost{min-width:72px}
+        .tok-ghost .tok-ch{color:#555;font-size:18px}
+        .tok-del{position:absolute;top:-6px;right:-6px;width:16px;height:16px;background:var(--red);border-radius:50%;color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2}
+        .chord-inp-pop{font-size:13px;background:#2c2c2e;border:1.5px solid var(--teal);border-radius:5px;color:var(--teal);font-weight:700;text-align:center;outline:none;padding:2px 6px;width:64px;position:absolute;bottom:calc(100% + 3px);left:50%;transform:translateX(-50%);z-index:20}
+        .add-ghost-btn{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:36px;background:rgba(255,255,255,.07);border-radius:5px;color:#666;font-size:18px;cursor:pointer;align-self:flex-end;margin-bottom:4px;padding:0 6px;flex-shrink:0}
+        .add-ghost-btn:hover{background:rgba(255,255,255,.16);color:#bbb}
+        .inst-grid{display:flex;flex-wrap:wrap;gap:8px;padding:4px 0}
+        .inst-bar-inp{display:flex;flex-direction:column;align-items:center;gap:4px}
+        .inst-bar-inp label{font-size:10px;color:#888;font-weight:600}
+        .inst-chord-inp{width:60px;border:1.5px solid var(--border);border-radius:6px;padding:6px 4px;font-size:14px;font-weight:700;text-align:center;outline:none;font-family:-apple-system,sans-serif}
+        .inst-chord-inp:focus{border-color:var(--teal)}
+        .hidden{display:none!important}
         </style>
         </head>
         <body>
@@ -294,187 +333,441 @@ class WebServer {
           <button class="btn" onclick="saveAll()">저장</button>
         </div>
         <div id="layout">
-          <div id="sidebar"></div>
+          <div id="sidebar"><div class="sb-hd">곡 목록</div></div>
           <div id="main">
-            <div id="empty">← 섹션을 선택하세요</div>
-            <div id="panel">
-              <div id="panel-title"></div>
-              <div>
-                <div class="lbl">가사 (코드 포함)</div>
-                <textarea id="ta" placeholder="[G]찬양해 [D]찬양해&#10;[Em]온 맘 다해 [C]주를"></textarea>
-                <div class="hint">[코드명]글자 형식으로 코드를 삽입하세요. Enter = 줄바꿈.</div>
-              </div>
-              <div>
-                <div class="lbl">미리보기</div>
-                <div id="preview"><span style="color:#555;font-size:13px">가사를 입력하면 여기에 표시됩니다</span></div>
-              </div>
-              <div>
-                <div class="lbl">연주 노트</div>
-                <input id="ni" type="text" placeholder="예: 키 G, 템포 72">
-              </div>
-            </div>
-            <div id="export-box">
-              <h2>내보내기</h2>
-              <div class="btn-row">
-                <a href="/export/setlist" class="btn btn-sec" style="text-decoration:none">이번 세트리스트</a>
-                \(exportBtns)
-              </div>
+            <div id="empty">← 곡을 선택하세요</div>
+            <div id="song-view">
+              <div id="song-title"></div>
+              <div id="sections-list"></div>
             </div>
           </div>
         </div>
+        <div id="export-box">
+          <h2>내보내기</h2>
+          <div class="btn-row">
+            <a href="/export/setlist" class="btn btn-sm btn-sec" style="text-decoration:none">이번 세트리스트</a>
+            \(exportBtns)
+          </div>
+        </div>
         <script>
-        const DATA = \(songsJson);
-        let curSong = null, curSec = null;
-        const dirty = {};
+        const DATA=\(songsJson);
+        const COLORS=['#007aff','#34c759','#5856d6','#ff9500','#bf5af2','#30b0c7','#ff453a'];
+        const $=id=>document.getElementById(id);
+        let curSong=null;
+        const dirty={};
+        const secUI={};
 
-        function renderSidebar() {
-          const sb = document.getElementById('sidebar');
-          sb.innerHTML = '';
-          for (const song of DATA) {
-            const hd = document.createElement('div');
-            hd.className = 'song-hd';
-            hd.textContent = song.song;
-            sb.appendChild(hd);
-            for (const sec of song.sections) {
-              const key = song.song + '|||' + sec.sec;
-              const row = document.createElement('div');
-              row.className = 'sec-row' + (curSong === song.song && curSec === sec.sec ? ' active' : '') + (dirty[key] ? ' dirty' : '');
-              row.textContent = sec.sec;
-              row.addEventListener('click', () => selectSec(song.song, sec.sec));
-              sb.appendChild(row);
+        function normChord(s){
+          if(!s)return'';s=s.trim();if(!s)return'';
+          let out=s[0].toUpperCase()+s.slice(1);
+          out=out.replace(/([A-G])s(?!u)/g,'$1#');
+          out=out.replace(/([A-G])b(?!b)/g,'$1♭');
+          return out;
+        }
+
+        function dkOf(song,sec){return song+'|||'+sec;}
+        function ukOf(song,sec,idx){return song+'|||'+sec+'|||'+idx;}
+        function origSecOf(song,sec){return DATA.find(s=>s.song===song)?.sections.find(s=>s.sec===sec)||{};}
+
+        function loadState(song,sec){
+          const k=dkOf(song,sec);
+          if(dirty[k])return dirty[k];
+          const o=origSecOf(song,sec);
+          const secStart=o.startBar||0;
+          const slides=(o.slides||[]).filter(sl=>sl.tokens&&sl.tokens.length>0);
+          if(slides.length===0){
+            return{splits:[],segData:[{isInstrumental:false,tokens:[]}],sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0};
+          }
+          const sorted=[...slides].sort((a,b)=>a.startBar-b.startBar);
+          const splits=sorted.slice(0,-1).map(sl=>sl.startBar-secStart+sl.barCount-1);
+          const segData=sorted.map(sl=>({isInstrumental:sl.isInstrumental||false,tokens:sl.tokens||[]}));
+          return{splits,segData,sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0};
+        }
+
+        function setState(song,sec,st){
+          dirty[dkOf(song,sec)]=st;
+          document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
+        }
+
+        function getSegs(st,total){
+          const sp=[...st.splits].sort((a,b)=>a-b);
+          const starts=[0,...sp.map(p=>p+1)];
+          const ends=[...sp,total-1];
+          return starts.map((start,i)=>({barStart:start,barEnd:ends[i],barCount:ends[i]-start+1,segData:st.segData[i]||{isInstrumental:false,tokens:[]}}));
+        }
+
+        function tokensToPlain(toks){return(toks||[]).map(t=>t.type==='br'?'\\n':t.type==='char'?(t.char||''):'').join('');}
+        function textToTokens(text){return[...text].map(c=>c==='\\n'?{type:'br'}:{type:'char',char:c});}
+
+        function renderSidebar(){
+          const sb=$('sidebar');sb.innerHTML='<div class="sb-hd">곡 목록</div>';
+          const songs=[...new Map(DATA.map(s=>[s.song,s])).values()];
+          songs.forEach(s=>{
+            const el=document.createElement('div');
+            el.className='sb-song'+(curSong===s.song?' active':'')+(Object.keys(dirty).some(k=>k.startsWith(s.song+'|||'))?' dirty':'');
+            el.dataset.song=s.song;el.textContent=s.song;
+            el.addEventListener('click',()=>selectSong(s.song));
+            sb.appendChild(el);
+          });
+        }
+
+        function selectSong(song){
+          curSong=song;renderSidebar();
+          $('empty').style.display='none';
+          const sv=$('song-view');sv.style.display='flex';
+          $('song-title').textContent=song;
+          renderSections(song);
+        }
+
+        function renderSections(song){
+          const list=$('sections-list');list.innerHTML='';
+          const songData=DATA.find(s=>s.song===song);
+          if(!songData)return;
+          songData.sections.forEach((sec,secIdx)=>{
+            const ukey=ukOf(song,sec.sec,secIdx);
+            if(!secUI[ukey])secUI[ukey]={open:false};
+            list.appendChild(createSecBlock(song,sec,secIdx));
+          });
+        }
+
+        function createSecBlock(song,sec,gidx){
+          const ukey=ukOf(song,sec.sec,gidx);
+          const ui=secUI[ukey];
+          const st=loadState(song,sec.sec);
+          const total=sec.totalBars||0;
+          const block=document.createElement('div');
+          block.className='sec-block';block.dataset.ukey=ukey;
+
+          const hdr=document.createElement('div');hdr.className='sec-hdr';hdr.style.cursor='pointer';
+          hdr.addEventListener('click',()=>{ui.open=!ui.open;refreshBlock(block,song,sec,gidx);});
+
+          const arrow=document.createElement('span');arrow.className='sec-arrow';arrow.textContent=ui.open?'▾':'▸';
+          const nameEl=document.createElement('span');nameEl.className='sec-name';nameEl.textContent=sec.sec;
+          const barsEl=document.createElement('span');barsEl.className='sec-bars-info';barsEl.textContent=total+'마디';
+
+          const capoW=document.createElement('div');capoW.className='capo-wrap';
+          capoW.innerHTML='카포 <input class="capo-inp" type="number" min="0" max="11" value="'+(st.capo||0)+'">';
+          const capoInp=capoW.querySelector('.capo-inp');
+          capoInp.addEventListener('click',e=>e.stopPropagation());
+          capoInp.addEventListener('change',e=>{e.stopPropagation();setState(song,sec.sec,{...loadState(song,sec.sec),capo:parseInt(capoInp.value)||0});});
+
+          const noteP=document.createElement('div');noteP.className='note-pair';
+          const snInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'세션 노트',value:st.sessionNote});
+          const gnInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'싱어 노트',value:st.singerNote});
+          [snInp,gnInp].forEach(inp=>inp.addEventListener('click',e=>e.stopPropagation()));
+          snInp.addEventListener('input',()=>setState(song,sec.sec,{...loadState(song,sec.sec),sessionNote:snInp.value}));
+          gnInp.addEventListener('input',()=>setState(song,sec.sec,{...loadState(song,sec.sec),singerNote:gnInp.value}));
+          noteP.appendChild(snInp);noteP.appendChild(gnInp);
+
+          hdr.appendChild(arrow);hdr.appendChild(nameEl);hdr.appendChild(barsEl);hdr.appendChild(capoW);hdr.appendChild(noteP);
+          block.appendChild(hdr);
+
+          if(ui.open){
+            const tlArea=document.createElement('div');tlArea.className='bar-tl-area';
+            renderBarTl(tlArea,song,sec,gidx);block.appendChild(tlArea);
+            const sa=document.createElement('div');sa.className='segs-area';
+            renderSegsArea(sa,song,sec,gidx);block.appendChild(sa);
+          }
+          return block;
+        }
+
+        function refreshBlock(block,song,sec,gidx){block.replaceWith(createSecBlock(song,sec,gidx));}
+        function getBlock(ukey){return document.querySelector('.sec-block[data-ukey="'+ukey+'"]');}
+
+        function renderBarTl(container,song,sec,gidx){
+          container.innerHTML='';
+          const ukey=ukOf(song,sec.sec,gidx);
+          const st=loadState(song,sec.sec);
+          const total=sec.totalBars||0;
+          const segs=getSegs(st,total);
+          const tl=document.createElement('div');tl.className='bar-tl';
+          for(let i=0;i<total;i++){
+            const segIdx=segs.findIndex(sg=>i>=sg.barStart&&i<=sg.barEnd);
+            const box=document.createElement('div');box.className='bar-box';
+            if(segIdx>=0){box.classList.add('seg-owned');box.style.background=COLORS[segIdx%COLORS.length];}
+            else box.classList.add('free');
+            const bn=document.createElement('span');bn.className='bn';bn.textContent=String(i+1);box.appendChild(bn);
+            tl.appendChild(box);
+            if(i<total-1){
+              const gap=document.createElement('div');
+              const isActive=st.splits.includes(i);
+              gap.className='div-gap'+(isActive?' active':'');
+              gap.title=isActive?'구분 제거':'여기서 나누기';
+              gap.addEventListener('click',()=>{
+                const cur=loadState(song,sec.sec);
+                let splits=[...cur.splits];let segData=[...cur.segData];
+                const segs2=getSegs(cur,total);
+                if(splits.includes(i)){
+                  const idx=splits.indexOf(i);splits.splice(idx,1);
+                  const merged={isInstrumental:segData[idx].isInstrumental,tokens:[...(segData[idx].tokens||[]),...(segData[idx+1]?.tokens||[])]};
+                  segData.splice(idx,2,merged);
+                }else{
+                  const idx=segs2.findIndex(sg=>i>=sg.barStart&&i<=sg.barEnd);
+                  splits.push(i);splits.sort((a,b)=>a-b);
+                  const orig=segData[idx]||{isInstrumental:false,tokens:[]};
+                  segData.splice(idx,1,{isInstrumental:orig.isInstrumental,tokens:orig.tokens},{isInstrumental:orig.isInstrumental,tokens:[]});
+                }
+                setState(song,sec.sec,{...cur,splits,segData});
+                const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
+              });
+              tl.appendChild(gap);
             }
           }
+          container.appendChild(tl);
         }
 
-        function selectSec(song, sec) {
-          flushCurrent();
-          curSong = song; curSec = sec;
-          const key = song + '|||' + sec;
-          const sd = DATA.find(s => s.song === song)?.sections.find(s => s.sec === sec) || {};
-          const state = dirty[key] || { text: sd.text || '', note: sd.note || '' };
-          document.getElementById('panel-title').textContent = sec;
-          document.getElementById('ta').value = state.text;
-          document.getElementById('ni').value = state.note;
-          document.getElementById('empty').style.display = 'none';
-          document.getElementById('panel').classList.add('show');
-          updatePreview();
-          renderSidebar();
-          document.getElementById('ta').focus();
+        const chordEditState={};
+
+        function renderSegsArea(container,song,sec,gidx){
+          container.innerHTML='';
+          const st=loadState(song,sec.sec);
+          const total=sec.totalBars||0;
+          const segs=getSegs(st,total);
+          const secStart=origSecOf(song,sec.sec).startBar||0;
+          segs.forEach((sg,i)=>container.appendChild(createSegCard(song,sec,gidx,i,sg,segs.length,secStart,total)));
         }
 
-        function flushCurrent() {
-          if (!curSong || !curSec) return;
-          const key = curSong + '|||' + curSec;
-          const text = document.getElementById('ta').value;
-          const note = document.getElementById('ni').value;
-          const sd = DATA.find(s => s.song === curSong)?.sections.find(s => s.sec === curSec) || {};
-          if (text !== (sd.text || '') || note !== (sd.note || '')) {
-            dirty[key] = { text, note };
-          } else {
-            delete dirty[key];
-          }
-        }
+        function createSegCard(song,sec,gidx,segIdx,sg,totalSegs,secStart,total){
+          const ukey=ukOf(song,sec.sec,gidx);
+          const ceKey=ukey+'|||'+segIdx;
+          if(!chordEditState[ceKey])chordEditState[ceKey]={chordMode:false,editIdx:null};
+          const ces=chordEditState[ceKey];
+          const card=document.createElement('div');card.className='seg-card';card.dataset.si=String(segIdx);
 
-        function markDirty() {
-          if (!curSong || !curSec) return;
-          dirty[curSong + '|||' + curSec] = { text: document.getElementById('ta').value, note: document.getElementById('ni').value };
-          document.querySelectorAll('.sec-row.active').forEach(r => r.classList.add('dirty'));
-        }
+          const hd=document.createElement('div');hd.className='seg-hdr';
+          const dot=document.createElement('div');dot.className='seg-dot';dot.style.background=COLORS[segIdx%COLORS.length];
+          const info=document.createElement('div');info.className='seg-info';
+          info.textContent='마디 '+(sg.barStart+1)+(sg.barCount>1?'~'+(sg.barEnd+1):'');
+          const typeBtn=document.createElement('button');typeBtn.className='btn btn-sm btn-ghost';
+          typeBtn.textContent=sg.segData.isInstrumental?'🎵 간주':'🎤 가사';
+          typeBtn.addEventListener('click',()=>{
+            const st=loadState(song,sec.sec);const segData=[...st.segData];
+            segData[segIdx]={...segData[segIdx],isInstrumental:!segData[segIdx].isInstrumental};
+            setState(song,sec.sec,{...st,segData});
+            const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
+          });
+          hd.appendChild(dot);hd.appendChild(info);hd.appendChild(typeBtn);card.appendChild(hd);
 
-        document.getElementById('ta').addEventListener('input', () => { markDirty(); updatePreview(); });
-        document.getElementById('ni').addEventListener('input', markDirty);
-
-        function parseLyric(text) {
-          const tokens = [];
-          const chars = [...text];
-          let i = 0;
-          while (i < chars.length) {
-            const c = chars[i];
-            if (c === '\\n') {
-              tokens.push({ type: 'br' });
-              i++;
-            } else if (c === '[') {
-              i++;
-              let chord = '';
-              while (i < chars.length && chars[i] !== ']' && chars[i] !== '\\n') chord += chars[i++];
-              if (chars[i] === ']') i++;
-              if (i < chars.length && chars[i] !== '[' && chars[i] !== '\\n') {
-                const tok = { type: 'char', char: chars[i] };
-                if (chord) tok.chord = chord;
-                tokens.push(tok); i++;
-              } else {
-                const tok = { type: 'ghost' };
-                if (chord) tok.chord = chord;
-                tokens.push(tok);
+          const edArea=document.createElement('div');edArea.className='seg-ed';
+          if(sg.segData.isInstrumental){
+            renderInstEditor(edArea,song,sec,gidx,segIdx,sg,secStart,total);
+          }else{
+            const modeRow=document.createElement('div');modeRow.className='mode-row';
+            const lyricBtn=document.createElement('button');lyricBtn.className='btn btn-sm'+(ces.chordMode?' btn-ghost':'');lyricBtn.textContent='가사';
+            lyricBtn.addEventListener('click',()=>{if(ces.chordMode){ces.chordMode=false;ces.editIdx=null;refreshSegCard(card,song,sec,gidx,segIdx,total);}});
+            const chordBtn=document.createElement('button');chordBtn.className='btn btn-sm'+(ces.chordMode?'':' btn-ghost');chordBtn.textContent='코드 편집';
+            chordBtn.addEventListener('click',()=>{
+              if(!ces.chordMode){
+                const ta=card.querySelector('.lyric-ta');
+                if(ta){const st=loadState(song,sec.sec);const segData=[...st.segData];
+                  if(tokensToPlain(segData[segIdx].tokens||[])!==ta.value){segData[segIdx]={...segData[segIdx],tokens:textToTokens(ta.value)};setState(song,sec.sec,{...st,segData});}
+                }
+                ces.chordMode=true;ces.editIdx=null;refreshSegCard(card,song,sec,gidx,segIdx,total);
               }
-            } else {
-              tokens.push({ type: 'char', char: c });
-              i++;
+            });
+            modeRow.appendChild(lyricBtn);modeRow.appendChild(chordBtn);edArea.appendChild(modeRow);
+            if(!ces.chordMode){
+              const ta=document.createElement('textarea');ta.className='lyric-ta';
+              ta.placeholder='가사를 입력하세요\\nEnter = 줄바꿈';
+              ta.value=tokensToPlain(sg.segData.tokens||[]);
+              ta.addEventListener('input',()=>{
+                const st=loadState(song,sec.sec);const segData=[...st.segData];
+                segData[segIdx]={...segData[segIdx],tokens:textToTokens(ta.value)};
+                setState(song,sec.sec,{...st,segData});
+              });
+              edArea.appendChild(ta);
+            }else{
+              const grid=document.createElement('div');grid.className='chord-grid';
+              renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);edArea.appendChild(grid);
             }
           }
-          return tokens;
+          card.appendChild(edArea);
+          return card;
         }
 
-        function updatePreview() {
-          const tokens = parseLyric(document.getElementById('ta').value);
-          const pv = document.getElementById('preview');
-          if (!tokens.length) {
-            pv.innerHTML = '<span style="color:#555;font-size:13px">가사를 입력하면 여기에 표시됩니다</span>';
-            return;
-          }
-          const lines = [[]];
-          for (const t of tokens) {
-            if (t.type === 'br') lines.push([]);
-            else lines[lines.length - 1].push(t);
-          }
-          pv.innerHTML = lines.map(line => {
-            if (!line.length) return '<div class="pv-line" style="height:10px"></div>';
-            return '<div class="pv-line">' + line.map(t => {
-              const ca = '<span class="ca">' + (t.chord ? esc(t.chord) : '') + '</span>';
-              const ch = t.char === ' ' ? '&ensp;' : esc(t.char || '');
-              return '<span class="cc">' + ca + '<span class="ct">' + ch + '</span></span>';
-            }).join('') + '</div>';
-          }).join('');
+        function refreshSegCard(card,song,sec,gidx,segIdx,total){
+          const st=loadState(song,sec.sec);const segs=getSegs(st,total);
+          const secStart=origSecOf(song,sec.sec).startBar||0;
+          card.replaceWith(createSegCard(song,sec,gidx,segIdx,segs[segIdx],segs.length,secStart,total));
         }
 
-        function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        function renderChordGrid(grid,song,sec,gidx,segIdx,ceKey){
+          const ces=chordEditState[ceKey];
+          const st=loadState(song,sec.sec);
+          const total=origSecOf(song,sec.sec).totalBars||0;
+          const tokens=getSegs(st,total)[segIdx]?.segData.tokens||[];
+          grid.innerHTML='';
+          let line=newTokLine();let lineLastIdx=-1;
+          const finishLine=brIdx=>{
+            line.appendChild(makeAddGhostBtn(song,sec,gidx,segIdx,ceKey,lineLastIdx>=0?lineLastIdx+1:brIdx));
+            grid.appendChild(line);line=newTokLine();lineLastIdx=-1;
+          };
+          tokens.forEach((t,ti)=>{
+            if(t.type==='br'){finishLine(ti+1);}
+            else{line.appendChild(makeTokEl(t,ti,song,sec,gidx,segIdx,ceKey));lineLastIdx=ti;}
+          });
+          finishLine(tokens.length);
+        }
 
-        function saveAll() {
-          flushCurrent();
-          if (!Object.keys(dirty).length) { showMsg('변경사항 없음'); return; }
-          const payload = {};
-          for (const [key, state] of Object.entries(dirty)) {
-            const sep = key.indexOf('|||');
-            const song = key.slice(0, sep), sec = key.slice(sep + 3);
-            if (!payload[song]) payload[song] = {};
-            const tokens = parseLyric(state.text);
-            const plain = tokens.map(t => t.type === 'br' ? '\\n' : (t.type === 'char' ? (t.char || '') : '')).join('');
-            payload[song][sec] = {
-              lyricCue: plain.split('\\n')[0] || '',
-              note: state.note,
-              slides: [{ startBar: 0, barCount: 0, isInstrumental: false, tokens: tokens, instChords: [], singerNote: '' }]
-            };
+        function newTokLine(){const el=document.createElement('div');el.className='tok-line';return el;}
+
+        function makeAddGhostBtn(song,sec,gidx,segIdx,ceKey,at){
+          const btn=document.createElement('span');btn.className='add-ghost-btn';btn.textContent='+';
+          btn.addEventListener('click',()=>{
+            commitChordEdit(song,sec,gidx,segIdx,ceKey);
+            const st=loadState(song,sec.sec);const segData=[...st.segData];
+            const toks=[...(segData[segIdx].tokens||[])];toks.splice(at,0,{type:'ghost'});
+            segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,{...st,segData});
+            const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
+            if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
+            setTimeout(()=>openChordInput(song,sec,gidx,segIdx,ceKey,at),0);
+          });
+          return btn;
+        }
+
+        function makeTokEl(t,ti,song,sec,gidx,segIdx,ceKey){
+          const ces=chordEditState[ceKey];
+          const el=document.createElement('span');el.className='tok tok-'+t.type;
+          if(ti===ces.editIdx)el.classList.add('editing');
+          if(ti===ces.editIdx){
+            const inp=document.createElement('input');inp.className='chord-inp-pop';
+            inp.value=t.chord||'';inp.placeholder='코드';
+            inp.addEventListener('keydown',e=>handleChordKey(e,ti,inp,song,sec,gidx,segIdx,ceKey));
+            inp.addEventListener('input',()=>{inp.value=inp.value.slice(0,1).toUpperCase()+inp.value.slice(1);});
+            inp.addEventListener('blur',()=>{if(ces.editIdx===ti){ces.editIdx=null;confirmChord(song,sec,gidx,segIdx,ceKey,ti,inp.value);}});
+            el.appendChild(inp);setTimeout(()=>{inp.focus();inp.select();},0);
+          }else if(t.chord){
+            const ca=document.createElement('span');ca.className='tok-ca';ca.textContent=t.chord;el.appendChild(ca);
           }
-          fetch('/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-            .then(r => r.json())
-            .then(() => {
-              for (const [key, state] of Object.entries(dirty)) {
-                const sep = key.indexOf('|||'), song = key.slice(0, sep), sec = key.slice(sep + 3);
-                const s = DATA.find(s => s.song === song)?.sections.find(s => s.sec === sec);
-                if (s) { s.text = state.text; s.note = state.note; }
+          const ch=document.createElement('span');ch.className='tok-ch';
+          ch.textContent=t.type==='ghost'?'·':(t.char===' '?' ':(t.char||''));
+          el.appendChild(ch);
+          if(t.type==='ghost'){
+            const del=document.createElement('span');del.className='tok-del';del.textContent='×';
+            del.addEventListener('click',e=>{
+              e.stopPropagation();commitChordEdit(song,sec,gidx,segIdx,ceKey);
+              const st=loadState(song,sec.sec);const segData=[...st.segData];
+              const toks=[...(segData[segIdx].tokens||[])];toks.splice(ti,1);
+              segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,{...st,segData});
+              const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
+              if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
+            });
+            el.appendChild(del);
+          }
+          el.addEventListener('click',()=>{if(ti!==ces.editIdx)openChordInput(song,sec,gidx,segIdx,ceKey,ti);});
+          return el;
+        }
+
+        function openChordInput(song,sec,gidx,segIdx,ceKey,ti){
+          const ces=chordEditState[ceKey];
+          if(ces.editIdx===ti)return;
+          if(ces.editIdx!==null){
+            const inp=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-inp-pop');
+            const v=inp?inp.value:null;const old=ces.editIdx;ces.editIdx=null;
+            if(v!==null)confirmChord(song,sec,gidx,segIdx,ceKey,old,v);
+          }
+          ces.editIdx=ti;
+          const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
+          if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
+        }
+
+        function commitChordEdit(song,sec,gidx,segIdx,ceKey){
+          const ces=chordEditState[ceKey];if(ces.editIdx===null)return;
+          const inp=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-inp-pop');
+          const v=inp?inp.value:null;const idx=ces.editIdx;ces.editIdx=null;
+          if(v!==null)confirmChord(song,sec,gidx,segIdx,ceKey,idx,v);
+        }
+
+        function confirmChord(song,sec,gidx,segIdx,ceKey,ti,val){
+          const chord=normChord(val);
+          const st=loadState(song,sec.sec);const segData=[...st.segData];
+          const toks=[...(segData[segIdx].tokens||[])];
+          if(toks[ti]){toks[ti]={...toks[ti]};if(chord)toks[ti].chord=chord;else delete toks[ti].chord;}
+          segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,{...st,segData});
+          const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
+          if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
+        }
+
+        function handleChordKey(e,ti,inp,song,sec,gidx,segIdx,ceKey){
+          const ces=chordEditState[ceKey];
+          if(e.key==='Enter'||e.key===' '){
+            e.preventDefault();ces.editIdx=null;confirmChord(song,sec,gidx,segIdx,ceKey,ti,inp.value);
+            const st=loadState(song,sec.sec);const total=origSecOf(song,sec.sec).totalBars||0;
+            const toks=getSegs(st,total)[segIdx]?.segData.tokens||[];
+            for(let j=ti+1;j<toks.length;j++){if(toks[j].type!=='br'){setTimeout(()=>openChordInput(song,sec,gidx,segIdx,ceKey,j),0);break;}}
+          }else if(e.key==='Escape'){
+            ces.editIdx=null;
+            const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
+            if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
+          }else if(e.key==='Tab'){
+            e.preventDefault();ces.editIdx=null;confirmChord(song,sec,gidx,segIdx,ceKey,ti,inp.value);
+            const st=loadState(song,sec.sec);const segData=[...st.segData];
+            const toks=[...(segData[segIdx].tokens||[])];toks.splice(ti+1,0,{type:'ghost'});
+            segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,{...st,segData});
+            const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
+            if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
+            setTimeout(()=>openChordInput(song,sec,gidx,segIdx,ceKey,ti+1),0);
+          }
+        }
+
+        function renderInstEditor(ed,song,sec,gidx,segIdx,sg,secStart,total){
+          const st=loadState(song,sec.sec);const segs=getSegs(st,total);
+          const existingToks=segs[segIdx]?.segData.tokens||[];
+          const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--sub);margin-bottom:8px';
+          hint.textContent='마디별 코드 입력 (s=♯, b=♭)';ed.appendChild(hint);
+          const grid=document.createElement('div');grid.className='inst-grid';
+          for(let b=0;b<sg.barCount;b++){
+            const wrap=document.createElement('div');wrap.className='inst-bar-inp';
+            const lbl=document.createElement('label');lbl.textContent='마디 '+(sg.barStart+b+1);
+            const inp=document.createElement('input');inp.className='inst-chord-inp';inp.type='text';
+            inp.value=normChord(existingToks[b]?.chord||'');inp.placeholder='–';
+            inp.addEventListener('input',()=>{inp.value=normChord(inp.value);});
+            inp.addEventListener('change',()=>{
+              const cur=loadState(song,sec.sec);const segData=[...cur.segData];
+              const capturedB=b;const capturedV=normChord(inp.value);
+              const newToks=Array(sg.barCount).fill(null).map((_,bi)=>({type:'ghost',chord:bi===capturedB?capturedV:(existingToks[bi]?.chord||'')})).filter(t=>t.chord);
+              segData[segIdx]={...segData[segIdx],tokens:newToks};setState(song,sec.sec,{...cur,segData});
+            });
+            wrap.appendChild(lbl);wrap.appendChild(inp);grid.appendChild(wrap);
+          }
+          ed.appendChild(grid);
+        }
+
+        function saveAll(){
+          if(!Object.keys(dirty).length){showMsg('변경사항 없음');return;}
+          const payload={};
+          for(const[k,st]of Object.entries(dirty)){
+            const sep=k.indexOf('|||'),song=k.slice(0,sep),sec=k.slice(sep+3);
+            if(!payload[song])payload[song]={};
+            const o=origSecOf(song,sec);
+            const secStart=o.startBar||0;const total=o.totalBars||0;
+            const segs=getSegs(st,total);
+            const slides=segs.map(sg=>({
+              startBar:secStart+sg.barStart,barCount:sg.barCount,
+              isInstrumental:!!sg.segData.isInstrumental,
+              tokens:sg.segData.tokens||[],instChords:[],singerNote:''
+            }));
+            const plain=tokensToPlain(segs[0]?.segData.tokens||[]);
+            payload[song][sec]={lyricCue:plain.split('\\n')[0]||'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides};
+          }
+          fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+            .then(r=>r.json())
+            .then(()=>{
+              for(const[k,st]of Object.entries(dirty)){
+                const sep=k.indexOf('|||'),song=k.slice(0,sep),sec=k.slice(sep+3);
+                const sd=DATA.find(x=>x.song===song)?.sections.find(x=>x.sec===sec);
+                if(sd){
+                  const segs=getSegs(st,sd.totalBars||0);
+                  sd.slides=segs.map(sg=>({startBar:(sd.startBar||0)+sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.tokens||[],instChords:[],singerNote:''}));
+                  sd.sessionNote=st.sessionNote;sd.singerNote=st.singerNote;
+                }
               }
-              for (const k in dirty) delete dirty[k];
-              renderSidebar();
-              showMsg('저장됐어요!');
-            }).catch(() => showMsg('저장 실패'));
+              for(const k in dirty)delete dirty[k];
+              renderSidebar();showMsg('저장됐어요!');
+            }).catch(()=>showMsg('저장 실패'));
         }
 
-        function showMsg(m) {
-          const el = document.getElementById('save-msg');
-          el.textContent = m;
-          el.style.opacity = '1';
-          setTimeout(() => el.style.opacity = '0', 2200);
-        }
+        function showMsg(m){const el=$('save-msg');el.textContent=m;el.style.opacity='1';setTimeout(()=>el.style.opacity='0',2200);}
 
         renderSidebar();
         </script>
@@ -527,7 +820,7 @@ class WebServer {
             else {
                 let d = getLyric?(currentSong, m.displayName)
                 let lc = csvEsc(d?.lyricCue ?? "")
-                let nt = csvEsc(d?.note ?? "")
+                let nt = csvEsc(d?.sessionNote ?? "")
                 csv += "\(csvEsc(currentSong)),\(csvEsc(m.displayName)),\(lc),\(nt)\n"
             }
         }
@@ -548,7 +841,7 @@ class WebServer {
             guard cols.count >= 4 else { continue }
             let (song, sec, lc, nt) = (cols[0], cols[1], cols[2], cols[3])
             guard !song.isEmpty, !sec.isEmpty else { continue }
-            saveLyrics?([song: [sec: SectionData(lyricCue: lc, note: nt)]])
+            saveLyrics?([song: [sec: SectionData(lyricCue: lc, sessionNote: nt)]])
         }
         onLyricsSaved?()
         send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")

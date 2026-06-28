@@ -31,6 +31,26 @@ Indicator/Indicator/
 └── Resources/index.html  # 브라우저 표시 화면
 ```
 
+## 2026-06-28 작업 내역 (3차)
+
+### Universal Binary 빌드 + GitHub Release 업데이트
+
+- Release 빌드 시 `ONLY_ACTIVE_ARCH=NO`, `ARCHS="arm64 x86_64"` → Universal Binary (Intel + Apple Silicon 동시 지원)
+- Deployment Target: macOS 14.0 → macOS 14 (Sonoma) + macOS 15 (Sequoia) 모두 지원
+- GitHub Releases v1.0.0: Universal Binary `.zip` 교체, 릴리즈 노트 갱신
+
+## 2026-06-28 작업 내역 (2차)
+
+### 에디터·밴드뷰·싱어뷰 UI 개편
+
+- `WebServer.swift`: 에디터 전면 교체 — 드래그 선택 방식 → 구분 bar 방식. 마디 박스 사이 gap 클릭으로 오렌지색 구분선 토글. 구분선 기준 세그먼트 자동 분리, 각 세그먼트에 가사/코드 에디터 독립 배치.
+- `WebServer.swift`: 기본 슬라이드 자동생성 제거 — 토큰 없는 슬라이드 필터링, 빈 섹션 = 1개 빈 세그먼트 표시.
+- `WebServer.swift`: 마디 번호 섹션 내 상대번호(1-based) 표시.
+- `WebServer.swift`: 같은 섹션명 링크 버그 수정 — uiKey=song|||sec|||idx(인스턴스별), dataKey=song|||sec(데이터 공유).
+- `WebServer.swift`: ghost token 4배 폭 (min-width:72px).
+- `Resources/index.html`: 밴드/세션 화면 재설계 — lyric-panel(우측 1/3) 제거, 지금/다음 2컬럼으로 단순화. 각 컬럼: 섹션명→가사+코드(chord-above)→세션노트. 진행률 바 전체 폭 독립 요소(#progress-outer)로 분리.
+- `Resources/singer.html`: 싱어 노트 표시 추가 — 현재/다음 카드 우상단에 노란색(#E8A840) 굵은 글씨로 singerNote/nextSingerNote 표시.
+
 ## 2026-06-28 작업 내역
 
 ### AX 폴링 재설계 + 싱어 뷰 + 가사 편집기
