@@ -128,28 +128,46 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
+    align-items: center;
     gap: 6px;
     min-height: 0;
   }
 
-  #cur-chords {
-    position: relative;
-    min-height: 20px;
+  /* 가사+코드 줄별 렌더 */
+  .lyric-line {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: center;
+    flex-wrap: nowrap;
   }
-  .chord-above {
+  .lyric-char {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .lyric-char.ghost { min-width: 0.8em; }
+  #cur-lyric-wrap .lyric-char {
+    font-size: clamp(36px, 8vw, 96px);
+    font-weight: 700;
+    line-height: 1.35;
+    color: #ffffff;
+  }
+  #nxt-lyric-wrap .lyric-char {
+    font-size: clamp(26px, 5.5vw, 64px);
+    font-weight: 600;
+    line-height: 1.35;
+    color: #555;
+  }
+  .chord-label {
     font-size: 13px; font-weight: 700;
     color: #5DCAA5;
-    position: absolute;
     white-space: nowrap;
+    line-height: 1.3;
   }
-
-  #cur-lyric {
-    font-size: clamp(18px, 4.5vw, 32px);
-    font-weight: 700;
-    line-height: 1.4;
-    color: #ffffff;
-    white-space: pre-wrap;
-    word-break: keep-all;
+  #nxt-lyric-wrap .chord-label {
+    font-size: 11px;
+    color: #3d7a6a;
   }
 
   /* ── 카운트다운 (카드 경계에 오버랩) ── */
@@ -229,6 +247,7 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
+    align-items: center;
     gap: 4px;
     min-height: 0;
   }
@@ -245,25 +264,6 @@
     letter-spacing: -0.02em;
   }
 
-  #nxt-chords {
-    position: relative;
-    min-height: 16px;
-  }
-  .nxt-chord {
-    font-size: 11px; font-weight: 700;
-    color: #3d7a6a;
-    position: absolute;
-    white-space: nowrap;
-  }
-
-  #nxt-lyric {
-    font-size: clamp(13px, 3vw, 20px);
-    font-weight: 600;
-    color: #444;
-    white-space: pre-wrap;
-    word-break: keep-all;
-    line-height: 1.4;
-  }
 
   /* 다음 곡 표시 */
   #nxt-song-row {
@@ -304,8 +304,7 @@
         <div id="cur-singer-note" class="hidden"></div>
       </div>
       <div id="cur-lyric-wrap">
-        <div id="cur-chords"></div>
-        <div id="cur-lyric"></div>
+        <div class="lyric-block" id="cur-lyric-block"></div>
       </div>
     </div>
   </div>
@@ -320,8 +319,7 @@
         <div id="nxt-singer-note" class="hidden"></div>
       </div>
       <div id="nxt-lyric-wrap">
-        <div id="nxt-chords"></div>
-        <div id="nxt-lyric"></div>
+        <div class="lyric-block" id="nxt-lyric-block"></div>
       </div>
       <div id="nxt-song-display" class="hidden"></div>
     </div>
@@ -332,11 +330,44 @@
 <script>
   const $ = id => document.getElementById(id);
 
+  // ── 가사 캐시 (/edit DATA 파싱) ──
+  let lyricCache = {}; // { songName: { secName: { startBar, slides[] } } }
+
+  async function fetchLyricCache() {
+    try {
+      const html = await fetch('/edit').then(r => r.text());
+      const m = html.match(/const DATA=(\[[\s\S]*?\]);/);
+      if (!m) return;
+      const data = JSON.parse(m[1]);
+      lyricCache = {};
+      data.forEach(song => {
+        lyricCache[song.song] = {};
+        (song.sections || []).forEach(sec => {
+          lyricCache[song.song][sec.sec] = sec;
+        });
+      });
+    } catch(e) {}
+  }
+
+  function findTokens(songName, secName, barFloat, useFirst) {
+    const sec = lyricCache[songName]?.[secName];
+    if (!sec || !sec.slides || sec.slides.length === 0) return null;
+    if (useFirst) return sec.slides[0].tokens || null;
+    let best = sec.slides[0];
+    for (const sl of sec.slides) {
+      if (sl.startBar <= barFloat) best = sl;
+      else break;
+    }
+    return best.tokens && best.tokens.length > 0 ? best.tokens : null;
+  }
+
+  fetchLyricCache();
+
   // ── SSE ──
   let reconnectDelay = 1000;
   function connect() {
     const es = new EventSource('/events');
-    es.onopen = () => { reconnectDelay = 1000; $('offline').classList.add('hidden'); };
+    es.onopen = () => { reconnectDelay = 1000; $('offline').classList.add('hidden'); fetchLyricCache(); };
     es.onmessage = e => { try { applyState(JSON.parse(e.data)); } catch {} };
     es.onerror = () => { es.close(); setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 2, 10000); };
   }
@@ -388,30 +419,43 @@
   }
 
   // ── 가사+코드 렌더 ──
-  function renderLyric(chordsEl, lyricEl, chordClass, tokens, fallback) {
-    chordsEl.innerHTML = '';
-    if (tokens && tokens.length > 0) {
-      let text = '';
-      const chordPositions = [];
-      tokens.forEach(t => {
-        if (t.type === 'br') { text += '\n'; }
-        else if (t.type === 'char' || t.type === 'ghost') {
-          if (t.chord) chordPositions.push({ charIdx: text.length, chord: t.chord });
-          if (t.type === 'char') text += t.char || '';
-        }
-      });
-      lyricEl.textContent = text;
-      const firstLineLen = text.indexOf('\n') >= 0 ? text.indexOf('\n') : text.length;
-      chordPositions.forEach(({ charIdx, chord }) => {
+  function renderLyricBlock(blockEl, tokens, fallback) {
+    blockEl.innerHTML = '';
+    if (!tokens || tokens.length === 0) {
+      (fallback || '').split('\n').forEach(line => {
+        const lineEl = document.createElement('div');
+        lineEl.className = 'lyric-line';
         const span = document.createElement('span');
-        span.className = chordClass;
-        span.textContent = chord;
-        span.style.left = firstLineLen > 0 ? `${(charIdx / firstLineLen) * 100}%` : '0%';
-        chordsEl.appendChild(span);
+        span.className = 'lyric-char';
+        span.textContent = line;
+        lineEl.appendChild(span);
+        blockEl.appendChild(lineEl);
       });
-    } else {
-      lyricEl.textContent = fallback || '';
+      return;
     }
+    let lines = [[]];
+    tokens.forEach(t => {
+      if (t.type === 'br') lines.push([]);
+      else lines[lines.length - 1].push(t);
+    });
+    while (lines.length > 1 && lines[lines.length - 1].length === 0) lines.pop();
+    lines.forEach(line => {
+      const lineEl = document.createElement('div');
+      lineEl.className = 'lyric-line';
+      line.forEach(t => {
+        const charEl = document.createElement('span');
+        charEl.className = t.type === 'ghost' ? 'lyric-char ghost' : 'lyric-char';
+        if (t.chord) {
+          const chordEl = document.createElement('span');
+          chordEl.className = 'chord-label';
+          chordEl.textContent = t.chord;
+          charEl.appendChild(chordEl);
+        }
+        if (t.type === 'char') charEl.appendChild(document.createTextNode(t.char || ''));
+        lineEl.appendChild(charEl);
+      });
+      blockEl.appendChild(lineEl);
+    });
   }
 
   // ── 카운트다운 ──
@@ -444,9 +488,12 @@
 
     // 현재 섹션
     const sec = s.currentSection || '';
+    const songName = songs[idx] || '';
     $('cur-section-label').textContent = sec.startsWith('#') ? '' : (sec || '—');
-    renderLyric($('cur-chords'), $('cur-lyric'), 'chord-above',
-                s.currentSlideTokens, s.lyricCue);
+    const curTokens = (s.currentSlideTokens && s.currentSlideTokens.length > 0)
+      ? s.currentSlideTokens
+      : findTokens(songName, sec, s.currentBarFloat, false);
+    renderLyricBlock($('cur-lyric-block'), curTokens, s.lyricCue);
     const curNote = s.singerNote || '';
     $('cur-singer-note').textContent = curNote;
     $('cur-singer-note').classList.toggle('hidden', !curNote);
@@ -460,15 +507,17 @@
     $('nxt-singer-note').classList.toggle('hidden', !nxtNote || nxtIsSong);
 
     if (nxtIsSong) {
-      const songName = s.nextSongName || nxtSec.replace(/^#/, '');
+      const songName2 = s.nextSongName || nxtSec.replace(/^#/, '');
       $('nxt-lyric-wrap').classList.add('hidden');
       $('nxt-song-display').classList.remove('hidden');
-      $('nxt-song-display').textContent = songName;
+      $('nxt-song-display').textContent = songName2;
     } else {
       $('nxt-lyric-wrap').classList.remove('hidden');
       $('nxt-song-display').classList.add('hidden');
-      renderLyric($('nxt-chords'), $('nxt-lyric'), 'nxt-chord',
-                  s.nextSlideTokens, s.nextLyricCue);
+      const nxtTokens = (s.nextSlideTokens && s.nextSlideTokens.length > 0)
+        ? s.nextSlideTokens
+        : findTokens(songName, nxtSec, 0, true);
+      renderLyricBlock($('nxt-lyric-block'), nxtTokens, s.nextLyricCue);
     }
 
     // 카운트다운
