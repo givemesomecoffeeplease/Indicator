@@ -31,6 +31,25 @@ Indicator/Indicator/
 └── Resources/index.html  # 브라우저 표시 화면
 ```
 
+## 2026-06-29 작업 내역
+
+### 가사 띄어쓰기 수정
+- `index.html`, `singer.html`: `renderLyricBlock`에서 공백 문자(`' '`) → ` `으로 렌더링. 가사 단어 사이 공백이 화면에 표시되지 않던 버그 수정.
+
+### 2번째 슬라이드 재생 중 표시 안 되는 버그 수정
+- 원인: `sl.startBar`는 절대 bar 번호(Logic 세션 전체 기준), `currentBarFloat`는 섹션 내 상대 bar 번호 — 두 값의 기준이 달라 비교가 틀렸음.
+- `index.html`, `singer.html`: `findTokens` → `findSlide`로 교체. `relStart = sl.startBar - sec.startBar`(섹션-상대 값)와 `barFloat` 비교. 이제 재생 중에도 정확한 슬라이드 선택.
+- 반환값을 전체 slide 객체로 변경(`tokens`뿐 아니라 `instChords`, `isInstrumental`도 포함).
+
+### 간주 8비트 그리드 편집기
+- `WebServer.swift`: `renderInstEditor` 완전 재설계. 마디별 단일 코드 입력 → 8비트 그리드(1 + 2 + 3 + 4 +) 입력으로 교체.
+- 저장 형식: `segData.instChords: [[{pos, name}]]` — 기존 `tokens` 대신 사용.
+- `loadState`, `getSegs`, `saveAll` 모두 `instChords` 지원 추가.
+
+### 간주 코드 전체 표시 + 마디 구분
+- `index.html`, `singer.html`: `renderInstDisplay` 신규 함수. 모든 마디를 카드형 그리드로 표시, 각 마디 내 8비트 슬롯 시각화. 빈 마디도 표시.
+- `renderSlide` 래퍼 함수 추가: `isInstrumental`이면 `renderInstDisplay`, 아니면 `renderLyricBlock` 호출.
+
 ## 2026-06-28 작업 내역 (3차)
 
 ### Universal Binary 빌드 + GitHub Release 업데이트

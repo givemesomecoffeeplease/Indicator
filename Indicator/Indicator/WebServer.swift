@@ -318,11 +318,14 @@ class WebServer {
         .chord-inp-pop{font-size:13px;background:#2c2c2e;border:1.5px solid var(--teal);border-radius:5px;color:var(--teal);font-weight:700;text-align:center;outline:none;padding:2px 6px;width:64px;position:absolute;bottom:calc(100% + 3px);left:50%;transform:translateX(-50%);z-index:20}
         .add-ghost-btn{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:36px;background:rgba(255,255,255,.07);border-radius:5px;color:#666;font-size:18px;cursor:pointer;align-self:flex-end;margin-bottom:4px;padding:0 6px;flex-shrink:0}
         .add-ghost-btn:hover{background:rgba(255,255,255,.16);color:#bbb}
-        .inst-grid{display:flex;flex-wrap:wrap;gap:8px;padding:4px 0}
-        .inst-bar-inp{display:flex;flex-direction:column;align-items:center;gap:4px}
-        .inst-bar-inp label{font-size:10px;color:#888;font-weight:600}
-        .inst-chord-inp{width:60px;border:1.5px solid var(--border);border-radius:6px;padding:6px 4px;font-size:14px;font-weight:700;text-align:center;outline:none;font-family:-apple-system,sans-serif}
-        .inst-chord-inp:focus{border-color:var(--teal)}
+        .inst-table{display:flex;flex-direction:column;gap:3px;overflow-x:auto}
+        .inst-row{display:flex;align-items:center;gap:2px}
+        .inst-bar-lbl{width:64px;font-size:11px;color:var(--sub);font-weight:600;flex-shrink:0}
+        .inst-beat-hdr{width:42px;font-size:10px;color:var(--sub);font-weight:700;text-align:center;flex-shrink:0}
+        .inst-beat-on .inst-beat-inp{background:#f0faf7;border-color:rgba(93,202,165,.3)}
+        .inst-beat-off .inst-beat-inp{background:#fafafa}
+        .inst-beat-inp{width:42px;padding:4px 2px;font-size:13px;font-weight:700;text-align:center;border:1.5px solid var(--border);border-radius:5px;outline:none;font-family:-apple-system,sans-serif}
+        .inst-beat-inp:focus{border-color:var(--teal)}
         .hidden{display:none!important}
         </style>
         </head>
@@ -374,13 +377,13 @@ class WebServer {
           if(dirty[k])return dirty[k];
           const o=origSecOf(song,sec);
           const secStart=o.startBar||0;
-          const slides=(o.slides||[]).filter(sl=>sl.tokens&&sl.tokens.length>0);
+          const slides=(o.slides||[]).filter(sl=>(sl.tokens&&sl.tokens.length>0)||sl.isInstrumental);
           if(slides.length===0){
-            return{splits:[],segData:[{isInstrumental:false,tokens:[]}],sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0};
+            return{splits:[],segData:[{isInstrumental:false,tokens:[],instChords:[]}],sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0};
           }
           const sorted=[...slides].sort((a,b)=>a.startBar-b.startBar);
-          const splits=sorted.slice(0,-1).map(sl=>sl.startBar-secStart+sl.barCount-1);
-          const segData=sorted.map(sl=>({isInstrumental:sl.isInstrumental||false,tokens:sl.tokens||[]}));
+          const splits=sorted.slice(0,-1).map(sl=>{const r=sl.startBar>=secStart&&secStart>0?sl.startBar-secStart:sl.startBar;return r+sl.barCount-1;});
+          const segData=sorted.map(sl=>({isInstrumental:sl.isInstrumental||false,tokens:sl.tokens||[],instChords:sl.instChords||[]}));
           return{splits,segData,sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0};
         }
 
@@ -393,7 +396,7 @@ class WebServer {
           const sp=[...st.splits].sort((a,b)=>a-b);
           const starts=[0,...sp.map(p=>p+1)];
           const ends=[...sp,total-1];
-          return starts.map((start,i)=>({barStart:start,barEnd:ends[i],barCount:ends[i]-start+1,segData:st.segData[i]||{isInstrumental:false,tokens:[]}}));
+          return starts.map((start,i)=>({barStart:start,barEnd:ends[i],barCount:ends[i]-start+1,segData:st.segData[i]||{isInstrumental:false,tokens:[],instChords:[]}}));
         }
 
         function tokensToPlain(toks){return(toks||[]).map(t=>t.type==='br'?'\\n':t.type==='char'?(t.char||''):'').join('');}
@@ -451,12 +454,14 @@ class WebServer {
           capoInp.addEventListener('click',e=>e.stopPropagation());
           capoInp.addEventListener('change',e=>{e.stopPropagation();setState(song,sec.sec,{...loadState(song,sec.sec),capo:parseInt(capoInp.value)||0});});
 
+          if(secUI[ukey].sessionNote===undefined)secUI[ukey].sessionNote=st.sessionNote||'';
+          if(secUI[ukey].singerNote===undefined)secUI[ukey].singerNote=st.singerNote||'';
           const noteP=document.createElement('div');noteP.className='note-pair';
-          const snInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'세션 노트',value:st.sessionNote});
-          const gnInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'싱어 노트',value:st.singerNote});
+          const snInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'세션 노트',value:secUI[ukey].sessionNote});
+          const gnInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'싱어 노트',value:secUI[ukey].singerNote});
           [snInp,gnInp].forEach(inp=>inp.addEventListener('click',e=>e.stopPropagation()));
-          snInp.addEventListener('input',()=>setState(song,sec.sec,{...loadState(song,sec.sec),sessionNote:snInp.value}));
-          gnInp.addEventListener('input',()=>setState(song,sec.sec,{...loadState(song,sec.sec),singerNote:gnInp.value}));
+          snInp.addEventListener('input',()=>{secUI[ukey].sessionNote=snInp.value;setState(song,sec.sec,{...loadState(song,sec.sec)});});
+          gnInp.addEventListener('input',()=>{secUI[ukey].singerNote=gnInp.value;setState(song,sec.sec,{...loadState(song,sec.sec)});});
           noteP.appendChild(snInp);noteP.appendChild(gnInp);
 
           hdr.appendChild(arrow);hdr.appendChild(nameEl);hdr.appendChild(barsEl);hdr.appendChild(capoW);hdr.appendChild(noteP);
@@ -546,7 +551,27 @@ class WebServer {
             setState(song,sec.sec,{...st,segData});
             const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
           });
-          hd.appendChild(dot);hd.appendChild(info);hd.appendChild(typeBtn);card.appendChild(hd);
+          if(totalSegs>1){
+            const delBtn=document.createElement('button');delBtn.className='btn btn-sm btn-red';delBtn.textContent='삭제';
+            delBtn.addEventListener('click',()=>{
+              const cur=loadState(song,sec.sec);let splits=[...cur.splits];let segData=[...cur.segData];
+              const splitIdx=segIdx>0?segIdx-1:0;
+              splits.splice(splitIdx,1);
+              if(segIdx>0){
+                const merged={isInstrumental:segData[segIdx-1].isInstrumental,tokens:[...(segData[segIdx-1].tokens||[]),...(segData[segIdx].tokens||[])]};
+                segData.splice(segIdx-1,2,merged);
+              }else{
+                const merged={isInstrumental:segData[1].isInstrumental,tokens:[...(segData[0].tokens||[]),...(segData[1].tokens||[])]};
+                segData.splice(0,2,merged);
+              }
+              setState(song,sec.sec,{...cur,splits,segData});
+              const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
+            });
+            hd.appendChild(dot);hd.appendChild(info);hd.appendChild(typeBtn);hd.appendChild(delBtn);
+          }else{
+            hd.appendChild(dot);hd.appendChild(info);hd.appendChild(typeBtn);
+          }
+          card.appendChild(hd);
 
           const edArea=document.createElement('div');edArea.className='seg-ed';
           if(sg.segData.isInstrumental){
@@ -633,7 +658,10 @@ class WebServer {
             const inp=document.createElement('input');inp.className='chord-inp-pop';
             inp.value=t.chord||'';inp.placeholder='코드';
             inp.addEventListener('keydown',e=>handleChordKey(e,ti,inp,song,sec,gidx,segIdx,ceKey));
-            inp.addEventListener('input',()=>{inp.value=inp.value.slice(0,1).toUpperCase()+inp.value.slice(1);});
+            inp.addEventListener('input',()=>{
+              inp.value=inp.value.replace(/[^A-Za-z0-9#♭/]/g,'');
+              inp.value=inp.value.slice(0,1).toUpperCase()+inp.value.slice(1);
+            });
             inp.addEventListener('blur',()=>{if(ces.editIdx===ti){ces.editIdx=null;confirmChord(song,sec,gidx,segIdx,ceKey,ti,inp.value);}});
             el.appendChild(inp);setTimeout(()=>{inp.focus();inp.select();},0);
           }else if(t.chord){
@@ -712,41 +740,70 @@ class WebServer {
 
         function renderInstEditor(ed,song,sec,gidx,segIdx,sg,secStart,total){
           const st=loadState(song,sec.sec);const segs=getSegs(st,total);
-          const existingToks=segs[segIdx]?.segData.tokens||[];
-          const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--sub);margin-bottom:8px';
-          hint.textContent='마디별 코드 입력 (s=♯, b=♭)';ed.appendChild(hint);
-          const grid=document.createElement('div');grid.className='inst-grid';
+          const existingIC=segs[segIdx]?.segData.instChords||[];
+          const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--sub);margin-bottom:10px';
+          hint.textContent='8비트 그리드 코드 입력 (s=♯, b=♭)';ed.appendChild(hint);
+          const table=document.createElement('div');table.className='inst-table';
+          const hdr=document.createElement('div');hdr.className='inst-row';
+          const hl=document.createElement('div');hl.className='inst-bar-lbl';hdr.appendChild(hl);
+          ['1','+','2','+','3','+','4','+'].forEach(lbl=>{const l=document.createElement('div');l.className='inst-beat-hdr';l.textContent=lbl;hdr.appendChild(l);});
+          table.appendChild(hdr);
           for(let b=0;b<sg.barCount;b++){
-            const wrap=document.createElement('div');wrap.className='inst-bar-inp';
-            const lbl=document.createElement('label');lbl.textContent='마디 '+(sg.barStart+b+1);
-            const inp=document.createElement('input');inp.className='inst-chord-inp';inp.type='text';
-            inp.value=normChord(existingToks[b]?.chord||'');inp.placeholder='–';
-            inp.addEventListener('input',()=>{inp.value=normChord(inp.value);});
-            inp.addEventListener('change',()=>{
-              const cur=loadState(song,sec.sec);const segData=[...cur.segData];
-              const capturedB=b;const capturedV=normChord(inp.value);
-              const newToks=Array(sg.barCount).fill(null).map((_,bi)=>({type:'ghost',chord:bi===capturedB?capturedV:(existingToks[bi]?.chord||'')})).filter(t=>t.chord);
-              segData[segIdx]={...segData[segIdx],tokens:newToks};setState(song,sec.sec,{...cur,segData});
-            });
-            wrap.appendChild(lbl);wrap.appendChild(inp);grid.appendChild(wrap);
+            const barSlots=existingIC[b]||[];
+            const row=document.createElement('div');row.className='inst-row';
+            const lbl=document.createElement('div');lbl.className='inst-bar-lbl';lbl.textContent='마디 '+(sg.barStart+b+1);row.appendChild(lbl);
+            for(let beat=0;beat<8;beat++){
+              const slot=barSlots.find(s=>s.pos===beat);
+              const cell=document.createElement('div');cell.className='inst-beat-'+(beat%2===0?'on':'off');
+              const inp=document.createElement('input');inp.className='inst-beat-inp';inp.type='text';
+              inp.value=slot?slot.name:'';inp.placeholder='';
+              inp.addEventListener('focus',()=>inp.select());
+              inp.addEventListener('input',()=>{inp.value=inp.value.replace(/[^A-Za-z0-9#♭/]/g,'');inp.value=normChord(inp.value);});
+              inp.addEventListener('change',()=>{
+                const cur=loadState(song,sec.sec);const segData=[...cur.segData];
+                const curIC=getSegs(cur,total)[segIdx]?.segData.instChords||[];
+                const newIC=Array(sg.barCount).fill(null).map((_,bi)=>{
+                  const arr=[...(curIC[bi]||[])];
+                  if(bi===b){const f=arr.filter(s=>s.pos!==beat);const v=normChord(inp.value);if(v)f.push({pos:beat,name:v});return f.sort((a,c)=>a.pos-c.pos);}
+                  return arr;
+                });
+                segData[segIdx]={...segData[segIdx],instChords:newIC};setState(song,sec.sec,{...cur,segData});
+              });
+              cell.appendChild(inp);row.appendChild(cell);
+            }
+            table.appendChild(row);
           }
-          ed.appendChild(grid);
+          ed.appendChild(table);
         }
 
         function saveAll(){
-          if(!Object.keys(dirty).length){showMsg('변경사항 없음');return;}
+          const needsSave=Object.keys(dirty).length>0||Object.keys(secUI).some(uk=>secUI[uk].sessionNote!==undefined||secUI[uk].singerNote!==undefined);
+          if(!needsSave){showMsg('변경사항 없음');return;}
           const payload={};
+          const songData=DATA.find(s=>s.song===curSong);
+          if(songData)songData.sections.forEach((sec,gidx)=>{
+            const dk=dkOf(curSong,sec.sec);const ukey=ukOf(curSong,sec.sec,gidx);
+            const st=loadState(curSong,sec.sec);
+            if(!payload[curSong])payload[curSong]={};
+            if(!payload[curSong][sec.sec]){
+              const o=origSecOf(curSong,sec.sec);
+              const secStart=o.startBar||0;const total=o.totalBars||0;
+              const segs=getSegs(st,total);
+              const slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:''}));
+              const plain=tokensToPlain(segs[0]?.segData.tokens||[]);
+              const sNote=secUI[ukey]?.sessionNote??st.sessionNote??'';
+              const gNote=secUI[ukey]?.singerNote??st.singerNote??'';
+              payload[curSong][sec.sec]={lyricCue:plain.split('\\n')[0]||'',sessionNote:sNote,singerNote:gNote,slides};
+            }
+          });
           for(const[k,st]of Object.entries(dirty)){
             const sep=k.indexOf('|||'),song=k.slice(0,sep),sec=k.slice(sep+3);
+            if(song===curSong)continue;
             if(!payload[song])payload[song]={};
             const o=origSecOf(song,sec);
             const secStart=o.startBar||0;const total=o.totalBars||0;
             const segs=getSegs(st,total);
-            const slides=segs.map(sg=>({
-              startBar:secStart+sg.barStart,barCount:sg.barCount,
-              isInstrumental:!!sg.segData.isInstrumental,
-              tokens:sg.segData.tokens||[],instChords:[],singerNote:''
-            }));
+            const slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:''}));
             const plain=tokensToPlain(segs[0]?.segData.tokens||[]);
             payload[song][sec]={lyricCue:plain.split('\\n')[0]||'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides};
           }
@@ -758,7 +815,7 @@ class WebServer {
                 const sd=DATA.find(x=>x.song===song)?.sections.find(x=>x.sec===sec);
                 if(sd){
                   const segs=getSegs(st,sd.totalBars||0);
-                  sd.slides=segs.map(sg=>({startBar:(sd.startBar||0)+sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.tokens||[],instChords:[],singerNote:''}));
+                  sd.slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:''}));
                   sd.sessionNote=st.sessionNote;sd.singerNote=st.singerNote;
                 }
               }
@@ -785,6 +842,7 @@ class WebServer {
             print("[Save] decoded OK: \(decoded)")
             saveLyrics?(decoded)
             onLyricsSaved?()
+            broadcaster.send("event: lyrics-updated\ndata: {}\n\n")
         } else {
             print("[Save] decode FAILED")
         }

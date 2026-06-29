@@ -148,25 +148,25 @@
   }
   .lyric-char.ghost { min-width: 0.8em; }
   #cur-lyric-wrap .lyric-char {
-    font-size: clamp(36px, 8vw, 96px);
+    font-size: clamp(20px, 4vw, 48px);
     font-weight: 700;
     line-height: 1.35;
     color: #ffffff;
   }
   #nxt-lyric-wrap .lyric-char {
-    font-size: clamp(26px, 5.5vw, 64px);
+    font-size: clamp(15px, 3vw, 32px);
     font-weight: 600;
     line-height: 1.35;
     color: #555;
   }
   .chord-label {
-    font-size: 13px; font-weight: 700;
+    font-size: 15px; font-weight: 700;
     color: #5DCAA5;
     white-space: nowrap;
     line-height: 1.3;
   }
   #nxt-lyric-wrap .chord-label {
-    font-size: 11px;
+    font-size: 13px;
     color: #3d7a6a;
   }
 
@@ -281,6 +281,11 @@
     font-size: 14px; color: #888; z-index: 99;
   }
   .hidden { display: none !important; }
+  .inst-disp-grid { display: flex; align-items: center; flex-wrap: wrap; gap: 0; padding: 4px 0; }
+  .inst-disp-bar { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 2px 12px; min-width: 40px; gap: 2px; }
+  .inst-disp-div { width: 1px; height: 36px; background: #333; margin: 0 4px; }
+  .inst-disp-chord { font-size: clamp(16px,3vw,36px); color: #5DCAA5; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+  .inst-disp-empty { font-size: clamp(14px,2.5vw,28px); color: #333; }
 </style>
 </head>
 <body>
@@ -343,22 +348,39 @@
       data.forEach(song => {
         lyricCache[song.song] = {};
         (song.sections || []).forEach(sec => {
-          lyricCache[song.song][sec.sec] = sec;
+          if (!lyricCache[song.song][sec.sec]) lyricCache[song.song][sec.sec] = [];
+          lyricCache[song.song][sec.sec].push(sec);
         });
       });
     } catch(e) {}
   }
 
-  function findTokens(songName, secName, barFloat, useFirst) {
-    const sec = lyricCache[songName]?.[secName];
-    if (!sec || !sec.slides || sec.slides.length === 0) return null;
-    if (useFirst) return sec.slides[0].tokens || null;
-    let best = sec.slides[0];
-    for (const sl of sec.slides) {
-      if (sl.startBar <= barFloat) best = sl;
+  function findSlide(songName, secName, barFloat, forNext) {
+    const list = lyricCache[songName]?.[secName];
+    if (!list || !list.length) return null;
+    if (forNext) {
+      const next = list.find(s => (s.startBar || 0) > barFloat) || list[0];
+      return next.slides?.[0] || null;
+    }
+    let sec = list[0];
+    for (const s of list) {
+      if ((s.startBar || 0) <= barFloat) sec = s;
       else break;
     }
-    return best.tokens && best.tokens.length > 0 ? best.tokens : null;
+    if (!sec.slides || !sec.slides.length) return null;
+    const secStart = sec.startBar || 0;
+    const relBar = barFloat - secStart;
+    let best = sec.slides[0];
+    for (const sl of sec.slides) {
+      const slRel = (secStart > 0 && sl.startBar >= secStart) ? sl.startBar - secStart : sl.startBar;
+      if (slRel <= relBar) best = sl;
+      else break;
+    }
+    return best;
+  }
+  function findTokens(songName, secName, barFloat, useFirst) {
+    const sl = findSlide(songName, secName, barFloat, useFirst);
+    return sl?.tokens?.length ? sl.tokens : null;
   }
 
   fetchLyricCache();
@@ -369,6 +391,7 @@
     const es = new EventSource('/events');
     es.onopen = () => { reconnectDelay = 1000; $('offline').classList.add('hidden'); fetchLyricCache(); };
     es.onmessage = e => { try { applyState(JSON.parse(e.data)); } catch {} };
+    es.addEventListener('lyrics-updated', () => { fetchLyricCache(); });
     es.onerror = () => { es.close(); setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 2, 10000); };
   }
   connect();
@@ -440,22 +463,65 @@
     });
     while (lines.length > 1 && lines[lines.length - 1].length === 0) lines.pop();
     lines.forEach(line => {
+      const allGhost = line.length > 0 && line.every(t => t.type === 'ghost');
       const lineEl = document.createElement('div');
       lineEl.className = 'lyric-line';
+      if (allGhost) {
+        lineEl.style.cssText = 'flex-wrap:wrap;justify-content:flex-start;gap:6px 0;';
+      }
       line.forEach(t => {
+        if (allGhost && !t.chord) return;
         const charEl = document.createElement('span');
         charEl.className = t.type === 'ghost' ? 'lyric-char ghost' : 'lyric-char';
+        if (allGhost) charEl.style.cssText = 'min-width:2em;margin-right:12px;';
         if (t.chord) {
           const chordEl = document.createElement('span');
           chordEl.className = 'chord-label';
           chordEl.textContent = t.chord;
           charEl.appendChild(chordEl);
         }
-        if (t.type === 'char') charEl.appendChild(document.createTextNode(t.char || ''));
+        if (t.type === 'char') charEl.appendChild(document.createTextNode(t.char === ' ' ? '\u00A0' : (t.char || '')));
+        else if (t.type === 'ghost') charEl.appendChild(document.createTextNode(' '));
         lineEl.appendChild(charEl);
       });
       blockEl.appendChild(lineEl);
     });
+  }
+
+  // ── 간주 코드 그리드 렌더 ──
+  function renderInstDisplay(blockEl, instChords, barCount) {
+    const bc = barCount || (instChords || []).length;
+    const grid = document.createElement('div');
+    grid.className = 'inst-disp-grid';
+    for (let b = 0; b < bc; b++) {
+      if (b > 0) { const div = document.createElement('div'); div.className = 'inst-disp-div'; grid.appendChild(div); }
+      const barEl = document.createElement('div');
+      barEl.className = 'inst-disp-bar';
+      const slots = ((instChords || [])[b] || []).slice().sort((a,c) => a.pos - c.pos);
+      if (slots.length === 0) {
+        const emp = document.createElement('span'); emp.className = 'inst-disp-empty'; emp.textContent = '—'; barEl.appendChild(emp);
+      } else {
+        slots.forEach(s => {
+          const c = document.createElement('span'); c.className = 'inst-disp-chord'; c.textContent = s.name; barEl.appendChild(c);
+        });
+      }
+      grid.appendChild(barEl);
+    }
+    blockEl.appendChild(grid);
+  }
+
+  function renderSlide(blockEl, slide, fallback) {
+    blockEl.innerHTML = '';
+    if (slide && slide.isInstrumental) {
+      const ic = slide.instChords;
+      if (ic && ic.some(b => b && b.length > 0)) {
+        renderInstDisplay(blockEl, ic, slide.barCount);
+      } else {
+        renderLyricBlock(blockEl, slide.tokens, fallback);
+      }
+    } else {
+      renderLyricBlock(blockEl, slide ? slide.tokens : null, fallback);
+    }
   }
 
   // ── 카운트다운 ──
@@ -490,10 +556,8 @@
     const sec = s.currentSection || '';
     const songName = songs[idx] || '';
     $('cur-section-label').textContent = sec.startsWith('#') ? '' : (sec || '—');
-    const curTokens = (s.currentSlideTokens && s.currentSlideTokens.length > 0)
-      ? s.currentSlideTokens
-      : findTokens(songName, sec, s.currentBarFloat, false);
-    renderLyricBlock($('cur-lyric-block'), curTokens, s.lyricCue);
+    const curSlide = findSlide(songName, sec, s.currentBarFloat ?? 0, false);
+    renderSlide($('cur-lyric-block'), curSlide, s.lyricCue);
     const curNote = s.singerNote || '';
     $('cur-singer-note').textContent = curNote;
     $('cur-singer-note').classList.toggle('hidden', !curNote);
@@ -514,10 +578,8 @@
     } else {
       $('nxt-lyric-wrap').classList.remove('hidden');
       $('nxt-song-display').classList.add('hidden');
-      const nxtTokens = (s.nextSlideTokens && s.nextSlideTokens.length > 0)
-        ? s.nextSlideTokens
-        : findTokens(songName, nxtSec, 0, true);
-      renderLyricBlock($('nxt-lyric-block'), nxtTokens, s.nextLyricCue);
+      const nxtSlide = findSlide(songName, nxtSec, s.currentBarFloat ?? 0, true);
+      renderSlide($('nxt-lyric-block'), nxtSlide, s.nextLyricCue);
     }
 
     // 카운트다운

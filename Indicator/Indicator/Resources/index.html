@@ -79,9 +79,8 @@
     grid-template-rows:
       18px   /* row 1: sec-label */
       auto   /* row 2: section name */
-      auto   /* row 3: meta pills */
+      auto   /* row 3: note */
       1fr    /* row 4: lyric+chord */
-      auto   /* row 5: note */
     ;
     row-gap: 6px;
     align-items: start;
@@ -154,8 +153,8 @@
     display: flex; gap: 5px; align-items: center; justify-content: center;
     flex-wrap: wrap;
   }
-  #cur-meta { grid-column: 1; grid-row: 3; }
-  #nxt-meta { grid-column: 3; grid-row: 3; }
+  #cur-meta { display: none; }
+  #nxt-meta { display: none; }
   .meta-sm {
     font-size: 9px; font-weight: 700;
     color: #555566; background: #1e1e28;
@@ -192,18 +191,18 @@
     display: inline-flex;
     flex-direction: column;
     align-items: center;
-    font-size: clamp(20px, 4.5vw, 48px);
+    font-size: clamp(14px, 2.8vw, 28px);
     font-weight: 700;
     line-height: 1.4;
     color: #c8c8d8;
   }
   .lyric-char.ghost { min-width: 0.8em; }
   #nxt-lyric-wrap .lyric-char {
-    font-size: clamp(15px, 3vw, 32px);
+    font-size: clamp(14px, 2.8vw, 28px);
     color: #3a3a52;
   }
   .chord-label {
-    font-size: 11px; font-weight: 700;
+    font-size: 13px; font-weight: 700;
     color: #5DCAA5;
     white-space: nowrap;
     line-height: 1.3;
@@ -213,7 +212,7 @@
   /* 노트 (row 5) */
   .note {
     display: flex; align-items: flex-start;
-    gap: 4px; font-size: 10px;
+    gap: 4px; font-size: 13px;
     color: #E8A840; line-height: 1.3;
     text-align: left; padding: 0 10px;
     align-self: start;
@@ -223,8 +222,8 @@
     width: 4px; height: 4px; border-radius: 50%;
     background: #E8A840; flex-shrink: 0; margin-top: 3px;
   }
-  #cur-note-wrap { grid-column: 1; grid-row: 5; }
-  #nxt-note-wrap { grid-column: 3; grid-row: 5; }
+  #cur-note-wrap { grid-column: 1; grid-row: 3; }
+  #nxt-note-wrap { grid-column: 3; grid-row: 3; }
 
   /* 섹션 전환 애니메이션 */
   .sec-fade {
@@ -276,6 +275,20 @@
     letter-spacing: 0.04em; z-index: 99;
   }
   #offline.hidden { display: none; }
+  .inst-chord-grid { display: flex; flex-wrap: wrap; gap: 5px; align-items: flex-start; justify-content: flex-start; padding: 2px 0; }
+  .inst-chord-bar { display: flex; align-items: stretch; border: 1px solid #2a2a3a; border-radius: 5px; overflow: hidden; }
+  .icb-num { display: flex; align-items: center; justify-content: center; font-size: 9px; color: #444; font-weight: 700; padding: 0 4px; border-right: 1px solid #2a2a3a; min-width: 16px; }
+  .icb-beats { display: flex; }
+  .icb-beat { width: 16px; min-height: 28px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1px solid #1a1a2a; padding: 2px 1px; }
+  .icb-beat.icb-on { background: rgba(93,202,165,.06); }
+  .icb-beat:last-child { border-right: none; }
+  .icb-chord { font-size: 11px; color: #5DCAA5; font-weight: 700; white-space: nowrap; line-height: 1; }
+  .icb-div { display: none; }
+  .inst-disp-grid { display: flex; align-items: center; flex-wrap: wrap; gap: 0; padding: 4px 0; }
+  .inst-disp-bar { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 2px 10px; min-width: 36px; gap: 2px; }
+  .inst-disp-div { width: 1px; height: 32px; background: #333; margin: 0 4px; }
+  .inst-disp-chord { font-size: clamp(13px,2.2vw,22px); color: #5DCAA5; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+  .inst-disp-empty { font-size: clamp(12px,1.8vw,18px); color: #333; }
 </style>
 </head>
 <body>
@@ -357,22 +370,43 @@
       data.forEach(song => {
         lyricCache[song.song] = {};
         (song.sections || []).forEach(sec => {
-          lyricCache[song.song][sec.sec] = sec;
+          if (!lyricCache[song.song][sec.sec]) lyricCache[song.song][sec.sec] = [];
+          lyricCache[song.song][sec.sec].push(sec);
         });
       });
     } catch(e) {}
   }
 
-  function findTokens(songName, secName, barFloat, useFirst) {
-    const sec = lyricCache[songName]?.[secName];
-    if (!sec || !sec.slides || sec.slides.length === 0) return null;
-    if (useFirst) return sec.slides[0].tokens || null;
-    let best = sec.slides[0];
-    for (const sl of sec.slides) {
-      if (sl.startBar <= barFloat) best = sl;
+  function findSlide(songName, secName, barFloat, forNext) {
+    const list = lyricCache[songName]?.[secName];
+    if (!list || !list.length) return null;
+    // barFloat = anchorBar (absolute Logic bar); sec.startBar = absolute section start
+    if (forNext) {
+      const next = list.find(s => (s.startBar || 0) > barFloat) || list[0];
+      return next.slides?.[0] || null;
+    }
+    // Find the section occurrence containing barFloat
+    let sec = list[0];
+    for (const s of list) {
+      if ((s.startBar || 0) <= barFloat) sec = s;
       else break;
     }
-    return best.tokens && best.tokens.length > 0 ? best.tokens : null;
+    if (!sec.slides || !sec.slides.length) return null;
+    const secStart = sec.startBar || 0;
+    const relBar = barFloat - secStart;
+    // sl.startBar: may be absolute (old saves) or relative (new saves, 0-based)
+    // Auto-detect: if sl.startBar >= secStart and secStart > 0, it's absolute → convert
+    let best = sec.slides[0];
+    for (const sl of sec.slides) {
+      const slRel = (secStart > 0 && sl.startBar >= secStart) ? sl.startBar - secStart : sl.startBar;
+      if (slRel <= relBar) best = sl;
+      else break;
+    }
+    return best;
+  }
+  function findTokens(songName, secName, barFloat, useFirst) {
+    const sl = findSlide(songName, secName, barFloat, useFirst);
+    return sl?.tokens?.length ? sl.tokens : null;
   }
 
   fetchLyricCache();
@@ -383,6 +417,7 @@
     es = new EventSource('/events');
     es.onopen = () => { $('offline').classList.add('hidden'); reconnectDelay = 1000; fetchLyricCache(); };
     es.onmessage = e => { try { applyState(JSON.parse(e.data)); } catch {} };
+    es.addEventListener('lyrics-updated', () => { fetchLyricCache(); });
     es.onerror = () => {
       $('offline').classList.remove('hidden');
       es.close();
@@ -521,22 +556,63 @@
     });
     while (lines.length > 1 && lines[lines.length - 1].length === 0) lines.pop();
     lines.forEach(line => {
+      const allGhost = line.length > 0 && line.every(t => t.type === 'ghost');
       const lineEl = document.createElement('div');
       lineEl.className = 'lyric-line';
+      if (allGhost) {
+        lineEl.style.cssText = 'flex-wrap:wrap;justify-content:flex-start;gap:6px 0;';
+      }
       line.forEach(t => {
+        if (allGhost && !t.chord) return;
         const charEl = document.createElement('span');
         charEl.className = t.type === 'ghost' ? 'lyric-char ghost' : 'lyric-char';
+        if (allGhost) charEl.style.cssText = 'min-width:2em;margin-right:12px;';
         if (t.chord) {
           const chordEl = document.createElement('span');
           chordEl.className = 'chord-label';
           chordEl.textContent = t.chord;
           charEl.appendChild(chordEl);
         }
-        if (t.type === 'char') charEl.appendChild(document.createTextNode(t.char || ''));
+        if (t.type === 'char') charEl.appendChild(document.createTextNode(t.char === ' ' ? '\u00A0' : (t.char || '')));
+        else if (t.type === 'ghost') charEl.appendChild(document.createTextNode(' '));
         lineEl.appendChild(charEl);
       });
       blockEl.appendChild(lineEl);
     });
+  }
+
+  // ── 간주 표시 ──
+  function renderInstDisplay(blockEl, instChords, barCount) {
+    const bc = barCount || (instChords || []).length;
+    const grid = document.createElement('div');
+    grid.className = 'inst-disp-grid';
+    for (let b = 0; b < bc; b++) {
+      if (b > 0) { const d = document.createElement('div'); d.className = 'inst-disp-div'; grid.appendChild(d); }
+      const bar = document.createElement('div');
+      bar.className = 'inst-disp-bar';
+      const slots = ((instChords || [])[b] || []).slice().sort((a, c) => a.pos - c.pos);
+      if (slots.length === 0) {
+        const e = document.createElement('span'); e.className = 'inst-disp-empty'; e.textContent = '—'; bar.appendChild(e);
+      } else {
+        slots.forEach(s => { const c = document.createElement('span'); c.className = 'inst-disp-chord'; c.textContent = s.name; bar.appendChild(c); });
+      }
+      grid.appendChild(bar);
+    }
+    blockEl.appendChild(grid);
+  }
+  function renderSlide(blockEl, slide, fallback) {
+    blockEl.innerHTML = '';
+    if (slide && slide.isInstrumental) {
+      const ic = slide.instChords;
+      if (ic && ic.some(b => b && b.length > 0)) {
+        renderInstDisplay(blockEl, ic, slide.barCount);
+      } else {
+        // fallback: old ghost-token format
+        renderLyricBlock(blockEl, slide.tokens, fallback);
+      }
+    } else {
+      renderLyricBlock(blockEl, slide ? slide.tokens : null, fallback);
+    }
   }
 
   // ── 상태 적용 ──
@@ -579,14 +655,10 @@
 
     // 가사+코드
     const songName = songs[songIdx] || '';
-    const curTokens = (s.currentSlideTokens && s.currentSlideTokens.length > 0)
-      ? s.currentSlideTokens
-      : findTokens(songName, s.currentSection, s.currentBarFloat, false);
-    const nxtTokens = (s.nextSlideTokens && s.nextSlideTokens.length > 0)
-      ? s.nextSlideTokens
-      : findTokens(songName, s.nextSection, 0, true);
-    renderLyricBlock($('cur-lyric-block'), curTokens, s.lyricCue);
-    renderLyricBlock($('nxt-lyric-block'), nxtTokens, s.nextLyricCue);
+    const curSlide = findSlide(songName, s.currentSection, s.currentBarFloat ?? 0, false);
+    const nxtSlide = findSlide(songName, s.nextSection, s.currentBarFloat ?? 0, true);
+    renderSlide($('cur-lyric-block'), curSlide, s.lyricCue);
+    renderSlide($('nxt-lyric-block'), nxtSlide, s.nextLyricCue);
 
     // 노트 (세션 노트)
     const curNote = s.sessionNote || '';
