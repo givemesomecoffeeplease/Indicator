@@ -336,7 +336,9 @@
   const $ = id => document.getElementById(id);
 
   // ── 가사 캐시 (/edit DATA 파싱) ──
-  let lyricCache = {}; // { songName: { secName: { startBar, slides[] } } }
+  // flat sorted slide array: { songName: [{ secName, absBar, slide }] }
+  let lyricSlides = {};
+  let lastKnownState = null;
 
   async function fetchLyricCache() {
     try {
@@ -344,15 +346,37 @@
       const m = html.match(/const DATA=(\[[\s\S]*?\]);/);
       if (!m) return;
       const data = JSON.parse(m[1]);
-      lyricCache = {};
+      lyricSlides = {};
       data.forEach(song => {
-        lyricCache[song.song] = {};
+        const arr = [];
         (song.sections || []).forEach(sec => {
-          if (!lyricCache[song.song][sec.sec]) lyricCache[song.song][sec.sec] = [];
-          lyricCache[song.song][sec.sec].push(sec);
+          const secStart = sec.startBar || 0;
+          (sec.slides || []).forEach(slide => {
+            const slRel = (secStart > 0 && slide.startBar >= secStart) ? slide.startBar - secStart : slide.startBar;
+            arr.push({ secName: sec.sec, absBar: secStart + slRel, slide });
+          });
         });
+        arr.sort((a, b) => a.absBar - b.absBar);
+        lyricSlides[song.song] = arr;
       });
+      if (lastKnownState) applyState(lastKnownState);
     } catch(e) {}
+  }
+
+  function findCurrentEntry(songName, barFloat) {
+    const arr = lyricSlides[songName];
+    if (!arr || !arr.length) return null;
+    let best = arr[0];
+    for (const e of arr) { if (e.absBar <= barFloat) best = e; else break; }
+    return best;
+  }
+
+  function findNextEntry(songName, barFloat) {
+    const arr = lyricSlides[songName];
+    if (!arr || !arr.length) return null;
+    let bestIdx = 0;
+    for (let i = 0; i < arr.length; i++) { if (arr[i].absBar <= barFloat) bestIdx = i; else break; }
+    return arr[bestIdx + 1] || null;
   }
 
   function findSlide(songName, secName, barFloat, forNext) {
@@ -383,6 +407,46 @@
     return sl?.tokens?.length ? sl.tokens : null;
   }
 
+  // 다음 슬라이드: ① 같은 섹션 occurrence 내 다음 슬라이드 → ② 같은 섹션명 다음 occurrence → ③ 다음 섹션
+  function findNextSlide(songName, secName, barFloat, nextSecName) {
+    const list = lyricCache[songName]?.[secName];
+    if (list && list.length) {
+      let secIdx = 0;
+      let sec = list[0];
+      for (let i = 0; i < list.length; i++) {
+        if ((list[i].startBar || 0) <= barFloat) { sec = list[i]; secIdx = i; }
+        else break;
+      }
+      // ① 같은 occurrence 내 다음 슬라이드
+      if (sec.slides && sec.slides.length > 1) {
+        const secStart = sec.startBar || 0;
+        const relBar = barFloat - secStart;
+        let bestIdx = 0;
+        for (let i = 0; i < sec.slides.length; i++) {
+          const sl = sec.slides[i];
+          const slRel = (secStart > 0 && sl.startBar >= secStart) ? sl.startBar - secStart : sl.startBar;
+          if (slRel <= relBar) bestIdx = i;
+          else break;
+        }
+        if (bestIdx + 1 < sec.slides.length) {
+          return { slide: sec.slides[bestIdx + 1], sec: secName };
+        }
+      }
+      // ② 같은 섹션명 다음 occurrence
+      if (secIdx + 1 < list.length) {
+        return { slide: list[secIdx + 1].slides?.[0] || null, sec: secName };
+      }
+    }
+    // ③ 다음 섹션
+    if (nextSecName) {
+      const nxtList = lyricCache[songName]?.[nextSecName];
+      if (nxtList && nxtList.length) {
+        return { slide: nxtList[0].slides?.[0] || null, sec: nextSecName };
+      }
+    }
+    return { slide: null, sec: nextSecName || '' };
+  }
+
   fetchLyricCache();
 
   // ── SSE ──
@@ -390,7 +454,7 @@
   function connect() {
     const es = new EventSource('/events');
     es.onopen = () => { reconnectDelay = 1000; $('offline').classList.add('hidden'); fetchLyricCache(); };
-    es.onmessage = e => { try { applyState(JSON.parse(e.data)); } catch {} };
+    es.onmessage = e => { try { lastKnownState = JSON.parse(e.data); applyState(lastKnownState); } catch {} };
     es.addEventListener('lyrics-updated', () => { fetchLyricCache(); });
     es.onerror = () => { es.close(); setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 2, 10000); };
   }
@@ -552,35 +616,35 @@
     renderSongWheel(songs, Math.max(0, idx));
     $('key-label').textContent = s.key || '';
 
-    // 현재 섹션
+    // 현재/다음 슬라이드 (flat 순서 기준)
     const sec = s.currentSection || '';
     const songName = songs[idx] || '';
+    const barFloat = s.currentBarFloat ?? 0;
     $('cur-section-label').textContent = sec.startsWith('#') ? '' : (sec || '—');
-    const curSlide = findSlide(songName, sec, s.currentBarFloat ?? 0, false);
-    renderSlide($('cur-lyric-block'), curSlide, s.lyricCue);
+    const curEntry = findCurrentEntry(songName, barFloat);
+    renderSlide($('cur-lyric-block'), curEntry?.slide || null, s.lyricCue);
     const curNote = s.singerNote || '';
     $('cur-singer-note').textContent = curNote;
     $('cur-singer-note').classList.toggle('hidden', !curNote);
 
-    // 다음 섹션
+    // 다음 슬라이드: flat 배열 기준 바로 다음 슬라이드
+    const nxtEntry = findNextEntry(songName, barFloat);
     const nxtSec = s.nextSection || '';
     const nxtIsSong = s.nextSectionIsSong || nxtSec.startsWith('#');
-    $('nxt-section-label').textContent = nxtIsSong ? '' : nxtSec;
-    const nxtNote = s.nextSingerNote || '';
-    $('nxt-singer-note').textContent = nxtNote;
-    $('nxt-singer-note').classList.toggle('hidden', !nxtNote || nxtIsSong);
-
-    if (nxtIsSong) {
+    // flat 배열에 다음 슬라이드가 없으면 → 다음 곡 경계
+    if (!nxtEntry && nxtIsSong) {
       const songName2 = s.nextSongName || nxtSec.replace(/^#/, '');
+      $('nxt-section-label').textContent = '';
       $('nxt-lyric-wrap').classList.add('hidden');
       $('nxt-song-display').classList.remove('hidden');
       $('nxt-song-display').textContent = songName2;
     } else {
+      $('nxt-section-label').textContent = nxtEntry ? nxtEntry.secName : '';
       $('nxt-lyric-wrap').classList.remove('hidden');
       $('nxt-song-display').classList.add('hidden');
-      const nxtSlide = findSlide(songName, nxtSec, s.currentBarFloat ?? 0, true);
-      renderSlide($('nxt-lyric-block'), nxtSlide, s.nextLyricCue);
+      renderSlide($('nxt-lyric-block'), nxtEntry?.slide || null, '');
     }
+    $('nxt-singer-note').classList.add('hidden');
 
     // 카운트다운
     renderCountdown(s.countdownBars || 0, s.beatsPerBar || 4);

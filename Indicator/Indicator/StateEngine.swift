@@ -35,6 +35,7 @@ class StateEngine {
     private var currentSectionIdx: Int = -1
     private var currentSectionName: String = ""  // 표시용
     private var sectionEntryMTC: TimeInterval = 0   // 이 섹션 시작 시점의 MTC
+    private var sectionEntryBar: Double = 0          // 이 섹션 시작 절대 bar
     private var sectionDurationSec: Double = 0       // 이 섹션 총 길이(초)
 
     // ── 다음 섹션 전환 예측 ───────────────────────────────
@@ -200,6 +201,8 @@ class StateEngine {
 
         sectionDurationSec = calcDuration(from: startBar, to: endBar)
 
+        sectionEntryBar = Double(startBar)
+
         if retroactive {
             let secElapsed  = calcDuration(from: startBar, to: anchorBar)
             sectionEntryMTC = anchorMTC - secElapsed
@@ -361,12 +364,12 @@ class StateEngine {
         nextChordMTC = sectionEntryMTC + secsFromSectionStart
     }
 
-    // MTC 경과 시간으로 보간한 현재 bar 위치
+    // MTC 경과 시간으로 보간한 현재 bar 위치 (섹션 시작 MTC 기준 — AX freeze 영향 없음)
     private func realtimeBar() -> Double {
-        guard anchorMTC > 0 else { return anchorBar }
-        let elapsed = mtcTime - anchorMTC
-        guard elapsed >= 0, elapsed < 5 else { return anchorBar }
-        return anchorBar + elapsed / beatDuration() / Double(max(1, snapshot.beatsPerBar))
+        guard mtcIsPlaying, sectionEntryMTC > 0 else { return anchorBar }
+        let elapsed = mtcTime - sectionEntryMTC
+        guard elapsed >= 0 else { return sectionEntryBar }
+        return sectionEntryBar + elapsed / beatDuration() / Double(max(1, snapshot.beatsPerBar))
     }
 
     // MARK: - 계산 & 브로드캐스트
@@ -488,7 +491,7 @@ class StateEngine {
         }
 
         state.isPlaying       = mtcIsPlaying
-        state.currentBarFloat = anchorBar
+        state.currentBarFloat = realtimeBar()
         state.bpm             = snapshot.bpm
         state.beatsPerBar     = snapshot.beatsPerBar
         state.timeSignature   = snapshot.timeSignature

@@ -1,5 +1,43 @@
 # Indicator
 
+## 2026-06-29 작업 내역
+
+### 밴드뷰 레이아웃 재설계
+- `index.html`: `#main`(지금/다음 섹션)을 `flex:1`로 상단 지배, 아래에 현재가사 → 다음가사 → 진행바 → 타임라인 순 배치
+- 지금/다음 섹션 가운데 세로 구분선(`#sec-divider-v`), 섹션-가사 사이 가로 구분선(`#sec-divider-h`) 추가
+- 섹션명 폰트 크기 확대: 현재 `clamp(32px,7vw,64px)`, 다음 `clamp(24px,5.5vw,48px)`
+- 카운트다운을 현재/다음 가사 사이에 소형으로 배치
+
+### 슬라이드 표시 로직 전면 재설계
+- `lyricSlides[songName]` — 곡 내 모든 슬라이드를 절대 bar 기준 flat 정렬 배열로 구성
+- `findCurrentEntry(songName, barFloat)` — `absBar <= barFloat`인 마지막 슬라이드
+- `findNextEntry(songName, barFloat)` — 그 바로 다음 슬라이드 (섹션명 동일 여부 무관)
+- 기존 섹션 occurrence 매칭 로직 제거 → 단순 순서 기반으로 Verse1→Verse1→Interlude 정확히 동작
+
+### Race condition 수정 (코드/가사 미표시)
+- `fetchLyricCache` 완료 후 `lastKnownState`로 즉시 재렌더링
+- 일시정지 상태(`isPlaying=false`)에서 SSE가 멈춰도 페이지 로드 시 코드·가사 정상 표시
+
+### realtimeBar 버그 수정 (2번째 슬라이드 재생 중 미표시)
+- 근본 원인: `realtimeBar()`가 `anchorMTC`(앱 시작 시점 고정) 기준 → 5초 후 `elapsed >= 5` 가드로 `anchorBar`(섹션 시작 bar)에 고정됨
+- 수정: `sectionEntryMTC`(섹션 진입 시 MTC) + `sectionEntryBar`(섹션 시작 절대 bar) 기준으로 재작성 — 제한 없이 정확한 bar 계산
+
+### 싱어뷰 "다음" 카드 슬라이드 기준으로 변경
+- 기존: `nextSection` SSE 필드 기준 (다음 섹션 이름)
+- 변경: `findNextEntry` — flat 배열 기준 바로 다음 슬라이드 (같은 섹션명 2번째 occurrence 포함)
+
+---
+
+### ⚠️ 미수정 버그 (다음 작업)
+> 플랜: `/Users/heehan/.claude/plans/band-singer-fix-2026-06-29.md`
+
+1. **간주 코드 일부만 표시**: `renderInstDisplay`의 `barCount` vs `instChords.length` 불일치, WebServer.swift 저장 시 빈 마디(`[]`) 누락 가능성
+2. **노트 미표시 (밴드/싱어)**: 
+   - 밴드뷰 JS가 `s.sessionNote`/`s.nextSessionNote`를 읽지만 `IndicatorState`에는 `note`/`nextNote`만 존재
+   - 싱어뷰 JS가 `s.singerNote`를 읽지만 StateEngine이 `IndicatorState`에 `singerNote`를 채우지 않음
+   - 수정: `Models.swift`에 `singerNote`/`nextSingerNote` 추가, StateEngine에서 채우기, index.html 필드명 수정
+3. **밴드뷰 카운트다운 위치**: 현재 가사 사이 → 지금/다음 섹션 가운데로 이동 (index.html HTML/CSS 변경)
+
 라이브 예배 밴드용 실시간 모니터 앱. Logic Pro 재생 상태를 읽어 SSE로 브라우저에 현재 섹션·카운트다운·가사를 표시.
 
 ## 빌드 & 실행

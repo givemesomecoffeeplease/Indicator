@@ -25,21 +25,27 @@ struct LyricSlide: Codable, Equatable {
 struct SectionData: Codable {
     var lyricCue: String
     var note: String
+    var sessionNote: String
+    var singerNote: String
     var slides: [LyricSlide]
 
-    init(lyricCue: String = "", note: String = "", slides: [LyricSlide] = []) {
+    init(lyricCue: String = "", note: String = "", sessionNote: String = "", singerNote: String = "", slides: [LyricSlide] = []) {
         self.lyricCue = lyricCue
         self.note = note
+        self.sessionNote = sessionNote
+        self.singerNote = singerNote
         self.slides = slides
     }
 
-    // 하위 호환: lyricCue/note만 있는 JSON도 디코딩 가능
-    enum CodingKeys: String, CodingKey { case lyricCue, note, slides }
+    // 하위 호환: 기존 필드 없으면 기본값
+    enum CodingKeys: String, CodingKey { case lyricCue, note, sessionNote, singerNote, slides }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        lyricCue = (try? c.decode(String.self, forKey: .lyricCue)) ?? ""
-        note     = (try? c.decode(String.self, forKey: .note))     ?? ""
-        slides   = (try? c.decode([LyricSlide].self, forKey: .slides)) ?? []
+        lyricCue    = (try? c.decode(String.self, forKey: .lyricCue))    ?? ""
+        note        = (try? c.decode(String.self, forKey: .note))        ?? ""
+        sessionNote = (try? c.decode(String.self, forKey: .sessionNote)) ?? ""
+        singerNote  = (try? c.decode(String.self, forKey: .singerNote))  ?? ""
+        slides      = (try? c.decode([LyricSlide].self, forKey: .slides)) ?? []
     }
 }
 
