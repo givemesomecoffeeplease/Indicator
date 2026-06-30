@@ -11,6 +11,8 @@ class WebServer {
     // Wired up by AppDelegate after init
     var getMarkers: (() -> [Marker])? = nil
     var getLyric: ((_ song: String, _ section: String) -> SectionData?)? = nil
+    // occurrence 기반 조회: (song, section, startBar, canonicalStartBar) -> (resolved data, linked 여부)
+    var getLyricOcc: ((_ song: String, _ section: String, _ startBar: Int, _ canonicalStartBar: Int) -> (SectionData, Bool))? = nil
     var saveLyrics: ((_ dict: [String: [String: SectionData]]) -> Void)? = nil
     var exportSetlist: ((_ markers: [Marker]) -> Data?)? = nil
     var exportSong: ((_ name: String) -> Data?)? = nil
@@ -207,25 +209,46 @@ class WebServer {
             return s
         }
 
+        // 간주 슬라이드의 instChords를 targetTotalBars에 맞춰 앞마디부터 채우고 남으면 버림/모자라면 빈 마디로 패딩
+        func adaptSlides(_ slides: [LyricSlide], targetTotalBars: Int) -> [LyricSlide] {
+            slides.map { slide in
+                guard slide.isInstrumental else { return slide }
+                var s = slide
+                let n = s.instChords.count
+                if targetTotalBars <= n {
+                    s.instChords = Array(s.instChords.prefix(targetTotalBars))
+                } else {
+                    s.instChords += Array(repeating: [], count: targetTotalBars - n)
+                }
+                s.barCount = targetTotalBars
+                return s
+            }
+        }
+
         // Build songs data (with slides + totalBars)
         struct SecInfo {
             var sec: String; var startBar: Int; var totalBars: Int
-            var slidesJson: String; var sessionNote: String; var singerNote: String
+            var slidesJson: String; var sessionNote: String; var singerNote: String; var linked: Bool
         }
         var songs: [(name: String, sections: [SecInfo])] = []
         var curSong = ""
+        var canonicalStartBar: [String: Int] = [:]  // "song|||sec" -> 가장 이른 occurrence의 startBar
         for (i, m) in markers.enumerated() {
             if m.isSong {
                 curSong = m.displayName
                 songs.append((name: curSong, sections: []))
             } else if !curSong.isEmpty {
-                let d = getLyric?(curSong, m.displayName)
-                let slidesJson = encodeJSON(d?.slides ?? [LyricSlide]())
+                let canonKey = "\(curSong)|||\(m.displayName)"
+                if canonicalStartBar[canonKey] == nil { canonicalStartBar[canonKey] = m.bar }
+                let canon = canonicalStartBar[canonKey] ?? m.bar
                 let nextBar = (i + 1 < markers.count) ? markers[i + 1].bar : m.bar
                 let totalBars = max(0, nextBar - m.bar)
+                let (d, linked) = getLyricOcc?(curSong, m.displayName, m.bar, canon) ?? (SectionData(), false)
+                let adapted = adaptSlides(d.slides, targetTotalBars: totalBars)
+                let slidesJson = encodeJSON(adapted)
                 songs[songs.count - 1].sections.append(
                     SecInfo(sec: m.displayName, startBar: m.bar, totalBars: totalBars,
-                            slidesJson: slidesJson, sessionNote: d?.sessionNote ?? "", singerNote: d?.singerNote ?? "")
+                            slidesJson: slidesJson, sessionNote: d.sessionNote, singerNote: d.singerNote, linked: linked)
                 )
             }
         }
@@ -233,7 +256,7 @@ class WebServer {
         // Embed as JSON
         let songsJson = "[" + songs.map { song in
             let secs = "[" + song.sections.map { sec in
-                "{\"sec\":\"\(j(sec.sec))\",\"startBar\":\(sec.startBar),\"totalBars\":\(sec.totalBars),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\"}"
+                "{\"sec\":\"\(j(sec.sec))\",\"startBar\":\(sec.startBar),\"totalBars\":\(sec.totalBars),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
             }.joined(separator: ",") + "]"
             return "{\"song\":\"\(j(song.name))\",\"sections\":\(secs)}"
         }.joined(separator: ",") + "]"
@@ -368,28 +391,13 @@ class WebServer {
           return out;
         }
 
-        function dkOf(song,sec){return song+'|||'+sec;}
+        // occurrence(startBar) 기반 키 — 같은 이름 섹션이 여러 번 등장해도 독립적으로 식별됨
+        function dkOf(song,sec,startBar){return song+'|||'+sec+'@@'+startBar;}
         function ukOf(song,sec,idx){return song+'|||'+sec+'|||'+idx;}
-        function origSecOf(song,sec){return DATA.find(s=>s.song===song)?.sections.find(s=>s.sec===sec)||{};}
-
-        function loadState(song,sec){
-          const k=dkOf(song,sec);
-          if(dirty[k])return dirty[k];
-          const o=origSecOf(song,sec);
-          const secStart=o.startBar||0;
-          const slides=(o.slides||[]).filter(sl=>(sl.tokens&&sl.tokens.length>0)||sl.isInstrumental);
-          if(slides.length===0){
-            return{splits:[],segData:[{isInstrumental:false,tokens:[],instChords:[]}],sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0};
-          }
-          const sorted=[...slides].sort((a,b)=>a.startBar-b.startBar);
-          const splits=sorted.slice(0,-1).map(sl=>{const r=sl.startBar>=secStart&&secStart>0?sl.startBar-secStart:sl.startBar;return r+sl.barCount-1;});
-          const segData=sorted.map(sl=>({isInstrumental:sl.isInstrumental||false,tokens:sl.tokens||[],instChords:sl.instChords||[]}));
-          return{splits,segData,sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0};
-        }
-
-        function setState(song,sec,st){
-          dirty[dkOf(song,sec)]=st;
-          document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
+        function origSecOf(song,sec,startBar){
+          const secs=DATA.find(s=>s.song===song)?.sections||[];
+          if(startBar!==undefined){const exact=secs.find(s=>s.sec===sec&&s.startBar===startBar);if(exact)return exact;}
+          return secs.find(s=>s.sec===sec)||{};
         }
 
         function getSegs(st,total){
@@ -397,6 +405,98 @@ class WebServer {
           const starts=[0,...sp.map(p=>p+1)];
           const ends=[...sp,total-1];
           return starts.map((start,i)=>({barStart:start,barEnd:ends[i],barCount:ends[i]-start+1,segData:st.segData[i]||{isInstrumental:false,tokens:[],instChords:[]}}));
+        }
+
+        // 간주 슬라이드를 targetTotal 마디에 맞춰 앞마디부터 채우고 남으면 버림/모자라면 빈 마디로 패딩 (서버 adaptSlides와 동일 규칙)
+        function adaptRawSlides(rawSlides,targetTotal){
+          return(rawSlides||[]).map(sl=>{
+            if(!sl.isInstrumental)return sl;
+            const n=(sl.instChords||[]).length;
+            const ic=targetTotal<=n?sl.instChords.slice(0,targetTotal):[...sl.instChords,...Array(targetTotal-n).fill([])];
+            return{...sl,instChords:ic,barCount:targetTotal};
+          });
+        }
+        // raw slides 배열 -> {splits,segData} (loadState와 동일 변환 로직)
+        function slidesFromRaw(rawSlides,secStart){
+          const slides=(rawSlides||[]).filter(sl=>(sl.tokens&&sl.tokens.length>0)||sl.isInstrumental);
+          if(slides.length===0)return{splits:[],segData:[{isInstrumental:false,tokens:[],instChords:[]}]};
+          const sorted=[...slides].sort((a,b)=>a.startBar-b.startBar);
+          const splits=sorted.slice(0,-1).map(sl=>{const r=sl.startBar>=secStart&&secStart>0?sl.startBar-secStart:sl.startBar;return r+sl.barCount-1;});
+          const segData=sorted.map(sl=>({isInstrumental:sl.isInstrumental||false,tokens:sl.tokens||[],instChords:sl.instChords||[]}));
+          return{splits,segData};
+        }
+        // {splits,segData} 상태 -> raw slide 배열 (저장/캐노니컬 전파용, saveAll과 동일 변환)
+        function rawSlidesFromState(st,total){
+          return getSegs(st,total).map(sg=>({
+            startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,
+            tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),
+            instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[]
+          }));
+        }
+
+        // 캐노니컬(같은 이름 가장 이른 occurrence)의 최신 데이터를 내 마디 수에 맞춰 즉시 계산 (세션 중 캐노니컬 수정도 반영)
+        // 노트는 연결 여부와 무관하게 항상 자기 occurrence 것을 쓴다 (가사/코드만 캐노니컬을 따라감)
+        function buildLinkedPreview(song,sec,startBar){
+          const canon=origSecOf(song,sec); // startBar 생략 -> 이름으로 첫 occurrence(캐노니컬) 탐색
+          const canonStart=canon.startBar||0;
+          const canonDirty=dirty[dkOf(song,sec,canonStart)];
+          let rawSlides;
+          if(canonDirty&&!canonDirty.linked){
+            rawSlides=rawSlidesFromState(canonDirty,canon.totalBars||0);
+          } else {
+            rawSlides=canon.slides;
+          }
+          const target=origSecOf(song,sec,startBar).totalBars||0;
+          const adapted=adaptRawSlides(rawSlides,target);
+          const{splits,segData}=slidesFromRaw(adapted,canonStart);
+          const own=origSecOf(song,sec,startBar);
+          return{splits,segData,sessionNote:own.sessionNote||'',singerNote:own.singerNote||'',capo:0,linked:true};
+        }
+
+        function loadState(song,sec,startBar){
+          const k=dkOf(song,sec,startBar);
+          if(dirty[k])return dirty[k];
+          const o=origSecOf(song,sec,startBar);
+          if(!!o.linked)return buildLinkedPreview(song,sec,startBar);
+          const secStart=o.startBar||0;
+          const slides=(o.slides||[]).filter(sl=>(sl.tokens&&sl.tokens.length>0)||sl.isInstrumental);
+          if(slides.length===0){
+            return{splits:[],segData:[{isInstrumental:false,tokens:[],instChords:[]}],sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0,linked:false};
+          }
+          const sorted=[...slides].sort((a,b)=>a.startBar-b.startBar);
+          const splits=sorted.slice(0,-1).map(sl=>{const r=sl.startBar>=secStart&&secStart>0?sl.startBar-secStart:sl.startBar;return r+sl.barCount-1;});
+          const segData=sorted.map(sl=>({isInstrumental:sl.isInstrumental||false,tokens:sl.tokens||[],instChords:sl.instChords||[]}));
+          return{splits,segData,sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0,linked:false};
+        }
+
+        function setState(song,sec,startBar,st){
+          // 콘텐츠(가사/코드) 직접 수정 시 자동으로 독립 편집으로 전환 (자동연결 상태였다면 분리)
+          dirty[dkOf(song,sec,startBar)]={...st,linked:false};
+          document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
+          updateLinkUI(song,sec,startBar,false);
+        }
+
+        // 노트는 가사/코드 연결 상태(linked)와 무관하게 항상 occurrence 자기 자신 것 — fork 시키지 않음
+        function setNote(song,sec,startBar,field,value){
+          const cur=loadState(song,sec,startBar);
+          dirty[dkOf(song,sec,startBar)]={...cur,[field]:value};
+          document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
+        }
+
+        // 드롭박스에서 명시적으로 연결/독립 전환
+        function setLinked(song,sec,startBar,linked){
+          if(linked){
+            dirty[dkOf(song,sec,startBar)]={...buildLinkedPreview(song,sec,startBar)};
+          } else {
+            const cur=loadState(song,sec,startBar);
+            dirty[dkOf(song,sec,startBar)]={...cur,linked:false};
+          }
+          document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
+        }
+
+        function updateLinkUI(song,sec,startBar,linked){
+          const sel=document.querySelector('select.link-select[data-song="'+song+'"][data-sec="'+sec+'"][data-sb="'+startBar+'"]');
+          if(sel)sel.value=linked?'linked':'independent';
         }
 
         function tokensToPlain(toks){return(toks||[]).map(t=>t.type==='br'?'\\n':t.type==='char'?(t.char||''):'').join('');}
@@ -436,7 +536,7 @@ class WebServer {
         function createSecBlock(song,sec,gidx){
           const ukey=ukOf(song,sec.sec,gidx);
           const ui=secUI[ukey];
-          const st=loadState(song,sec.sec);
+          const st=loadState(song,sec.sec,sec.startBar);
           const total=sec.totalBars||0;
           const block=document.createElement('div');
           block.className='sec-block';block.dataset.ukey=ukey;
@@ -448,11 +548,24 @@ class WebServer {
           const nameEl=document.createElement('span');nameEl.className='sec-name';nameEl.textContent=sec.sec;
           const barsEl=document.createElement('span');barsEl.className='sec-bars-info';barsEl.textContent=total+'마디';
 
+          const linkSel=document.createElement('select');
+          linkSel.className='link-select';
+          linkSel.dataset.song=song;linkSel.dataset.sec=sec.sec;linkSel.dataset.sb=sec.startBar;
+          const isCanonical=(origSecOf(song,sec.sec).startBar===sec.startBar);
+          linkSel.innerHTML='<option value="independent">독립적으로 편집</option>'+(isCanonical?'':'<option value="linked">'+sec.sec+' 자동 연결</option>');
+          linkSel.value=st.linked?'linked':'independent';
+          if(isCanonical)linkSel.disabled=true;
+          linkSel.addEventListener('click',e=>e.stopPropagation());
+          linkSel.addEventListener('change',()=>{
+            setLinked(song,sec.sec,sec.startBar,linkSel.value==='linked');
+            refreshBlock(block,song,sec,gidx);
+          });
+
           const capoW=document.createElement('div');capoW.className='capo-wrap';
           capoW.innerHTML='카포 <input class="capo-inp" type="number" min="0" max="11" value="'+(st.capo||0)+'">';
           const capoInp=capoW.querySelector('.capo-inp');
           capoInp.addEventListener('click',e=>e.stopPropagation());
-          capoInp.addEventListener('change',e=>{e.stopPropagation();setState(song,sec.sec,{...loadState(song,sec.sec),capo:parseInt(capoInp.value)||0});});
+          capoInp.addEventListener('change',e=>{e.stopPropagation();setState(song,sec.sec,sec.startBar,{...loadState(song,sec.sec,sec.startBar),capo:parseInt(capoInp.value)||0});});
 
           if(secUI[ukey].sessionNote===undefined)secUI[ukey].sessionNote=st.sessionNote||'';
           if(secUI[ukey].singerNote===undefined)secUI[ukey].singerNote=st.singerNote||'';
@@ -460,11 +573,11 @@ class WebServer {
           const snInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'세션 노트',value:secUI[ukey].sessionNote});
           const gnInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'싱어 노트',value:secUI[ukey].singerNote});
           [snInp,gnInp].forEach(inp=>inp.addEventListener('click',e=>e.stopPropagation()));
-          snInp.addEventListener('input',()=>{secUI[ukey].sessionNote=snInp.value;setState(song,sec.sec,{...loadState(song,sec.sec)});});
-          gnInp.addEventListener('input',()=>{secUI[ukey].singerNote=gnInp.value;setState(song,sec.sec,{...loadState(song,sec.sec)});});
+          snInp.addEventListener('input',()=>{secUI[ukey].sessionNote=snInp.value;setNote(song,sec.sec,sec.startBar,'sessionNote',snInp.value);});
+          gnInp.addEventListener('input',()=>{secUI[ukey].singerNote=gnInp.value;setNote(song,sec.sec,sec.startBar,'singerNote',gnInp.value);});
           noteP.appendChild(snInp);noteP.appendChild(gnInp);
 
-          hdr.appendChild(arrow);hdr.appendChild(nameEl);hdr.appendChild(barsEl);hdr.appendChild(capoW);hdr.appendChild(noteP);
+          hdr.appendChild(arrow);hdr.appendChild(nameEl);hdr.appendChild(barsEl);hdr.appendChild(linkSel);hdr.appendChild(capoW);hdr.appendChild(noteP);
           block.appendChild(hdr);
 
           if(ui.open){
@@ -482,7 +595,7 @@ class WebServer {
         function renderBarTl(container,song,sec,gidx){
           container.innerHTML='';
           const ukey=ukOf(song,sec.sec,gidx);
-          const st=loadState(song,sec.sec);
+          const st=loadState(song,sec.sec,sec.startBar);
           const total=sec.totalBars||0;
           const segs=getSegs(st,total);
           const tl=document.createElement('div');tl.className='bar-tl';
@@ -499,7 +612,7 @@ class WebServer {
               gap.className='div-gap'+(isActive?' active':'');
               gap.title=isActive?'구분 제거':'여기서 나누기';
               gap.addEventListener('click',()=>{
-                const cur=loadState(song,sec.sec);
+                const cur=loadState(song,sec.sec,sec.startBar);
                 let splits=[...cur.splits];let segData=[...cur.segData];
                 const segs2=getSegs(cur,total);
                 if(splits.includes(i)){
@@ -512,7 +625,7 @@ class WebServer {
                   const orig=segData[idx]||{isInstrumental:false,tokens:[]};
                   segData.splice(idx,1,{isInstrumental:orig.isInstrumental,tokens:orig.tokens},{isInstrumental:orig.isInstrumental,tokens:[]});
                 }
-                setState(song,sec.sec,{...cur,splits,segData});
+                setState(song,sec.sec,sec.startBar,{...cur,splits,segData});
                 const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
               });
               tl.appendChild(gap);
@@ -525,10 +638,10 @@ class WebServer {
 
         function renderSegsArea(container,song,sec,gidx){
           container.innerHTML='';
-          const st=loadState(song,sec.sec);
+          const st=loadState(song,sec.sec,sec.startBar);
           const total=sec.totalBars||0;
           const segs=getSegs(st,total);
-          const secStart=origSecOf(song,sec.sec).startBar||0;
+          const secStart=origSecOf(song,sec.sec,sec.startBar).startBar||0;
           segs.forEach((sg,i)=>container.appendChild(createSegCard(song,sec,gidx,i,sg,segs.length,secStart,total)));
         }
 
@@ -546,15 +659,15 @@ class WebServer {
           const typeBtn=document.createElement('button');typeBtn.className='btn btn-sm btn-ghost';
           typeBtn.textContent=sg.segData.isInstrumental?'🎵 간주':'🎤 가사';
           typeBtn.addEventListener('click',()=>{
-            const st=loadState(song,sec.sec);const segData=[...st.segData];
+            const st=loadState(song,sec.sec,sec.startBar);const segData=[...st.segData];
             segData[segIdx]={...segData[segIdx],isInstrumental:!segData[segIdx].isInstrumental};
-            setState(song,sec.sec,{...st,segData});
+            setState(song,sec.sec,sec.startBar,{...st,segData});
             const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
           });
           if(totalSegs>1){
             const delBtn=document.createElement('button');delBtn.className='btn btn-sm btn-red';delBtn.textContent='삭제';
             delBtn.addEventListener('click',()=>{
-              const cur=loadState(song,sec.sec);let splits=[...cur.splits];let segData=[...cur.segData];
+              const cur=loadState(song,sec.sec,sec.startBar);let splits=[...cur.splits];let segData=[...cur.segData];
               const splitIdx=segIdx>0?segIdx-1:0;
               splits.splice(splitIdx,1);
               if(segIdx>0){
@@ -564,7 +677,7 @@ class WebServer {
                 const merged={isInstrumental:segData[1].isInstrumental,tokens:[...(segData[0].tokens||[]),...(segData[1].tokens||[])]};
                 segData.splice(0,2,merged);
               }
-              setState(song,sec.sec,{...cur,splits,segData});
+              setState(song,sec.sec,sec.startBar,{...cur,splits,segData});
               const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
             });
             hd.appendChild(dot);hd.appendChild(info);hd.appendChild(typeBtn);hd.appendChild(delBtn);
@@ -584,8 +697,8 @@ class WebServer {
             chordBtn.addEventListener('click',()=>{
               if(!ces.chordMode){
                 const ta=card.querySelector('.lyric-ta');
-                if(ta){const st=loadState(song,sec.sec);const segData=[...st.segData];
-                  if(tokensToPlain(segData[segIdx].tokens||[])!==ta.value){segData[segIdx]={...segData[segIdx],tokens:textToTokens(ta.value)};setState(song,sec.sec,{...st,segData});}
+                if(ta){const st=loadState(song,sec.sec,sec.startBar);const segData=[...st.segData];
+                  if(tokensToPlain(segData[segIdx].tokens||[])!==ta.value){segData[segIdx]={...segData[segIdx],tokens:textToTokens(ta.value)};setState(song,sec.sec,sec.startBar,{...st,segData});}
                 }
                 ces.chordMode=true;ces.editIdx=null;refreshSegCard(card,song,sec,gidx,segIdx,total);
               }
@@ -596,9 +709,9 @@ class WebServer {
               ta.placeholder='가사를 입력하세요\\nEnter = 줄바꿈';
               ta.value=tokensToPlain(sg.segData.tokens||[]);
               ta.addEventListener('input',()=>{
-                const st=loadState(song,sec.sec);const segData=[...st.segData];
+                const st=loadState(song,sec.sec,sec.startBar);const segData=[...st.segData];
                 segData[segIdx]={...segData[segIdx],tokens:textToTokens(ta.value)};
-                setState(song,sec.sec,{...st,segData});
+                setState(song,sec.sec,sec.startBar,{...st,segData});
               });
               edArea.appendChild(ta);
             }else{
@@ -611,15 +724,15 @@ class WebServer {
         }
 
         function refreshSegCard(card,song,sec,gidx,segIdx,total){
-          const st=loadState(song,sec.sec);const segs=getSegs(st,total);
-          const secStart=origSecOf(song,sec.sec).startBar||0;
+          const st=loadState(song,sec.sec,sec.startBar);const segs=getSegs(st,total);
+          const secStart=origSecOf(song,sec.sec,sec.startBar).startBar||0;
           card.replaceWith(createSegCard(song,sec,gidx,segIdx,segs[segIdx],segs.length,secStart,total));
         }
 
         function renderChordGrid(grid,song,sec,gidx,segIdx,ceKey){
           const ces=chordEditState[ceKey];
-          const st=loadState(song,sec.sec);
-          const total=origSecOf(song,sec.sec).totalBars||0;
+          const st=loadState(song,sec.sec,sec.startBar);
+          const total=origSecOf(song,sec.sec,sec.startBar).totalBars||0;
           const tokens=getSegs(st,total)[segIdx]?.segData.tokens||[];
           grid.innerHTML='';
           let line=newTokLine();let lineLastIdx=-1;
@@ -640,9 +753,9 @@ class WebServer {
           const btn=document.createElement('span');btn.className='add-ghost-btn';btn.textContent='+';
           btn.addEventListener('click',()=>{
             commitChordEdit(song,sec,gidx,segIdx,ceKey);
-            const st=loadState(song,sec.sec);const segData=[...st.segData];
+            const st=loadState(song,sec.sec,sec.startBar);const segData=[...st.segData];
             const toks=[...(segData[segIdx].tokens||[])];toks.splice(at,0,{type:'ghost'});
-            segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,{...st,segData});
+            segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,sec.startBar,{...st,segData});
             const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
             if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
             setTimeout(()=>openChordInput(song,sec,gidx,segIdx,ceKey,at),0);
@@ -674,9 +787,9 @@ class WebServer {
             const del=document.createElement('span');del.className='tok-del';del.textContent='×';
             del.addEventListener('click',e=>{
               e.stopPropagation();commitChordEdit(song,sec,gidx,segIdx,ceKey);
-              const st=loadState(song,sec.sec);const segData=[...st.segData];
+              const st=loadState(song,sec.sec,sec.startBar);const segData=[...st.segData];
               const toks=[...(segData[segIdx].tokens||[])];toks.splice(ti,1);
-              segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,{...st,segData});
+              segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,sec.startBar,{...st,segData});
               const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
               if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
             });
@@ -708,10 +821,10 @@ class WebServer {
 
         function confirmChord(song,sec,gidx,segIdx,ceKey,ti,val){
           const chord=normChord(val);
-          const st=loadState(song,sec.sec);const segData=[...st.segData];
+          const st=loadState(song,sec.sec,sec.startBar);const segData=[...st.segData];
           const toks=[...(segData[segIdx].tokens||[])];
           if(toks[ti]){toks[ti]={...toks[ti]};if(chord)toks[ti].chord=chord;else delete toks[ti].chord;}
-          segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,{...st,segData});
+          segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,sec.startBar,{...st,segData});
           const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
           if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
         }
@@ -720,7 +833,7 @@ class WebServer {
           const ces=chordEditState[ceKey];
           if(e.key==='Enter'||e.key===' '){
             e.preventDefault();ces.editIdx=null;confirmChord(song,sec,gidx,segIdx,ceKey,ti,inp.value);
-            const st=loadState(song,sec.sec);const total=origSecOf(song,sec.sec).totalBars||0;
+            const st=loadState(song,sec.sec,sec.startBar);const total=origSecOf(song,sec.sec,sec.startBar).totalBars||0;
             const toks=getSegs(st,total)[segIdx]?.segData.tokens||[];
             for(let j=ti+1;j<toks.length;j++){if(toks[j].type!=='br'){setTimeout(()=>openChordInput(song,sec,gidx,segIdx,ceKey,j),0);break;}}
           }else if(e.key==='Escape'){
@@ -729,9 +842,9 @@ class WebServer {
             if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
           }else if(e.key==='Tab'){
             e.preventDefault();ces.editIdx=null;confirmChord(song,sec,gidx,segIdx,ceKey,ti,inp.value);
-            const st=loadState(song,sec.sec);const segData=[...st.segData];
+            const st=loadState(song,sec.sec,sec.startBar);const segData=[...st.segData];
             const toks=[...(segData[segIdx].tokens||[])];toks.splice(ti+1,0,{type:'ghost'});
-            segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,{...st,segData});
+            segData[segIdx]={...segData[segIdx],tokens:toks};setState(song,sec.sec,sec.startBar,{...st,segData});
             const grid=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"] .chord-grid');
             if(grid)renderChordGrid(grid,song,sec,gidx,segIdx,ceKey);
             setTimeout(()=>openChordInput(song,sec,gidx,segIdx,ceKey,ti+1),0);
@@ -739,7 +852,7 @@ class WebServer {
         }
 
         function renderInstEditor(ed,song,sec,gidx,segIdx,sg,secStart,total){
-          const st=loadState(song,sec.sec);const segs=getSegs(st,total);
+          const st=loadState(song,sec.sec,sec.startBar);const segs=getSegs(st,total);
           const existingIC=segs[segIdx]?.segData.instChords||[];
           const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--sub);margin-bottom:10px';
           hint.textContent='8비트 그리드 코드 입력 (s=♯, b=♭)';ed.appendChild(hint);
@@ -760,14 +873,14 @@ class WebServer {
               inp.addEventListener('focus',()=>inp.select());
               inp.addEventListener('input',()=>{inp.value=inp.value.replace(/[^A-Za-z0-9#♭/]/g,'');inp.value=normChord(inp.value);});
               inp.addEventListener('change',()=>{
-                const cur=loadState(song,sec.sec);const segData=[...cur.segData];
+                const cur=loadState(song,sec.sec,sec.startBar);const segData=[...cur.segData];
                 const curIC=getSegs(cur,total)[segIdx]?.segData.instChords||[];
                 const newIC=Array(sg.barCount).fill(null).map((_,bi)=>{
                   const arr=[...(curIC[bi]||[])];
                   if(bi===b){const f=arr.filter(s=>s.pos!==beat);const v=normChord(inp.value);if(v)f.push({pos:beat,name:v});return f.sort((a,c)=>a.pos-c.pos);}
                   return arr;
                 });
-                segData[segIdx]={...segData[segIdx],instChords:newIC};setState(song,sec.sec,{...cur,segData});
+                segData[segIdx]={...segData[segIdx],instChords:newIC};setState(song,sec.sec,sec.startBar,{...cur,segData});
               });
               cell.appendChild(inp);row.appendChild(cell);
             }
@@ -776,47 +889,47 @@ class WebServer {
           ed.appendChild(table);
         }
 
+        // dirty 키("song|||sec@@startBar") 파싱
+        function parseDk(k){
+          const sep=k.indexOf('|||');
+          const song=k.slice(0,sep);
+          const rest=k.slice(sep+3);
+          const at=rest.lastIndexOf('@@');
+          return{song,sec:rest.slice(0,at),startBar:parseInt(rest.slice(at+2))};
+        }
+
         function saveAll(){
-          const needsSave=Object.keys(dirty).length>0||Object.keys(secUI).some(uk=>secUI[uk].sessionNote!==undefined||secUI[uk].singerNote!==undefined);
-          if(!needsSave){showMsg('변경사항 없음');return;}
+          if(Object.keys(dirty).length===0){showMsg('변경사항 없음');return;}
           const payload={};
-          const songData=DATA.find(s=>s.song===curSong);
-          if(songData)songData.sections.forEach((sec,gidx)=>{
-            const dk=dkOf(curSong,sec.sec);const ukey=ukOf(curSong,sec.sec,gidx);
-            const st=loadState(curSong,sec.sec);
-            if(!payload[curSong])payload[curSong]={};
-            if(!payload[curSong][sec.sec]){
-              const o=origSecOf(curSong,sec.sec);
-              const secStart=o.startBar||0;const total=o.totalBars||0;
-              const segs=getSegs(st,total);
-              const slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:''}));
-              const plain=tokensToPlain(segs[0]?.segData.tokens||[]);
-              const sNote=secUI[ukey]?.sessionNote??st.sessionNote??'';
-              const gNote=secUI[ukey]?.singerNote??st.singerNote??'';
-              payload[curSong][sec.sec]={lyricCue:plain.split('\\n')[0]||'',sessionNote:sNote,singerNote:gNote,slides};
-            }
-          });
           for(const[k,st]of Object.entries(dirty)){
-            const sep=k.indexOf('|||'),song=k.slice(0,sep),sec=k.slice(sep+3);
-            if(song===curSong)continue;
+            const{song,sec,startBar}=parseDk(k);
             if(!payload[song])payload[song]={};
-            const o=origSecOf(song,sec);
-            const secStart=o.startBar||0;const total=o.totalBars||0;
+            const occKey=sec+'@@'+startBar;
+            if(st.linked){
+              // 가사/코드는 캐노니컬을 따라가지만(slides 비움) 노트는 항상 자기 occurrence 것 보존
+              payload[song][occKey]={lyricCue:'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides:[],linked:true};
+              continue;
+            }
+            const o=origSecOf(song,sec,startBar);
+            const total=o.totalBars||0;
             const segs=getSegs(st,total);
             const slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:''}));
             const plain=tokensToPlain(segs[0]?.segData.tokens||[]);
-            payload[song][sec]={lyricCue:plain.split('\\n')[0]||'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides};
+            payload[song][occKey]={lyricCue:plain.split('\\n')[0]||'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides,linked:false};
           }
           fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
             .then(r=>r.json())
             .then(()=>{
               for(const[k,st]of Object.entries(dirty)){
-                const sep=k.indexOf('|||'),song=k.slice(0,sep),sec=k.slice(sep+3);
-                const sd=DATA.find(x=>x.song===song)?.sections.find(x=>x.sec===sec);
+                const{song,sec,startBar}=parseDk(k);
+                const sd=DATA.find(x=>x.song===song)?.sections.find(x=>x.sec===sec&&x.startBar===startBar);
                 if(sd){
-                  const segs=getSegs(st,sd.totalBars||0);
-                  sd.slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:''}));
-                  sd.sessionNote=st.sessionNote;sd.singerNote=st.singerNote;
+                  sd.linked=!!st.linked;
+                  sd.sessionNote=st.sessionNote||'';sd.singerNote=st.singerNote||'';
+                  if(!st.linked){
+                    const segs=getSegs(st,sd.totalBars||0);
+                    sd.slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:''}));
+                  }
                 }
               }
               for(const k in dirty)delete dirty[k];

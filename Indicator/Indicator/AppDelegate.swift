@@ -47,6 +47,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webServer.getLyric = { song, section in
             LyricsStore.shared.get(song: song, section: section)
         }
+        webServer.getLyricOcc = { song, section, startBar, canonicalStartBar in
+            LyricsStore.shared.resolve(song: song, section: section, startBar: startBar, canonicalStartBar: canonicalStartBar)
+        }
         webServer.saveLyrics = { dict in
             LyricsStore.shared.merge(dict)
         }
@@ -119,6 +122,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let tagMTC     = 103
     private let tagClock   = 104
     private let tagMarkers = 105
+    private let tagSchedule = 106
 
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -137,6 +141,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(makeStatusItem("MTC 수신 중", tag: tagMTC, action: #selector(openLogicSyncSettings)))
         menu.addItem(makeStatusItem("MIDI Clock 수신 중", tag: tagClock, action: #selector(openLogicSyncSettings)))
         menu.addItem(makeStatusItem("마커 목록 창 열림", tag: tagMarkers, action: nil))
+        menu.addItem(makeStatusItem("사전 스캔 안 됨 (선택)", tag: tagSchedule, action: #selector(scanSchedule)))
         menu.addItem(.separator())
 
         let addrItem = NSMenuItem(title: "http://\(ip):8888", action: #selector(copyAddress), keyEquivalent: "")
@@ -222,6 +227,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 updateStatusItem(item, ok: ok, title: title)
             }
         }
+
+        // 사전 스캔 상태 (3단계: 완료 / 재스캔 필요 / 안 됨 — 선택 기능이라 빨강 대신 회색 사용)
+        if let item = menu.item(withTag: tagSchedule) {
+            let snap = logicPoller.lastSnapshot
+            let liveMarkers = snap?.markers ?? []
+            let liveBpm = snap?.bpm ?? 0
+            let liveBpb = snap?.beatsPerBar ?? 4
+            let liveTS  = snap?.timeSigEvents ?? []
+            if ScheduleStore.shared.current == nil {
+                updateStatusItemTristate(item, color: .systemGray, title: "사전 스캔 안 됨 (선택)")
+            } else if ScheduleStore.shared.isValid(against: liveMarkers, bpm: liveBpm, beatsPerBar: liveBpb, timeSigEvents: liveTS) {
+                updateStatusItemTristate(item, color: .systemGreen, title: "사전 스캔 완료")
+            } else {
+                updateStatusItemTristate(item, color: .systemOrange, title: "마커/템포 변경됨 — 재스캔 필요")
+            }
+        }
+    }
+
+    private func updateStatusItemTristate(_ item: NSMenuItem, color: NSColor, title: String) {
+        let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: color, .font: NSFont.menuFont(ofSize: 0)]
+        let dot  = NSAttributedString(string: "● ", attributes: attrs)
+        let rest = NSAttributedString(string: title, attributes: [.font: NSFont.menuFont(ofSize: 0)])
+        let full = NSMutableAttributedString(attributedString: dot)
+        full.append(rest)
+        item.attributedTitle = full
+    }
+
+    @objc private func scanSchedule() {
+        guard let snap = logicPoller.lastSnapshot, !snap.markers.isEmpty else { return }
+        ScheduleStore.shared.scan(markers: snap.markers, bpm: snap.bpm, beatsPerBar: snap.beatsPerBar, timeSigEvents: snap.timeSigEvents)
     }
 
     @objc private func openAccessibilitySettings() {

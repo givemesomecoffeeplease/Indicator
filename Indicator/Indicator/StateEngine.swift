@@ -31,6 +31,10 @@ class StateEngine {
     private var pendingSectionIdx: Int = -1
     private var pendingCount: Int = 0
 
+    // ── 사전 스캔 앵커 (세션당 1회 고정 — 이후 AX 없이 MTC 산수로만 위치 계산) ──
+    private var pinnedScheduleBar: Double? = nil
+    private var pinnedScheduleMTC: TimeInterval? = nil
+
     // ── 현재 섹션 상태 ─────────────────────────────────────
     private var currentSectionIdx: Int = -1
     private var currentSectionName: String = ""  // 표시용
@@ -66,6 +70,7 @@ class StateEngine {
                 + Double(snapshot.transportBeat - 1) / Double(max(1, snapshot.beatsPerBar))
         anchorBar = bar
         anchorMTC = mtcTime
+        pinScheduleAnchorIfNeeded()
 
         debugLog("[AX] bar=\(String(format:"%.2f",bar)) mtcTime=\(String(format:"%.3f",mtcTime)) markers=\(snapshot.markers.count) bpm=\(snapshot.bpm) playing=\(mtcIsPlaying)")
 
@@ -125,6 +130,8 @@ class StateEngine {
             nextChordMTC       = 0
             pendingSectionIdx  = -1
             pendingCount       = 0
+            pinnedScheduleBar  = nil  // 점프 시 앵커 재고정 (안전 우선 — onJump 이후 다음 AX 읽기에서 재고정됨)
+            pinnedScheduleMTC  = nil
             onJump?()  // LogicPoller에게 bar/beat 즉시 재읽기 요청
         }
         prevMTCTime  = mtcTime
@@ -158,13 +165,27 @@ class StateEngine {
         let wall = Date().timeIntervalSinceReferenceDate
         guard wall - lastBeatWall >= 0.1 else { return }
         lastBeatWall = wall
-        debugLog("[Beat] countdownBeats=\(countdownBeats)")
 
-        if countdownBeats > 1 {
-            countdownBeats -= 1
-        } else if countdownBeats == 1 {
-            countdownBeats = 0
-            executeTransition()
+        if let schedBar = scheduleBarFloat(), scheduleTrusted() {
+            // 결정론적 경로 — 앵커+MTC 산수로 매번 정확한 위치 재계산 (디바운스/드리프트 없음)
+            anchorBar = schedBar
+            anchorMTC = mtcTime
+            let idx = detectSectionIdx(at: schedBar)
+            if idx != currentSectionIdx, idx >= 0 {
+                debugLog("[Schedule] TRANSITION → \(sectionName(at: idx)) (bar \(String(format:"%.2f",schedBar)))")
+                applySection(idx: idx, retroactive: true)
+            } else if let bounds = sectionBounds(idx: currentSectionIdx) {
+                countdownBeats = calcBeats(from: schedBar, to: bounds.end)
+            }
+        } else {
+            // 기존 경로 (변경 없음) — 스캔 없거나 무효일 때 폴백
+            debugLog("[Beat] countdownBeats=\(countdownBeats)")
+            if countdownBeats > 1 {
+                countdownBeats -= 1
+            } else if countdownBeats == 1 {
+                countdownBeats = 0
+                executeTransition()
+            }
         }
 
         if chordPending {
@@ -315,6 +336,47 @@ class StateEngine {
         return total
     }
 
+    // MARK: - 사전 스캔 결정론적 타이밍
+
+    // 스캔된 마커·템포·박자가 현재 라이브 상태와 정확히 일치하는지 (마디↔시간 환산 신뢰 여부)
+    private func scheduleTrusted() -> Bool {
+        ScheduleStore.shared.isValid(against: snapshot.markers, bpm: snapshot.bpm,
+                                      beatsPerBar: snapshot.beatsPerBar, timeSigEvents: snapshot.timeSigEvents)
+    }
+
+    // calcDuration의 역함수: startBar에서 elapsedSec(초)만큼 지난 후의 bar 위치
+    private func barAfter(elapsedSec: Double, from startBar: Double) -> Double {
+        guard elapsedSec > 0 else { return startBar }
+        var remaining = elapsedSec
+        var cur = startBar
+        let changes = snapshot.timeSigEvents.filter { Double($0.bar) > startBar }.sorted { $0.bar < $1.bar }
+        for ev in changes {
+            let bpb = Double(beatsPerBarAt(bar: cur))
+            let segSec = (Double(ev.bar) - cur) * bpb * beatDuration()
+            if remaining <= segSec {
+                return cur + remaining / (bpb * beatDuration())
+            }
+            remaining -= segSec
+            cur = Double(ev.bar)
+        }
+        let bpb = Double(beatsPerBarAt(bar: cur))
+        return cur + remaining / (bpb * beatDuration())
+    }
+
+    // 고정 앵커 + 경과 MTC 시간으로 계산한 현재 bar (AX 불필요, 노이즈 없음)
+    private func scheduleBarFloat() -> Double? {
+        guard let b0 = pinnedScheduleBar, let t0 = pinnedScheduleMTC else { return nil }
+        return barAfter(elapsedSec: mtcTime - t0, from: b0)
+    }
+
+    // 세션당 1회만 앵커 고정 — 재생 중이고 스캔이 신뢰 가능하며 아직 안 박혔을 때
+    private func pinScheduleAnchorIfNeeded() {
+        guard pinnedScheduleBar == nil, mtcIsPlaying, scheduleTrusted() else { return }
+        pinnedScheduleBar = anchorBar
+        pinnedScheduleMTC = anchorMTC
+        debugLog("[Schedule] anchor pinned: bar=\(String(format:"%.2f",anchorBar)) mtc=\(String(format:"%.3f",anchorMTC))")
+    }
+
     // ── 코드 beat-snap 헬퍼 ──────────────────────────────
 
     private func chordsInCurrentSection() -> [ChordEvent] {
@@ -422,13 +484,19 @@ class StateEngine {
             }
         }
 
-        if let d = LyricsStore.shared.get(song: songName, section: cm.displayName) {
-            state.lyricCue = d.lyricCue
-            state.note     = d.note
-        }
-        if let nm = nm, let d = LyricsStore.shared.get(song: songName, section: nm.displayName) {
-            state.nextLyricCue = d.lyricCue
-            state.nextNote     = d.note
+        // occurrence 기반 조회: 같은 이름 섹션이 여러 번 등장해도 각 occurrence의 독립/연결 데이터를 정확히 가져옴
+        let canonicalCur = sections.first(where: { $0.displayName == cm.displayName })?.bar ?? cm.bar
+        let (curData, _) = LyricsStore.shared.resolve(song: songName, section: cm.displayName, startBar: cm.bar, canonicalStartBar: canonicalCur)
+        state.lyricCue   = curData.lyricCue
+        state.note       = curData.sessionNote
+        state.singerNote = curData.singerNote
+
+        if let nm = nm {
+            let canonicalNxt = sections.first(where: { $0.displayName == nm.displayName })?.bar ?? nm.bar
+            let (nxtData, _) = LyricsStore.shared.resolve(song: songName, section: nm.displayName, startBar: nm.bar, canonicalStartBar: canonicalNxt)
+            state.nextLyricCue   = nxtData.lyricCue
+            state.nextNote       = nxtData.sessionNote
+            state.nextSingerNote = nxtData.singerNote
         }
         state.currentSectionIndexInSong = sections.firstIndex(of: cm) ?? -1
 

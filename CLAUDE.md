@@ -1,5 +1,33 @@
 # Indicator
 
+## 2026-06-30 작업 내역
+
+### 섹션 occurrence별 독립 데이터 (가사/코드 손실 버그 근본 수정)
+- **버그**: `LyricsStore`가 `song -> sectionName -> SectionData`로만 키를 가져서, 같은 이름 섹션이 여러 번 등장(occurrence)하면 전부 데이터를 공유. 길이(totalBars)가 다른 occurrence를 에디터에서 열면 공유 데이터를 자기 길이로 잘라서 보여주고, 셀 하나만 수정해도 잘린 길이로 원본을 덮어써서 **코드/가사 영구 손실**.
+- **해결**: 저장 키를 occurrence 단위(`"섹션명@@startBar"`)로 변경. 기본값은 "독립"이며, 드롭박스에서 "[섹션명] 자동 연결" 선택 시 같은 이름의 가장 이른(canonical) occurrence를 실시간으로 따라감 (`LyricsStore.resolve()`, `Models.swift`의 `SectionData.linked`)
+- 마디 수 불일치 처리: 간주 코드는 앞마디부터 채우고 남으면 버림/모자라면 빈 마디(`WebServer.swift`의 `adaptSlides`/`adaptRawSlides`, 서버·클라이언트 동일 로직). 가사는 마디 무관하게 토큰 전체 미러링.
+- **수정 시 자동 분리(fork-on-edit)**: "자동 연결" 상태에서 가사/코드를 직접 수정하면 자동으로 "독립적으로 편집"로 전환됨 (`setState`). 단, **노트(세션노트/싱어노트)는 가사/코드 연결 여부와 무관하게 항상 occurrence 자기 자신의 값만 사용** — `setNote`로 별도 분리, fork 안 시킴.
+- `loadState()`가 linked occurrence를 열 때마다 캐노니컬의 **최신** 상태(세션 중 캐노니컬을 수정했어도)를 즉시 재계산해서 보여줌 — 드롭박스를 다시 누를 필요 없음 (`buildLinkedPreview`)
+- 레거시 호환: 기존 `master.json`(occurrence 구분 없음)은 첫 occurrence가 자동으로 그 데이터를 쓰고(독립), 나머지 occurrence는 자동으로 "연결" 상태로 시작 — 마이그레이션 스크립트 불필요, 동적 폴백으로 처리
+
+### 가사/코드 표시 버그 다수 수정
+- **race condition**: `fetchLyricCache` 완료 전 첫 SSE 렌더가 빈 캐시로 fallback text를 그리고, 이후 `isPlaying=false`(정지)면 새 SSE 이벤트가 안 와서 영영 갱신 안 됨 → `lastKnownState` 저장 후 캐시 완료 시 재렌더링
+- **2번째 슬라이드 미표시**: `realtimeBar()`가 `anchorMTC`(앱 시작 시점 고정) 기준이라 5초 후 `anchorBar`(섹션 시작)에 고정되던 버그 → `sectionEntryMTC`+`sectionEntryBar` 기준으로 재작성
+- **슬라이드 탐색**: 섹션 occurrence 매칭 로직 제거, 곡 전체 슬라이드를 절대 bar 기준 flat 정렬 배열(`lyricSlides`)로 만들어 순서대로만 탐색 (`findCurrentEntry`/`findNextEntry`)
+- **간주 코드 그리드**: `flex-wrap:wrap`이라 마디 많으면 2번째 줄로 넘어가 부모 `overflow:hidden`에 잘리던 버그 → `nowrap`+고정 최소너비+가로스크롤로 변경, `justify-content:center` 추가
+- **ghost 토큰 높이 버그**: 글자 부분이 일반 공백이라 줄 높이 계산에서 collapse되어 코드 라벨이 아래로 밀리던 문제 → 줄바꿈 없는 공백(NBSP)으로 교체
+- 가사 토큰 칸 높이 통일: 코드 있는 줄에서만 모든 토큰에 빈 칸(투명) 예약 (코드 없는 줄까지 높이 늘리면 다른 레이아웃 깨짐 주의)
+- `IndicatorState`에 `singerNote`/`nextSingerNote` 필드 누락 + `StateEngine`이 존재하지 않는 `.note` 필드를 읽던 버그(에디터는 `sessionNote`에 저장) → 필드 추가 + `state.note = curData.sessionNote`로 수정
+
+### 사전 스캔 기능 (실연 안정성 — v2, 진행 중)
+> 플랜: `/Users/heehan/.claude/plans/pre-scan-schedule-cache.md`
+
+- **목적**: 조명 콘솔의 타임코드 동기화와 같은 원리. AX(화면읽기)는 마커를 "한 번 읽어오는 용도"로만 쓰고, 실제 진행은 MTC(타임코드) 기반 결정론적 계산으로 전환해 라이브 중 AX 의존도를 최소화.
+- **v1 실패**: "스캔 유효하면 AX 디바운스 생략"으로 구현했다가 **실연 테스트에서 카운터가 완전히 틀어지는 회귀** 발생, 즉시 롤백. 디바운스는 마커 위치 신뢰성이 아니라 AX 매 순간 읽기의 노이즈를 거르는 장치였음 — 혼동이 원인.
+- **v2 설계**: `ScheduleStore.swift`(신규) — 마커+BPM+박자 변경 이벤트까지 스캔해 fingerprint로 검증. `StateEngine`에 `pinnedScheduleBar`/`pinnedScheduleMTC` 앵커를 세션당 1회만 고정(MTC 재생 시작 시), 이후 `onBeat()`에서 앵커+경과 MTC 시간으로 매번 현재 bar를 처음부터 재계산(드리프트 누적 없음) → `detectSectionIdx`로 섹션 즉시 확정. **기존 AX 디바운스 경로는 스캔 없거나 무효(마커/템포 변경)일 때 폴백으로 100% 그대로 보존** (onBeat의 else 분기).
+- 메뉴바에 "사전 스캔" 체크리스트 항목 추가(초록=완료/주황=재스캔 필요/회색=안 함), 클릭 시 `LogicPoller.lastSnapshot`의 마커+BPM+박자를 스캔.
+- **⚠️ 다음 컴퓨터에서 계속 디버깅 예정**: 스캔 기능에 에러 있음 — 현재까지는 빌드 성공 + 기본 동작 확인했지만 추가 에러 리포트 받는 중. 점프(seek) 직후 기존 디바운스 경로와 새 경로가 같은 `update(snapshot:)` 호출 내에서 잠깐 겹치는 부분 등 재검토 필요.
+
 ## 2026-06-29 작업 내역
 
 ### 밴드뷰 레이아웃 재설계

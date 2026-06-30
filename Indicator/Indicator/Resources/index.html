@@ -126,30 +126,35 @@
   .meta-sm.vis { display: block; }
 
   /* 구분선 */
-  #sec-divider-v {
-    width: 1px; align-self: stretch;
-    background: #2a2a36; flex-shrink: 0;
-  }
   #sec-divider-h {
     height: 1px; background: #2a2a36;
     margin: 0 16px; flex-shrink: 0;
   }
 
-  /* 카운트다운 (가사 사이 경계) */
-  #cd-row {
+  /* 지금/다음 섹션 가운데: 구분선 + 카운트다운 */
+  #cd-col {
     flex-shrink: 0;
-    height: 20px;
+    align-self: stretch;
     display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  #sec-divider-v {
+    width: 1px; height: 100%;
+    background: #2a2a36;
   }
   #cd-wrap {
+    position: absolute;
     display: flex; align-items: center; justify-content: center;
     opacity: 0; transition: opacity 0.2s;
   }
   #cd-wrap.visible { opacity: 1; }
+  #cd-wrap.visible ~ #sec-divider-v,
+  #cd-col:has(#cd-wrap.visible) #sec-divider-v { opacity: 0; }
   #cd-num {
-    font-size: clamp(16px, 3.5vw, 26px);
+    font-size: clamp(28px, 6vw, 56px);
     font-weight: 900; color: #5DCAA5;
     line-height: 1; letter-spacing: -0.04em;
+    background: #14141a; padding: 0 8px;
   }
   #cd-num.beat-pop {
     animation: beatpop 0.18s cubic-bezier(0.2,0,0.4,1) forwards;
@@ -198,7 +203,7 @@
     display: flex;
     flex-direction: row;
     align-items: flex-end;
-    justify-content: flex-start;
+    justify-content: center;
     flex-wrap: nowrap;
   }
   .lyric-char {
@@ -218,14 +223,14 @@
     white-space: nowrap;
     line-height: 1.3;
   }
+  .chord-label-empty { color: transparent; }
 
   /* 노트 (row 5) */
   .note {
     display: flex; align-items: flex-start;
     gap: 4px; font-size: 13px;
     color: #E8A840; line-height: 1.3;
-    text-align: left; padding: 0 10px;
-    align-self: start;
+    text-align: center; padding: 0 10px;
   }
   .note.hidden { display: none; }
   .ndot {
@@ -294,11 +299,11 @@
   .icb-beat:last-child { border-right: none; }
   .icb-chord { font-size: 11px; color: #5DCAA5; font-weight: 700; white-space: nowrap; line-height: 1; }
   .icb-div { display: none; }
-  .inst-disp-grid { display: flex; align-items: center; flex-wrap: wrap; gap: 0; padding: 4px 0; }
-  .inst-disp-bar { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 2px 10px; min-width: 36px; gap: 2px; }
-  .inst-disp-div { width: 1px; height: 32px; background: #333; margin: 0 4px; }
-  .inst-disp-chord { font-size: clamp(13px,2.2vw,22px); color: #5DCAA5; font-weight: 700; line-height: 1.2; white-space: nowrap; }
-  .inst-disp-empty { font-size: clamp(12px,1.8vw,18px); color: #333; }
+  .inst-disp-grid { display: flex; align-items: center; justify-content: center; flex-wrap: nowrap; gap: 0; padding: 4px 0; width: 100%; overflow-x: auto; }
+  .inst-disp-bar { display: flex; flex: 0 0 auto; flex-direction: column; align-items: center; justify-content: center; min-width: 40px; padding: 2px 6px; gap: 2px; }
+  .inst-disp-div { width: 1px; flex-shrink: 0; height: 32px; background: #333; margin: 0 3px; }
+  .inst-disp-chord { font-size: clamp(12px,2vw,20px); color: #5DCAA5; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+  .inst-disp-empty { font-size: clamp(10px,1.6vw,16px); color: #333; }
 </style>
 </head>
 <body>
@@ -326,7 +331,10 @@
     </div>
     <div class="note hidden" id="cur-note-wrap"><div class="ndot"></div><span id="cur-note"></span></div>
   </div>
-  <div id="sec-divider-v"></div>
+  <div id="cd-col">
+    <div id="sec-divider-v"></div>
+    <div id="cd-wrap"><div id="cd-num">--</div></div>
+  </div>
   <div class="sec-col">
     <div class="sec-label" id="nxt-label">다음</div>
     <div id="nxt-name">--</div>
@@ -342,8 +350,6 @@
 <div id="sec-divider-h"></div>
 
 <div id="lyric-area"><div id="lyric-block"></div></div>
-
-<div id="cd-row"><div id="cd-wrap"><div id="cd-num">--</div></div></div>
 
 <div id="next-lyric-area"><div id="next-lyric-block"></div></div>
 
@@ -618,6 +624,7 @@
     while (lines.length > 1 && lines[lines.length - 1].length === 0) lines.pop();
     lines.forEach(line => {
       const allGhost = line.length > 0 && line.every(t => t.type === 'ghost');
+      const lineHasChord = line.some(t => t.chord);
       const lineEl = document.createElement('div');
       lineEl.className = 'lyric-line';
       if (allGhost) {
@@ -628,10 +635,10 @@
         const charEl = document.createElement('span');
         charEl.className = t.type === 'ghost' ? 'lyric-char ghost' : 'lyric-char';
         if (allGhost) charEl.style.cssText = 'min-width:2em;margin-right:12px;';
-        if (t.chord) {
+        if (lineHasChord && !(allGhost && !t.chord)) {
           const chordEl = document.createElement('span');
-          chordEl.className = 'chord-label';
-          chordEl.textContent = t.chord;
+          chordEl.className = t.chord ? 'chord-label' : 'chord-label chord-label-empty';
+          chordEl.textContent = t.chord || '\u00A0';
           charEl.appendChild(chordEl);
         }
         if (t.type === 'char') charEl.appendChild(document.createTextNode(t.char === ' ' ? '\u00A0' : (t.char || '')));
@@ -723,11 +730,11 @@
     renderSlide($('next-lyric-block'), nxtEntry?.slide || null, '');
 
     // 노트 (세션 노트)
-    const curNote = s.sessionNote || '';
+    const curNote = s.note || '';
     $('cur-note').textContent = curNote;
     $('cur-note-wrap').classList.toggle('hidden', !curNote);
 
-    const nxtNote = s.nextSessionNote || '';
+    const nxtNote = s.nextNote || '';
     $('nxt-note').textContent = nxtNote;
     $('nxt-note-wrap').classList.toggle('hidden', !nxtNote);
 

@@ -20,6 +20,7 @@
 		BB00020B00000000000000AA /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010B00000000000000AA /* index.html */; };
 		BB00020C00000000000000AA /* singer.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010C00000000000000AA /* singer.html */; };
 		F808FA292FEDAB0700C36F76 /* LyricsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA282FEDAB0700C36F76 /* LyricsStore.swift */; };
+		F808FA2B2FEDAB0700C36F76 /* ScheduleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +38,7 @@
 		BB00010B00000000000000AA /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
 		BB00010C00000000000000AA /* singer.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = singer.html; sourceTree = "<group>"; };
 		F808FA282FEDAB0700C36F76 /* LyricsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsStore.swift; sourceTree = "<group>"; };
+		F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				F808FA282FEDAB0700C36F76 /* LyricsStore.swift */,
+				F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */,
 				BB00000300000000000000AA /* Indicator */,
 				BB00000200000000000000AA /* Products */,
 			);
@@ -174,6 +177,7 @@
 				BB00020300000000000000AA /* MTCReceiver.swift in Sources */,
 				BB00020400000000000000AA /* LogicPoller.swift in Sources */,
 				F808FA292FEDAB0700C36F76 /* LyricsStore.swift in Sources */,
+				F808FA2B2FEDAB0700C36F76 /* ScheduleStore.swift in Sources */,
 				BB00020500000000000000AA /* StateEngine.swift in Sources */,
 				BB00020600000000000000AA /* WebServer.swift in Sources */,
 				BB00020700000000000000AA /* SSEBroadcaster.swift in Sources */,

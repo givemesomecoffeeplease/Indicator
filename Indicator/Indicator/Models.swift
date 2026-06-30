@@ -28,17 +28,19 @@ struct SectionData: Codable {
     var sessionNote: String
     var singerNote: String
     var slides: [LyricSlide]
+    var linked: Bool   // true면 같은 이름의 가장 이른 독립(linked==false) occurrence를 동적으로 따라감
 
-    init(lyricCue: String = "", note: String = "", sessionNote: String = "", singerNote: String = "", slides: [LyricSlide] = []) {
+    init(lyricCue: String = "", note: String = "", sessionNote: String = "", singerNote: String = "", slides: [LyricSlide] = [], linked: Bool = false) {
         self.lyricCue = lyricCue
         self.note = note
         self.sessionNote = sessionNote
         self.singerNote = singerNote
         self.slides = slides
+        self.linked = linked
     }
 
     // 하위 호환: 기존 필드 없으면 기본값
-    enum CodingKeys: String, CodingKey { case lyricCue, note, sessionNote, singerNote, slides }
+    enum CodingKeys: String, CodingKey { case lyricCue, note, sessionNote, singerNote, slides, linked }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lyricCue    = (try? c.decode(String.self, forKey: .lyricCue))    ?? ""
@@ -46,6 +48,7 @@ struct SectionData: Codable {
         sessionNote = (try? c.decode(String.self, forKey: .sessionNote)) ?? ""
         singerNote  = (try? c.decode(String.self, forKey: .singerNote))  ?? ""
         slides      = (try? c.decode([LyricSlide].self, forKey: .slides)) ?? []
+        linked      = (try? c.decode(Bool.self, forKey: .linked))        ?? false
     }
 }
 
@@ -100,8 +103,10 @@ struct IndicatorState: Codable, Equatable {
     var sectionLengthBars: Double = 0
     var lyricCue: String = ""
     var note: String = ""
+    var singerNote: String = ""
     var nextLyricCue: String = ""
     var nextNote: String = ""
+    var nextSingerNote: String = ""
     var nextSectionIsSong: Bool = false
     var currentBarFloat: Double = 0
     var nextChordInMs: Double = 0

@@ -18,12 +18,43 @@ class LyricsStore {
 
     // MARK: - Query
 
+    // 하위호환: occurrence 구분 없는 옛 조회 (legacy flat key)
     func get(song: String, section: String) -> SectionData? {
         data[song]?[section]
     }
 
     func songNames() -> [String] {
         Array(data.keys).sorted()
+    }
+
+    // MARK: - Occurrence 기반 조회 (섹션 동일 이름 여러 occurrence 독립/연결 지원)
+
+    private func occKey(_ section: String, _ startBar: Int) -> String { "\(section)@@\(startBar)" }
+
+    /// 특정 occurrence의 데이터를 해석한다.
+    /// - linked==true인 occurrence는 canonicalStartBar(같은 이름의 가장 이른 occurrence)의 데이터를 따라간다.
+    /// - 명시적 occurrence 데이터가 없으면: 첫 occurrence는 레거시(이름만) 데이터로, 나머지는 자동으로 첫 occurrence를 따라간다(linked=true).
+    /// - 반환값의 `linked`는 드롭박스 UI에 표시할 "현재 설정 상태"이다.
+    // 노트(sessionNote/singerNote)는 가사/코드 연결 여부와 무관하게 항상 occurrence 자기 자신의 값만 사용한다.
+    func resolve(song: String, section: String, startBar: Int, canonicalStartBar: Int) -> (data: SectionData, linked: Bool) {
+        let key = occKey(section, startBar)
+        if let exact = data[song]?[key] {
+            if exact.linked {
+                var canonicalData = data[song]?[occKey(section, canonicalStartBar)] ?? data[song]?[section] ?? SectionData()
+                canonicalData.sessionNote = exact.sessionNote
+                canonicalData.singerNote  = exact.singerNote
+                return (canonicalData, true)
+            }
+            return (exact, false)
+        }
+        if startBar == canonicalStartBar {
+            return (data[song]?[section] ?? SectionData(), false)
+        } else {
+            var canonicalData = data[song]?[occKey(section, canonicalStartBar)] ?? data[song]?[section] ?? SectionData()
+            canonicalData.sessionNote = ""
+            canonicalData.singerNote  = ""
+            return (canonicalData, true)
+        }
     }
 
     // MARK: - Write
