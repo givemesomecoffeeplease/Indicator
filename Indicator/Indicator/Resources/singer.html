@@ -338,7 +338,7 @@
   const $ = id => document.getElementById(id);
 
   // ── 가사 캐시 (/edit DATA 파싱) ──
-  // flat sorted slide array: { songName: [{ secName, absBar, slide }] }
+  // flat sorted slide array: { songName: [{ secName, secIdx, relBar, slide }] }
   let lyricSlides = {};
   let lastKnownState = null;
 
@@ -351,34 +351,32 @@
       lyricSlides = {};
       data.forEach(song => {
         const arr = [];
-        (song.sections || []).forEach(sec => {
-          const secStart = sec.startBar || 0;
+        (song.sections || []).forEach((sec, secIdx) => {
           (sec.slides || []).forEach(slide => {
-            const slRel = (secStart > 0 && slide.startBar >= secStart) ? slide.startBar - secStart : slide.startBar;
-            arr.push({ secName: sec.sec, absBar: secStart + slRel, slide });
+            arr.push({ secName: sec.sec, secIdx, relBar: slide.startBar || 0, slide });
           });
         });
-        arr.sort((a, b) => a.absBar - b.absBar);
+        arr.sort((a, b) => a.secIdx - b.secIdx || a.relBar - b.relBar);
         lyricSlides[song.song] = arr;
       });
       if (lastKnownState) applyState(lastKnownState);
     } catch(e) {}
   }
 
-  function findCurrentEntry(songName, barFloat) {
+  function findCurrentEntry(songName, secIdx, barFloat) {
     const arr = lyricSlides[songName];
     if (!arr || !arr.length) return null;
-    let best = arr[0];
-    for (const e of arr) { if (e.absBar <= barFloat) best = e; else break; }
+    const inSec = arr.filter(e => e.secIdx === secIdx);
+    if (!inSec.length) return null;
+    let best = inSec[0];
+    for (const e of inSec) { if (e.relBar <= barFloat) best = e; else break; }
     return best;
   }
 
-  function findNextEntry(songName, barFloat) {
+  function findNextEntry(songName, secIdx, barFloat) {
     const arr = lyricSlides[songName];
     if (!arr || !arr.length) return null;
-    let bestIdx = 0;
-    for (let i = 0; i < arr.length; i++) { if (arr[i].absBar <= barFloat) bestIdx = i; else break; }
-    return arr[bestIdx + 1] || null;
+    return arr.find(e => e.secIdx > secIdx || (e.secIdx === secIdx && e.relBar > barFloat)) || null;
   }
 
   function findSlide(songName, secName, barFloat, forNext) {
@@ -622,8 +620,9 @@
     // 현재/다음 슬라이드 (flat 순서 기준 — 라벨도 같은 소스로 통일해 라벨/콘텐츠 불일치 방지)
     const songName = songs[idx] || '';
     const barFloat = s.currentBarFloat ?? 0;
-    const curEntry = findCurrentEntry(songName, barFloat);
-    const curLabel = curEntry ? curEntry.secName : (s.currentSection || '');
+    const secIdx = s.currentSectionIndexInSong ?? -1;
+    const curEntry = findCurrentEntry(songName, secIdx, barFloat);
+    const curLabel = s.currentSection || curEntry?.secName || '';
     $('cur-section-label').textContent = curLabel.startsWith('#') ? '' : (curLabel || '—');
     renderSlide($('cur-lyric-block'), curEntry?.slide || null, s.lyricCue);
     const curNote = s.singerNote || '';
@@ -631,7 +630,7 @@
     $('cur-singer-note').classList.toggle('hidden', !curNote);
 
     // 다음 슬라이드: flat 배열 기준 바로 다음 슬라이드
-    const nxtEntry = findNextEntry(songName, barFloat);
+    const nxtEntry = findNextEntry(songName, secIdx, barFloat);
     const nxtSec = s.nextSection || '';
     const nxtIsSong = s.nextSectionIsSong || nxtSec.startsWith('#');
     // flat 배열에 다음 슬라이드가 없으면 → 다음 곡 경계

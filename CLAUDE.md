@@ -1,5 +1,43 @@
 # Indicator
 
+## 2026-07-02 작업 내역
+
+### 사전 스캔 v2 완성 — MTC 기반 변박/섹션 결정론적 계산
+
+#### 핵심 설계
+- **`ScheduleStore.swift`** (전면 재작성): 스캔 시 모든 변박 이벤트(`TimeSigEvent`, bar 번호)를 MTC 초로 변환해 `ScannedTimeSig` 배열로 저장. `beatsPerBarAt(mtcSeconds:)` — 배열 탐색만으로 즉시 반환, AX 지연 없음.
+- **자동 스캔**: 앱 시작 후 MTC 첫 수신 시 자동 스캔 (`AppDelegate.onTimeUpdate`). 조건: 마커+변박+anchorMTC(>0) 모두 있을 때. timeSigs가 1개 이하면 재스캔.
+- **bar→MTC 변환**: `convertTimeSigsToMTC()` — 앵커(bar, MTC)에서 앞뒤로 세그먼트별 `barDuration = beatsPerBar × (4/beatUnit) × (60/BPM)` 누산. BPM 일정 가정(변속 없는 곡 전제).
+
+#### StateEngine 변경
+- **박자 업데이트**: `applySection()`에서 `ScheduleStore.beatsPerBarAt(mtcSeconds: bounds.start)`로 섹션 진입 시 즉시 확정. `onBeat()`에서 덮어쓰지 않음(경계 직전 MTC로 이전 박자를 반환해 덮어쓰는 race condition 제거).
+- **카운트다운**: `onBeat()`마다 `-1` 감소 (MTC 재계산 제거 → 같은 숫자 두 번 나오거나 건너뛰는 버그 수정). 섹션 진입 시 `initCountdown()`으로 MTC 기반 초기값 1회 계산.
+- **정지 상태 섹션 감지**: `snapshot.transportMTC`(AX 타임코드 디스플레이, 정지 중에도 읽힘) 우선 사용 → 앵커 추산 폴백.
+- **박자 표시**: `compute()`에서 `currentSectionBeatsPerBar/beatUnit`을 그대로 사용 (ScheduleStore 매번 조회 제거).
+- **`recompute()` 버그 수정**: `lastState` 업데이트를 실제 브로드캐스트 직전으로 이동 (이전: rate limit 걸려도 `lastState` 갱신 → 이후 상태 변화 묻힘).
+- **`transportMTC` 읽기**: `LogicPoller.readTransportValues()`에서 두 번째 "재생헤드 위치" AX 그룹에서 타임코드 읽음 (`snapshot.transportMTC`).
+
+#### 스캔 결과 예시 (20260628click 프로젝트)
+```
+anchorBar=51 anchorMTC=3600.08 bpm=90.0
+3/4 @ 3600.08s  (bar 1)
+4/4 @ 3600.08s  (bar 1 기본값 중복 — Logic 기본 4/4가 지워지지 않아 발생)
+4/4 @ 3708.08s  (bar 55)
+2/4 @ 3751.47s  (bar 71)
+3/4 @ 3752.80s  (bar 72)
+4/4 @ 3790.80s  (bar 91)
+3/4 @ 3881.47s  (bar 125)
+4/4 @ 3911.47s  (bar 140)
+```
+
+#### 미해결 / 다음 작업
+1. **Logic 기본 4/4 중복 문제**: 조표 및 박자표 목록 첫 줄에 위치 없는 기본값(4/4)이 항상 존재. 실제 첫 변박(3/4 @ bar 1)과 같은 MTC에 겹쳐서 `beatsPerBarAt`이 `last(where:)` 기준으로 기본값보다 늦은 걸 반환함 → 현재는 우연히 동작하지만, 기본값이 실제 변박보다 나중에 정렬되면 틀릴 수 있음. **수정 방향**: `extractTimeSigsAndKeys`에서 위치 없는 기본행은 bar 0으로 처리해 항상 가장 앞에 오게 하거나, 같은 bar에 여러 항목이 있으면 마지막 것만 유지.
+2. **카운트다운 6에서 시작 버그**: 4/4 섹션인데 3/4 threshold(6)가 적용되는 경우 여전히 발생 여부 테스트 중. `applySection()`에서 `currentSectionBeatsPerBar = 4` 설정 후 `onBeat()`이 덮어쓰지 않도록 수정 완료 — 테스트 필요.
+3. **BPM 변속 미지원**: `convertTimeSigsToMTC`는 단일 BPM 가정. 곡 중 BPM 변속이 있으면 변박 MTC 오차 발생. 현재 사용 프로젝트는 BPM 고정이라 무관.
+4. **디버그 로그 정리**: `[AX]`, `[BPB]` 등 `debugLog()` 호출 남아있음 — 릴리즈 전 제거 필요.
+
+---
+
 ## 2026-06-30 작업 내역
 
 ### 섹션 occurrence별 독립 데이터 (가사/코드 손실 버그 근본 수정)

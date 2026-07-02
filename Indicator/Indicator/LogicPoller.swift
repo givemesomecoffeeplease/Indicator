@@ -142,12 +142,21 @@ class LogicPoller {
 
     private func readTransportValues(innerBar: AXUIElement, into snapshot: inout LogicSnapshot) {
 
-            // Bar / Beat
-            if let posGroup  = findByDesc(innerBar, "재생헤드 위치"),
+            // Bar / Beat + 타임코드 (두 개의 "재생헤드 위치" 그룹)
+            let children = axArray(of: innerBar, key: kAXChildrenAttribute) ?? []
+            let posGroups = children.filter {
+                (axString($0, key: kAXDescriptionAttribute) ?? "") == "재생헤드 위치"
+            }
+            if let posGroup = posGroups.first,
                let barSlider  = findByDesc(posGroup, "마디"),
                let beatSlider = findByDesc(posGroup, "비트") {
                 if let bar  = axNumber(barSlider),  bar  >= 1 { snapshot.transportBar  = Int(bar)  }
                 if let beat = axNumber(beatSlider), beat >= 1 { snapshot.transportBeat = Int(beat) }
+            }
+            if posGroups.count >= 2,
+               let desc = axString(posGroups[1], key: kAXDescriptionAttribute), desc == "재생헤드 위치",
+               let tcStr = axString(posGroups[1], key: kAXValueAttribute) ?? axString(posGroups[1], key: kAXTitleAttribute) {
+                if let tc = parseMTCSeconds(tcStr) { snapshot.transportMTC = tc }
             }
 
             // BPM
@@ -278,7 +287,7 @@ class LogicPoller {
 
             func harvest() {
                 for m in extractMarkers(from: table) {
-                    let key = "\(m.name)_\(m.bar)_\(m.beat)"
+                    let key = "\(m.name)_\(m.mtcSeconds)"
                     if seenKeys.insert(key).inserted { collected.append(m) }
                 }
             }
@@ -304,7 +313,7 @@ class LogicPoller {
             }
 
             if !collected.isEmpty {
-                snapshot.markers = collected.sorted { ($0.bar, $0.beat) < ($1.bar, $1.beat) }
+                snapshot.markers = collected.sorted { $0.mtcSeconds < $1.mtcSeconds }
             }
             return
         }
@@ -345,8 +354,9 @@ class LogicPoller {
             let nameText = (axString(nameCell, key: kAXDescriptionAttribute) ?? "")
                 .trimmingCharacters(in: .whitespaces)
 
-            guard !nameText.isEmpty, let pos = parseBarBeat(posText) else { continue }
-            markers.append(Marker(name: nameText, bar: pos.bar, beat: pos.beat))
+            guard !nameText.isEmpty, let mtcSec = parseMTCSeconds(posText) else { continue }
+            let bar = parseBarBeat(posText)?.bar ?? 1
+            markers.append(Marker(name: nameText, mtcSeconds: mtcSec, bar: bar))
         }
         return markers
     }
@@ -364,59 +374,108 @@ class LogicPoller {
             let title = axString(window, key: kAXTitleAttribute) ?? ""
             guard title.contains("조표 및 박자표 목록") else { continue }
             guard let table = findByRole(window, "AXTable") else { continue }
-            let events = extractTimeSigs(from: table)
-            if !events.isEmpty { snapshot.timeSigEvents = events }
+            let (timeSigs, keys) = extractTimeSigsAndKeys(from: table)
+            if !timeSigs.isEmpty { snapshot.timeSigEvents = timeSigs }
+            // 현재 bar 기준으로 적용 가능한 마지막 박자/키 적용
+            let curBar = max(1, snapshot.transportBar)
+            if let ts = timeSigs.last(where: { $0.bar <= curBar }) ?? timeSigs.first {
+                snapshot.beatsPerBar   = ts.beatsPerBar
+                snapshot.timeSignature = "\(ts.beatsPerBar)/\(ts.beatUnit)"
+            }
+            if let key = keys.last(where: { $0.bar <= curBar }) ?? keys.first {
+                snapshot.key = key.name
+            }
             return
         }
     }
 
-    private func extractTimeSigs(from table: AXUIElement) -> [TimeSigEvent] {
+    private func extractTimeSigsAndKeys(from table: AXUIElement) -> ([TimeSigEvent], [(bar: Int, name: String)]) {
         let rows = axArray(of: table, key: kAXRowsAttribute)
                 ?? axArray(of: table, key: kAXChildrenAttribute)
                 ?? []
 
-        var events: [TimeSigEvent] = []
+        var timeSigs: [TimeSigEvent] = []
+        var keys: [(bar: Int, name: String)] = []
+
         for row in rows {
             let cells = axArray(of: row, key: kAXChildrenAttribute) ?? []
             guard cells.count >= 3 else { continue }
 
-            // 위치: cells[0] → AXGroup child
-            guard let posChildren = axArray(of: cells[0], key: kAXChildrenAttribute),
-                  let posGroup = posChildren.first(where: {
-                      (axString($0, key: kAXRoleAttribute) ?? "") == "AXGroup"
-                  }) else { continue }
-            let posText = axString(posGroup, key: kAXDescriptionAttribute) ?? ""
-            guard let pos = parseBarBeat(posText) else { continue }
+            // 위치: cells[0] → AXGroup child. 없으면 기본 행(bar=1)
+            let posChildren = axArray(of: cells[0], key: kAXChildrenAttribute) ?? []
+            let posGroup = posChildren.first(where: {
+                (axString($0, key: kAXRoleAttribute) ?? "") == "AXGroup"
+            })
+            let bar: Int
+            if let posGroup = posGroup {
+                let posText = axString(posGroup, key: kAXDescriptionAttribute) ?? ""
+                guard let pos = parseBarBeat(posText) else { continue }
+                bar = pos.bar
+            } else {
+                bar = 1
+            }
 
-            // 타입: cells[1] → AXCell child → desc == "박자" 만 처리 (키 이벤트 스킵)
-            guard let typeChildren = axArray(of: cells[1], key: kAXChildrenAttribute),
-                  let typeCell = typeChildren.first(where: {
-                      (axString($0, key: kAXRoleAttribute) ?? "") == "AXCell"
-                  }),
-                  (axString(typeCell, key: kAXDescriptionAttribute) ?? "") == "박자"
-            else { continue }
+            // 타입: cells[1] → AXCell desc
+            let typeChildren = axArray(of: cells[1], key: kAXChildrenAttribute) ?? []
+            let typeDesc = typeChildren.compactMap { el -> String? in
+                guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXCell" else { return nil }
+                return axString(el, key: kAXDescriptionAttribute)
+            }.first ?? ""
 
-            // 값: cells[2] → AXSlider (분자) + AXPopUpButton val="/N" (분모)
             let valueChildren = axArray(of: cells[2], key: kAXChildrenAttribute) ?? []
-            guard let slider = valueChildren.first(where: {
-                      (axString($0, key: kAXRoleAttribute) ?? "") == "AXSlider"
-                  }),
-                  let numerator = axNumber(slider).map({ Int(round($0)) }),
-                  numerator > 0
-            else { continue }
 
-            let denomStr = valueChildren.compactMap { el -> String? in
-                guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXPopUpButton" else { return nil }
-                return axString(el, key: kAXValueAttribute)
-            }.first ?? "/4"
-            let beatUnit = Int(denomStr.replacingOccurrences(of: "/", with: "")) ?? 4
+            if typeDesc == "박자" {
+                // 값: AXSlider(분자) + AXPopUpButton val="/N"(분모)
+                guard let slider = valueChildren.first(where: {
+                          (axString($0, key: kAXRoleAttribute) ?? "") == "AXSlider"
+                      }),
+                      let numerator = axNumber(slider).map({ Int(round($0)) }),
+                      numerator > 0
+                else { continue }
 
-            events.append(TimeSigEvent(bar: pos.bar, beatsPerBar: numerator, beatUnit: beatUnit))
+                let denomStr = valueChildren.compactMap { el -> String? in
+                    guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXPopUpButton" else { return nil }
+                    return axString(el, key: kAXValueAttribute)
+                }.first ?? "/4"
+                let beatUnit = Int(denomStr.replacingOccurrences(of: "/", with: "")) ?? 4
+
+                timeSigs.append(TimeSigEvent(bar: bar, beatsPerBar: numerator, beatUnit: beatUnit))
+
+            } else if typeDesc == "키" {
+                // 값: AXPopUpButton val = "C 메이저" / "A 단조" 등
+                let rawKey = valueChildren.compactMap { el -> String? in
+                    guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXPopUpButton" else { return nil }
+                    return axString(el, key: kAXValueAttribute)
+                }.first ?? ""
+                let keyName = parseLogicKey(rawKey)
+                if !keyName.isEmpty {
+                    keys.append((bar: bar, name: keyName))
+                }
+            }
         }
-        return events.sorted { $0.bar < $1.bar }
+        return (timeSigs.sorted { $0.bar < $1.bar }, keys.sorted { $0.bar < $1.bar })
+    }
+
+    // "C 메이저" → "C", "A 단조" → "Am", "F# 메이저" → "F#", "B♭ 단조" → "B♭m"
+    private func parseLogicKey(_ raw: String) -> String {
+        let parts = raw.split(separator: " ").map(String.init)
+        guard let root = parts.first, !root.isEmpty else { return "" }
+        let isMinor = parts.dropFirst().contains("단조")
+        return isMinor ? root + "m" : root
     }
 
     // MARK: - Parsers
+
+    // "HH:MM:SS:FF.sub" → 초 (프레임 무시)
+    private func parseMTCSeconds(_ s: String) -> Double? {
+        let parts = s.split(separator: ":").map(String.init)
+        guard parts.count == 4,
+              let hh = Double(parts[0]),
+              let mm = Double(parts[1]),
+              let ss = Double(parts[2].split(separator: ".").first.map(String.init) ?? parts[2])
+        else { return nil }
+        return hh * 3600 + mm * 60 + ss
+    }
 
     private func parseBarBeat(_ s: String) -> (bar: Int, beat: Int)? {
         let nums = s.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }

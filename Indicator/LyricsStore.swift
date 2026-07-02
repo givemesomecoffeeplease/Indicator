@@ -29,28 +29,26 @@ class LyricsStore {
 
     // MARK: - Occurrence 기반 조회 (섹션 동일 이름 여러 occurrence 독립/연결 지원)
 
-    private func occKey(_ section: String, _ startBar: Int) -> String { "\(section)@@\(startBar)" }
+    private func occKey(_ section: String, _ occIdx: Int) -> String { "\(section)@@\(occIdx)" }
 
     /// 특정 occurrence의 데이터를 해석한다.
-    /// - linked==true인 occurrence는 canonicalStartBar(같은 이름의 가장 이른 occurrence)의 데이터를 따라간다.
-    /// - 명시적 occurrence 데이터가 없으면: 첫 occurrence는 레거시(이름만) 데이터로, 나머지는 자동으로 첫 occurrence를 따라간다(linked=true).
-    /// - 반환값의 `linked`는 드롭박스 UI에 표시할 "현재 설정 상태"이다.
-    // 노트(sessionNote/singerNote)는 가사/코드 연결 여부와 무관하게 항상 occurrence 자기 자신의 값만 사용한다.
-    func resolve(song: String, section: String, startBar: Int, canonicalStartBar: Int) -> (data: SectionData, linked: Bool) {
-        let key = occKey(section, startBar)
+    /// - occIdx: 곡 내에서 같은 이름 섹션의 등장 순서 (0-based)
+    /// - linked==true이면 occIdx=0(캐노니컬)의 슬라이드를 따라감. 노트는 항상 자기 occurrence 값 사용.
+    func resolve(song: String, section: String, occIdx: Int) -> (data: SectionData, linked: Bool) {
+        let key = occKey(section, occIdx)
         if let exact = data[song]?[key] {
             if exact.linked {
-                var canonicalData = data[song]?[occKey(section, canonicalStartBar)] ?? data[song]?[section] ?? SectionData()
+                var canonicalData = data[song]?[occKey(section, 0)] ?? data[song]?[section] ?? SectionData()
                 canonicalData.sessionNote = exact.sessionNote
                 canonicalData.singerNote  = exact.singerNote
                 return (canonicalData, true)
             }
             return (exact, false)
         }
-        if startBar == canonicalStartBar {
+        if occIdx == 0 {
             return (data[song]?[section] ?? SectionData(), false)
         } else {
-            var canonicalData = data[song]?[occKey(section, canonicalStartBar)] ?? data[song]?[section] ?? SectionData()
+            var canonicalData = data[song]?[occKey(section, 0)] ?? data[song]?[section] ?? SectionData()
             canonicalData.sessionNote = ""
             canonicalData.singerNote  = ""
             return (canonicalData, true)

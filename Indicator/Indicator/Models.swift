@@ -66,8 +66,8 @@ struct ChordEvent {
 
 struct Marker: Equatable {
     let name: String
-    let bar: Int
-    let beat: Int
+    let mtcSeconds: Double  // 마커 절대 위치 (MTC 타임코드 → 초)
+    let bar: Int            // Logic 마디 번호 (변박 조회용)
 
     var isSong: Bool { name.hasPrefix("#") }
     var displayName: String { isSong ? String(name.dropFirst()) : name }
@@ -79,6 +79,7 @@ struct LogicSnapshot {
     var timeSigEvents: [TimeSigEvent] = []   // 조표 및 박자표 목록에서 읽어온 박자 변경 이벤트
     var transportBar: Int = 1
     var transportBeat: Int = 1
+    var transportMTC: Double = 0   // AX 타임코드 디스플레이 (정지 상태에서도 읽힘)
     var bpm: Double = 120.0
     var beatsPerBar: Int = 4
     var timeSignature: String = "4/4"

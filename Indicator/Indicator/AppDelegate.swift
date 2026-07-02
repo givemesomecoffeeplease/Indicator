@@ -13,6 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let logicPoller  = LogicPoller()
     let stateEngine  = StateEngine()
     let webServer    = WebServer()
+    var hasAutoScanned = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -21,15 +22,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setupMenuBar()
 
         logicPoller.onSnapshot = { [weak self] snapshot in
-            self?.stateEngine.update(snapshot: snapshot)
+            guard let self else { return }
+            // timeSigEvents가 새로 생겼고 아직 변박 없이 스캔된 상태면 재스캔 예약
+            if !snapshot.timeSigEvents.isEmpty,
+               ScheduleStore.shared.current?.timeSigs.isEmpty == true {
+                self.hasAutoScanned = false  // MTC 수신 시 재스캔하도록 리셋
+            }
+            self.stateEngine.update(snapshot: snapshot)
         }
         mtcReceiver.onTimeUpdate = { [weak self] time in
-            self?.logicPoller.mtcActive = true
-            self?.stateEngine.updateMTC(time: time)
+            guard let self else { return }
+            self.logicPoller.mtcActive = true
+            self.stateEngine.updateMTC(time: time)
+            // MTC 수신 시 timeSigs가 부족하면 재스캔
+            let needRescan = (ScheduleStore.shared.current?.timeSigs.count ?? 0) < 2
+            if (!self.hasAutoScanned || needRescan),
+               let snap = self.logicPoller.lastSnapshot,
+               !snap.markers.isEmpty, snap.transportBar > 0, !snap.timeSigEvents.isEmpty {
+                self.hasAutoScanned = true
+                ScheduleStore.shared.scan(
+                    markers: snap.markers,
+                    timeSigEvents: snap.timeSigEvents,
+                    anchorBar: snap.transportBar,
+                    anchorMTC: time,
+                    bpm: snap.bpm
+                )
+            }
         }
         mtcReceiver.onStop = { [weak self] in
             self?.logicPoller.mtcActive = false
             self?.stateEngine.mtcStopped()
+            self?.logicPoller.syncBarBeat()  // 정지 직후 즉시 현재 위치 읽기
         }
         mtcReceiver.onBeat = { [weak self] in
             self?.stateEngine.onBeat()
@@ -47,8 +70,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webServer.getLyric = { song, section in
             LyricsStore.shared.get(song: song, section: section)
         }
-        webServer.getLyricOcc = { song, section, startBar, canonicalStartBar in
-            LyricsStore.shared.resolve(song: song, section: section, startBar: startBar, canonicalStartBar: canonicalStartBar)
+        webServer.getLyricOcc = { song, section, occIdx in
+            LyricsStore.shared.resolve(song: song, section: section, occIdx: occIdx)
         }
         webServer.saveLyrics = { dict in
             LyricsStore.shared.merge(dict)
@@ -232,15 +255,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let item = menu.item(withTag: tagSchedule) {
             let snap = logicPoller.lastSnapshot
             let liveMarkers = snap?.markers ?? []
-            let liveBpm = snap?.bpm ?? 0
-            let liveBpb = snap?.beatsPerBar ?? 4
-            let liveTS  = snap?.timeSigEvents ?? []
             if ScheduleStore.shared.current == nil {
                 updateStatusItemTristate(item, color: .systemGray, title: "사전 스캔 안 됨 (선택)")
-            } else if ScheduleStore.shared.isValid(against: liveMarkers, bpm: liveBpm, beatsPerBar: liveBpb, timeSigEvents: liveTS) {
+            } else if mtcReceiver.mtcReceived || ScheduleStore.shared.isValid(against: liveMarkers) {
+                // 재생 중엔 공연 전 스캔이 유효하므로 검사 스킵
                 updateStatusItemTristate(item, color: .systemGreen, title: "사전 스캔 완료")
             } else {
-                updateStatusItemTristate(item, color: .systemOrange, title: "마커/템포 변경됨 — 재스캔 필요")
+                updateStatusItemTristate(item, color: .systemOrange, title: "마커 변경됨 — 재스캔 필요")
             }
         }
     }
@@ -255,8 +276,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func scanSchedule() {
-        guard let snap = logicPoller.lastSnapshot, !snap.markers.isEmpty else { return }
-        ScheduleStore.shared.scan(markers: snap.markers, bpm: snap.bpm, beatsPerBar: snap.beatsPerBar, timeSigEvents: snap.timeSigEvents)
+        guard let snap = logicPoller.lastSnapshot,
+              !snap.markers.isEmpty,
+              !snap.timeSigEvents.isEmpty,
+              snap.transportBar > 0,
+              snap.transportMTC > 0 else { return }
+        hasAutoScanned = true
+        ScheduleStore.shared.scan(
+            markers: snap.markers,
+            timeSigEvents: snap.timeSigEvents,
+            anchorBar: snap.transportBar,
+            anchorMTC: snap.transportMTC,
+            bpm: snap.bpm
+        )
     }
 
     @objc private func openAccessibilitySettings() {
