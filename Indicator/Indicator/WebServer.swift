@@ -294,7 +294,7 @@ class WebServer {
         #main{flex:1;overflow-y:auto}
         #empty{display:flex;align-items:center;justify-content:center;height:100%;color:var(--sub);font-size:15px}
         #song-view{display:none;padding:24px;flex-direction:column;gap:20px}
-        #song-title{font-size:22px;font-weight:700;color:var(--text)}
+        #song-title{font-size:22px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px}
         #export-box{border-top:1px solid var(--border);padding:16px 24px;flex-shrink:0;background:var(--card)}
         #export-box h2{font-size:11px;font-weight:700;color:var(--sub);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
         .btn-row{display:flex;gap:8px;flex-wrap:wrap}
@@ -351,13 +351,18 @@ class WebServer {
         .inst-beat-inp{width:42px;padding:4px 2px;font-size:13px;font-weight:700;text-align:center;border:1.5px solid var(--border);border-radius:5px;outline:none;font-family:-apple-system,sans-serif}
         .inst-beat-inp:focus{border-color:var(--teal)}
         .hidden{display:none!important}
+        #main.drop-hover{outline:3px dashed #0055ff;outline-offset:-4px;background:rgba(0,85,255,0.04)}
         </style>
         </head>
         <body>
         <div id="hdr">
           <h1>가사 편집</h1>
           <span id="save-msg"></span>
-          <button class="btn" onclick="saveAll()">저장</button>
+          <input type="file" id="import-file-inp" accept=".html" style="display:none" onchange="handleImportFile(this.files[0],null)">
+          <input type="file" id="import-song-inp" accept=".html" style="display:none" onchange="handleImportFile(this.files[0],pendingImportSong)">
+          <button id="btn-import" class="btn btn-sm btn-sec" onclick="document.getElementById('import-file-inp').click()">전체 가져오기</button>
+          <button id="btn-export" class="btn btn-sm btn-sec" onclick="exportForTeam()">전체 내보내기</button>
+          <button class="btn" onclick="STANDALONE?standaloneDownload():saveAll()">저장</button>
         </div>
         <div id="layout">
           <div id="sidebar"><div class="sb-hd">곡 목록</div></div>
@@ -385,7 +390,9 @@ class WebServer {
           </div>
         </div>
         <script>
-        const DATA=\(songsJson);
+        const DATA=\(songsJson);//EXPORT_DATA_LINE
+        const STANDALONE=false;//EXPORT_STANDALONE_LINE
+        const EXPORT_FILENAME='';//EXPORT_FILENAME_LINE
         const COLORS=['#007aff','#34c759','#5856d6','#ff9500','#bf5af2','#30b0c7','#ff453a'];
         const $=id=>document.getElementById(id);
         let curSong=null;
@@ -522,7 +529,20 @@ class WebServer {
           curSong=song;renderSidebar();
           $('empty').style.display='none';
           const sv=$('song-view');sv.style.display='flex';
-          $('song-title').textContent=song;
+          const titleEl=$('song-title');
+          titleEl.innerHTML='';
+          const nameSpan=document.createElement('span');nameSpan.textContent=song;titleEl.appendChild(nameSpan);
+          if(!STANDALONE){
+            const actDiv=document.createElement('div');actDiv.style.cssText='display:flex;gap:6px;margin-left:auto';
+            const exportBtn=document.createElement('button');
+            exportBtn.className='btn btn-sm btn-sec';exportBtn.textContent='내보내기';
+            exportBtn.onclick=()=>exportSongAsHtml(song);
+            const importBtn=document.createElement('button');
+            importBtn.className='btn btn-sm btn-sec';importBtn.textContent='가져오기';
+            importBtn.onclick=()=>{pendingImportSong=song;$('import-song-inp').click();};
+            actDiv.appendChild(exportBtn);actDiv.appendChild(importBtn);
+            titleEl.appendChild(actDiv);
+          }
           renderSections(song);
         }
 
@@ -941,6 +961,131 @@ class WebServer {
         }
 
         function showMsg(m){const el=$('save-msg');el.textContent=m;el.style.opacity='1';setTimeout(()=>el.style.opacity='0',2200);}
+
+        // ── HTML 내보내기/가져오기 ──
+        function buildExportData(song){
+          const s=DATA.find(d=>d.song===song);
+          if(!s)return null;
+          const sections=s.sections.map(sec=>{
+            const k=dkOf(song,sec.sec,sec.startBar);
+            const st=dirty[k]||loadState(song,sec.sec,sec.startBar);
+            const slides=rawSlidesFromState(st,sec.totalBars);
+            return{sec:sec.sec,startBar:sec.startBar,slides,sessionNote:st.sessionNote||'',singerNote:st.singerNote||''};
+          });
+          return[{song,sections}];
+        }
+
+        async function buildStandaloneHtml(exportData,filename){
+          const dataJson=JSON.stringify(exportData);
+          let html;
+          if(STANDALONE){
+            html=document.documentElement.outerHTML;
+            if(!html.startsWith('<!DOCTYPE'))html='<!DOCTYPE html>'+html;
+          } else {
+            const resp=await fetch('/edit');
+            html=await resp.text();
+          }
+          html=html.replace(/const DATA=[^;]*;\\/\\/EXPORT_DATA_LINE/,()=>'const DATA='+dataJson+';//EXPORT_DATA_LINE');
+          html=html.replace('const STANDALONE=false;//EXPORT_STANDALONE_LINE','const STANDALONE=true;//EXPORT_STANDALONE_LINE');
+          html=html.replace(/const EXPORT_FILENAME='[^']*';\\/\\/EXPORT_FILENAME_LINE/,()=>"const EXPORT_FILENAME='"+(filename||'')+"';//EXPORT_FILENAME_LINE");
+          return html;
+        }
+
+        async function exportSongAsHtml(song){
+          const exportData=buildExportData(song);
+          if(!exportData)return;
+          const html=await buildStandaloneHtml(exportData,song);
+          const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+          const a=document.createElement('a');
+          a.href=URL.createObjectURL(blob);
+          a.download=song.replace(/[\\s/]/g,'_')+'.html';
+          a.click();
+          showMsg(song+' 내보내기 완료!');
+        }
+
+        async function exportForTeam(){
+          const date=prompt('예배 날짜를 입력하세요 (예: 20260628)','');
+          if(date===null)return;
+          const allSongs=[...new Set(DATA.map(s=>s.song))];
+          const exportData=allSongs.flatMap(song=>buildExportData(song)||[]);
+          if(!exportData.length){showMsg('곡 데이터 없음');return;}
+          const fname=(date?date+'_':'')+'가사편집';
+          const html=await buildStandaloneHtml(exportData,fname);
+          const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+          const a=document.createElement('a');
+          a.href=URL.createObjectURL(blob);
+          a.download=fname+'.html';
+          a.click();
+          showMsg('내보내기 완료!');
+        }
+
+        async function standaloneDownload(){
+          const allSongs=[...new Set(DATA.map(s=>s.song))];
+          const exportData=allSongs.flatMap(song=>buildExportData(song)||[]);
+          if(!exportData.length)return;
+          const html=await buildStandaloneHtml(exportData);
+          const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+          const a=document.createElement('a');
+          a.href=URL.createObjectURL(blob);
+          a.download=(EXPORT_FILENAME||'가사편집')+'_편집완료.html';
+          a.click();
+          showMsg('저장됐어요!');
+        }
+
+        function handleImportFile(file,targetSongName){
+          if(!file)return;
+          const reader=new FileReader();
+          reader.onload=e=>{
+            const html=e.target.result;
+            const match=html.match(/const DATA=([^;]*);\\/\\/EXPORT_DATA_LINE/);
+            if(!match){showMsg('파일 형식 오류');return;}
+            let importedData;
+            try{importedData=JSON.parse(match[1]);}catch{showMsg('파싱 오류');return;}
+            const payload={};
+            if(targetSongName){
+              const srcSong=importedData[0];
+              if(!srcSong){showMsg('데이터 없음');return;}
+              payload[targetSongName]={};
+              srcSong.sections.forEach(sec=>{
+                payload[targetSongName][sec.sec]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:sec.slides||[]};
+                const noteKey=sec.sec+'|||'+sec.startBar;
+                payload[targetSongName][noteKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:[]};
+              });
+            } else {
+              importedData.forEach(song=>{
+                payload[song.song]={};
+                song.sections.forEach(sec=>{
+                  payload[song.song][sec.sec]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:sec.slides||[]};
+                  const noteKey=sec.sec+'|||'+sec.startBar;
+                  payload[song.song][noteKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:[]};
+                });
+              });
+            }
+            fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+              .then(()=>{showMsg('가져오기 완료!');setTimeout(()=>location.reload(),1000);})
+              .catch(()=>showMsg('가져오기 실패'));
+          };
+          reader.readAsText(file);
+        }
+
+        // ── 드래그앤드롭 ──
+        let pendingImportSong=null;
+        const mainEl=$('main');
+        mainEl.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();if(curSong)mainEl.classList.add('drop-hover');});
+        mainEl.addEventListener('dragleave',e=>{if(!mainEl.contains(e.relatedTarget))mainEl.classList.remove('drop-hover');});
+        mainEl.addEventListener('drop',e=>{
+          e.preventDefault();e.stopPropagation();mainEl.classList.remove('drop-hover');
+          if(!curSong){showMsg('먼저 곡을 선택하세요');return;}
+          const file=[...e.dataTransfer.files].find(f=>f.name.endsWith('.html'));
+          if(file)handleImportFile(file,curSong);else showMsg('.html 파일만 가져올 수 있어요');
+        });
+        document.addEventListener('dragover',e=>{e.preventDefault();});
+        document.addEventListener('drop',e=>{e.preventDefault();});
+
+        if(STANDALONE){
+          const bi=$('btn-import');if(bi)bi.style.display='none';
+          const be=$('btn-export');if(be)be.style.display='none';
+        }
 
         renderSidebar();
         </script>
