@@ -375,6 +375,14 @@ class WebServer {
             <a href="/export/setlist" class="btn btn-sm btn-sec" style="text-decoration:none">이번 세트리스트</a>
             \(exportBtns)
           </div>
+          <h2 style="margin-top:12px">가져오기</h2>
+          <div class="btn-row" style="align-items:center;gap:8px">
+            <label class="btn btn-sm btn-sec" style="cursor:pointer">
+              파일 선택
+              <input type="file" accept=".json,.csv" style="display:none" onchange="handleImportFile(this)">
+            </label>
+            <span id="import-status" style="font-size:11px;color:var(--sub)"></span>
+          </div>
         </div>
         <script>
         const DATA=\(songsJson);

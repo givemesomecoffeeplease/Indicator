@@ -87,6 +87,16 @@ struct LogicSnapshot {
     var capturedMTCTime: TimeInterval = 0
 }
 
+// 싱어/밴드뷰에 전달하는 슬라이드 단위 정보
+struct SlideInfo: Codable, Equatable {
+    var tokens: [LyricToken]
+    var isInstrumental: Bool
+    var instChords: [[InstChordSlot]]
+    var barCount: Int
+    var singerNote: String
+    var sectionName: String
+}
+
 struct IndicatorState: Codable, Equatable {
     var songs: [String] = []
     var currentSongIndex: Int = -1
@@ -115,6 +125,8 @@ struct IndicatorState: Codable, Equatable {
     // 싱어 뷰
     var currentSlideTokens: [LyricToken] = []
     var nextSlideTokens: [LyricToken] = []
+    var currentSlideInfo: SlideInfo? = nil
+    var nextSlideInfo: SlideInfo? = nil
     var nextSongName: String = ""
     var nextSongKey: String = ""
     var chords: [String] = []

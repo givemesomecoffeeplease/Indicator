@@ -124,6 +124,29 @@ class MTCReceiver {
                     silenceTimer?.cancel()
                     DispatchQueue.main.async { self.onStop?() }
 
+                case 0xF0:
+                    // MTC Full Frame SysEx: F0 7F 7F 01 01 HH MM SS FF F7 (10 bytes)
+                    // 점프(seek) 시 Logic이 전송 — 새 위치를 즉시 반영
+                    if idx + 9 < count,
+                       raw[idx+1] == 0x7F, raw[idx+2] == 0x7F,
+                       raw[idx+3] == 0x01, raw[idx+4] == 0x01 {
+                        let hh       = raw[idx+5]
+                        let mm       = raw[idx+6]
+                        let ss       = raw[idx+7]
+                        let ff       = raw[idx+8]
+                        let rateCode = Int((hh >> 5) & 0x03)
+                        fps          = [24.0, 25.0, 29.97, 30.0][rateCode]
+                        let hours    = Int(hh & 0x1F)
+                        let total    = Double(hours)*3600 + Double(mm)*60 + Double(ss) + Double(ff)/fps
+                        currentTime  = total
+                        synced       = true
+                        qfCount      = 0
+                        qfIndex      = 0
+                        idx += 9  // F7까지 소비 (루프 끝 idx+=1 포함 시 10바이트 전진)
+                        let t = total
+                        DispatchQueue.main.async { self.onTimeUpdate?(t) }
+                    }
+
                 case 0xF1 where idx + 1 < count:
                     // MTC Quarter Frame
                     idx += 1

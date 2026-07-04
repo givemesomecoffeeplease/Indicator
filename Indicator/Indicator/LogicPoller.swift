@@ -34,11 +34,45 @@ class LogicPoller {
         t.setEventHandler { [weak self] in self?.readBarBeatOnly() }
         t.resume()
         driftTimer = t
+
+        // 접근성 권한 부여 감지 → 3초 후 자동 스캔
+        scheduleAutoScanAfterPermission()
     }
 
     func stop() {
         driftTimer?.cancel()
         driftTimer = nil
+        axPermissionTimer?.cancel()
+        axPermissionTimer = nil
+    }
+
+    // MARK: - 접근성 권한 감지 후 자동 스캔
+
+    private var axPermissionTimer: DispatchSourceTimer?
+    private var axWasGranted = false
+
+    private func scheduleAutoScanAfterPermission() {
+        if AXIsProcessTrusted() {
+            // 이미 권한 있음 → 3초 후 스캔
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.performScan()
+            }
+            return
+        }
+        // 권한 없음 → 0.5초마다 체크, 부여되면 3초 후 스캔 (1회만)
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + 0.5, repeating: .milliseconds(500))
+        t.setEventHandler { [weak self] in
+            guard let self, !self.axWasGranted, AXIsProcessTrusted() else { return }
+            self.axWasGranted = true
+            self.axPermissionTimer?.cancel()
+            self.axPermissionTimer = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                self.performScan()
+            }
+        }
+        t.resume()
+        axPermissionTimer = t
     }
 
     // 수동 새로고침 (메뉴 버튼)
@@ -462,6 +496,453 @@ class LogicPoller {
         guard let root = parts.first, !root.isEmpty else { return "" }
         let isMinor = parts.dropFirst().contains("단조")
         return isMinor ? root + "m" : root
+    }
+
+    // MARK: - 새 MTC 기반 스캔
+
+    // 수동 또는 자동 스캔 진입점
+    func performScan() {
+        ScheduleStore.shared.markScanning()
+        queue.async { [weak self] in self?.scanMTC() }
+    }
+
+    private func scanMTC() {
+        guard AXIsProcessTrusted() else {
+            DispatchQueue.main.async { ScheduleStore.shared.markFailed("접근성 권한 없음") }
+            return
+        }
+        guard let app = NSRunningApplication
+            .runningApplications(withBundleIdentifier: Self.bundleID).first else {
+            DispatchQueue.main.async { ScheduleStore.shared.markFailed("Logic Pro가 실행중이지 않음") }
+            return
+        }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+
+        // 1. 마커 읽기 (MTC 직접)
+        switch readMarkersMTC(axApp: axApp) {
+        case nil:
+            DispatchQueue.main.async { ScheduleStore.shared.markFailed("마커 목록 창을 열어주세요") }
+            return
+        case let m? where m.isEmpty:
+            DispatchQueue.main.async { ScheduleStore.shared.markFailed("마커 목록 > 보기 > '이벤트 위치 및 길이를 시간으로 표시' 체크") }
+            return
+        case let m?:
+            break
+        }
+        let markers = readMarkersMTC(axApp: axApp)!
+
+        // 2. 템포 읽기 (MTC 직접)
+        guard let tempos = readTemposMTC(axApp: axApp), !tempos.isEmpty else {
+            DispatchQueue.main.async { ScheduleStore.shared.markFailed("템포 목록 창을 열어주세요") }
+            return
+        }
+
+        // 3. 조표/박자표 읽기 (마디 위치 → MTC 변환)
+        let (timeSigs, keySigs) = readTimeSigsAndKeySigsMTC(axApp: axApp, tempos: tempos)
+
+        // 마커에 barHint 계산 (LyricsStore 키 호환용)
+        let rawTS = rawTimeSigsForBarHint(axApp: axApp)
+        let markersWithBar = markers.map { m -> ScannedMarker in
+            let bar = mtcToBar(m.mtcSeconds, tempos: tempos, rawTimeSigs: rawTS)
+            return ScannedMarker(name: m.name, isSong: m.isSong, mtcSeconds: m.mtcSeconds, barHint: max(1, Int(round(bar))))
+        }
+
+        let schedule = ScannedSchedule(
+            markers:   markersWithBar,
+            tempos:    tempos,
+            timeSigs:  timeSigs,
+            keySigs:   keySigs,
+            scannedAt: Date()
+        )
+        DispatchQueue.main.async { ScheduleStore.shared.save(schedule: schedule) }
+        debugLog("[Scan] 완료: 마커 \(markers.count)개, 템포 \(tempos.count)개, 박자 \(timeSigs.count)개, 조표 \(keySigs.count)개")
+    }
+
+    // MARK: 마커 목록 읽기 (MTC)
+    private func readMarkersMTC(axApp: AXUIElement) -> [ScannedMarker]? {
+        guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return nil }
+        for window in windows {
+            let title = axString(window, key: kAXTitleAttribute) ?? ""
+            guard title.contains("마커 목록") else { continue }
+            guard let scrollArea = findByRole(window, "AXScrollArea"),
+                  let table      = findByRole(scrollArea, "AXTable") else { return nil }
+
+            let scrollBar = axArray(of: scrollArea, key: kAXVerticalScrollBarAttribute as String)?.first
+                         ?? findByRole(scrollArea, "AXScrollBar")
+
+            var collected: [ScannedMarker] = []
+            var seenKeys = Set<String>()
+
+            func harvest() {
+                for m in extractMarkersMTC(from: table) {
+                    let key = "\(m.name)_\(m.mtcSeconds)"
+                    if seenKeys.insert(key).inserted { collected.append(m) }
+                }
+            }
+
+            if let sb = scrollBar {
+                var origRef: CFTypeRef?
+                AXUIElementCopyAttributeValue(sb, kAXValueAttribute as CFString, &origRef)
+                // 0.1 간격으로 촘촘하게 스크롤 (66개처럼 많은 경우 0.25로는 누락 발생)
+                for pos in stride(from: 0.0, through: 1.0, by: 0.1) {
+                    AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, pos as CFTypeRef)
+                    Thread.sleep(forTimeInterval: 0.08)
+                    harvest()
+                }
+                // 1.0 확실히 포함 (마지막 마커 누락 방지)
+                AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, 1.0 as CFTypeRef)
+                Thread.sleep(forTimeInterval: 0.08)
+                harvest()
+                if let orig = origRef {
+                    AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, orig)
+                }
+            } else {
+                harvest()
+            }
+
+            return collected.sorted { $0.mtcSeconds < $1.mtcSeconds }
+        }
+        return nil
+    }
+
+    private func extractMarkersMTC(from table: AXUIElement) -> [ScannedMarker] {
+        var seenPtrs = Set<UnsafeRawPointer>()
+        var rows: [AXUIElement] = []
+        func addRows(_ newRows: [AXUIElement]) {
+            for r in newRows {
+                let ptr = Unmanaged.passUnretained(r).toOpaque()
+                if seenPtrs.insert(ptr).inserted { rows.append(r) }
+            }
+        }
+        if let r = axArray(of: table, key: kAXRowsAttribute)       { addRows(r) }
+        if let r = axArray(of: table, key: kAXVisibleRowsAttribute) { addRows(r) }
+        if rows.isEmpty, let r = axArray(of: table, key: kAXChildrenAttribute) { addRows(r) }
+
+        var markers: [ScannedMarker] = []
+        var skipCount = 0
+        for row in rows {
+            let cells = axArray(of: row, key: kAXChildrenAttribute) ?? []
+            guard cells.count >= 3 else { skipCount += 1; continue }
+
+            // 위치: cells[1] → AXGroup.desc = "01:00:04:00.00"
+            guard let posChildren = axArray(of: cells[1], key: kAXChildrenAttribute),
+                  let posGroup = posChildren.first(where: {
+                      (axString($0, key: kAXRoleAttribute) ?? "") == "AXGroup"
+                  }),
+                  let posText = axString(posGroup, key: kAXDescriptionAttribute),
+                  let mtc = parseMTC(posText) else {
+                // 파싱 실패한 행의 구조 덤프
+                let desc0 = axString(cells[0], key: kAXDescriptionAttribute) ?? "-"
+                let desc1 = axString(cells[1], key: kAXDescriptionAttribute) ?? "-"
+                let desc2 = axString(cells[2], key: kAXDescriptionAttribute) ?? "-"
+                debugLog("[MarkerSkip] cells.count=\(cells.count) c0='\(desc0)' c1='\(desc1)' c2='\(desc2)'")
+                skipCount += 1
+                continue
+            }
+
+            // 이름: cells[2] → AXCell.desc
+            guard let nameChildren = axArray(of: cells[2], key: kAXChildrenAttribute),
+                  let nameCell = nameChildren.first(where: {
+                      (axString($0, key: kAXRoleAttribute) ?? "") == "AXCell"
+                  }) else { skipCount += 1; continue }
+            let name = (axString(nameCell, key: kAXDescriptionAttribute) ?? "")
+                .trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { skipCount += 1; continue }
+
+            markers.append(ScannedMarker(name: name, isSong: name.hasPrefix("#"), mtcSeconds: mtc, barHint: 0))
+        }
+        debugLog("[extractMarkersMTC] rows=\(rows.count) parsed=\(markers.count) skipped=\(skipCount)")
+        return markers
+    }
+
+    // MARK: 템포 목록 읽기 (MTC)
+    private func readTemposMTC(axApp: AXUIElement) -> [ScannedTempo]? {
+        guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return nil }
+        for window in windows {
+            let title = axString(window, key: kAXTitleAttribute) ?? ""
+            guard title.contains("템포"), !title.contains("트랙") else { continue }
+            guard let table = findByRole(window, "AXTable") else { return nil }
+
+            let scrollContainer = findByRole(window, "AXScrollArea") ?? window
+            let scrollBar = axArray(of: scrollContainer, key: kAXVerticalScrollBarAttribute as String)?.first
+                         ?? findByRole(scrollContainer, "AXScrollBar")
+
+            var collected: [ScannedTempo] = []
+            var seenKeys = Set<String>()
+
+            func harvest() {
+                for t in extractTemposMTC(from: table) {
+                    if seenKeys.insert("\(t.mtcSeconds)").inserted { collected.append(t) }
+                }
+            }
+
+            if let sb = scrollBar {
+                var origRef: CFTypeRef?
+                AXUIElementCopyAttributeValue(sb, kAXValueAttribute as CFString, &origRef)
+                for pos in stride(from: 0.0, through: 1.0, by: 0.1) {
+                    AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, pos as CFTypeRef)
+                    Thread.sleep(forTimeInterval: 0.08)
+                    harvest()
+                }
+                AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, 1.0 as CFTypeRef)
+                Thread.sleep(forTimeInterval: 0.08)
+                harvest()
+                if let orig = origRef {
+                    AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, orig)
+                }
+            } else {
+                harvest()
+            }
+
+            return collected.sorted { $0.mtcSeconds < $1.mtcSeconds }
+        }
+        return nil
+    }
+
+    private func extractTemposMTC(from table: AXUIElement) -> [ScannedTempo] {
+        var seenPtrs = Set<UnsafeRawPointer>()
+        var rows: [AXUIElement] = []
+        func addRows(_ r: [AXUIElement]) {
+            for row in r {
+                let ptr = Unmanaged.passUnretained(row).toOpaque()
+                if seenPtrs.insert(ptr).inserted { rows.append(row) }
+            }
+        }
+        if let r = axArray(of: table, key: kAXRowsAttribute)       { addRows(r) }
+        if let r = axArray(of: table, key: kAXVisibleRowsAttribute) { addRows(r) }
+        if rows.isEmpty, let r = axArray(of: table, key: kAXChildrenAttribute) { addRows(r) }
+
+        var tempos: [ScannedTempo] = []
+        for row in rows {
+            let cells = axArray(of: row, key: kAXChildrenAttribute) ?? []
+            guard cells.count >= 3 else { continue }
+            guard let barChildren = axArray(of: cells[0], key: kAXChildrenAttribute),
+                  let barGroup = barChildren.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXGroup" }),
+                  let barText = axString(barGroup, key: kAXDescriptionAttribute),
+                  let barPos = parseBarBeat(barText) else { continue }
+            guard let bpmChildren = axArray(of: cells[1], key: kAXChildrenAttribute),
+                  let bpmGroup = bpmChildren.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXGroup" }),
+                  let bpmText = axString(bpmGroup, key: kAXDescriptionAttribute),
+                  let bpm = Double(bpmText.trimmingCharacters(in: .whitespaces)) else { continue }
+            guard let mtcChildren = axArray(of: cells[2], key: kAXChildrenAttribute),
+                  let mtcGroup = mtcChildren.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXGroup" }),
+                  let mtcText = axString(mtcGroup, key: kAXDescriptionAttribute),
+                  let mtc = parseMTC(mtcText) else { continue }
+            tempos.append(ScannedTempo(bpm: bpm, mtcSeconds: mtc, barPosition: Double(barPos.bar)))
+        }
+        return tempos
+    }
+
+    // MARK: 조표/박자표 목록 읽기 (마디 위치 → MTC 변환)
+    private func readTimeSigsAndKeySigsMTC(axApp: AXUIElement,
+                                            tempos: [ScannedTempo]) -> ([ScannedTimeSig], [ScannedKeySig]) {
+        guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return ([], []) }
+        for window in windows {
+            let title = axString(window, key: kAXTitleAttribute) ?? ""
+            guard title.contains("조표 및 박자표 목록") else { continue }
+            guard let table = findByRole(window, "AXTable") else { return ([], []) }
+
+            let scrollArea = findByRole(window, "AXScrollArea")
+            let scrollBar = scrollArea.flatMap {
+                axArray(of: $0, key: kAXVerticalScrollBarAttribute as String)?.first
+                ?? findByRole($0, "AXScrollBar")
+            }
+
+            var rawTimeSigs: [(bar: Double, numerator: Int, denominator: Int)] = []
+            var rawKeySigs:  [(bar: Double, name: String)] = []
+            var seenKeys = Set<String>()
+
+            func harvest() {
+                for item in extractTimeSigsAndKeySigs(from: table) {
+                    let key = "\(item.kind)_\(item.bar)"
+                    if seenKeys.insert(key).inserted {
+                        if item.kind == "ts" { rawTimeSigs.append((bar: item.bar, numerator: item.n, denominator: item.d)) }
+                        else                 { rawKeySigs.append((bar: item.bar, name: item.name)) }
+                    }
+                }
+            }
+
+            if let sb = scrollBar {
+                var origRef: CFTypeRef?
+                AXUIElementCopyAttributeValue(sb, kAXValueAttribute as CFString, &origRef)
+                for pos in stride(from: 0.0, through: 1.0, by: 0.1) {
+                    AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, pos as CFTypeRef)
+                    Thread.sleep(forTimeInterval: 0.08)
+                    harvest()
+                }
+                AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, 1.0 as CFTypeRef)
+                Thread.sleep(forTimeInterval: 0.08)
+                harvest()
+                if let orig = origRef {
+                    AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, orig)
+                }
+            } else {
+                harvest()
+            }
+
+            let timeSigs = rawTimeSigs.map { ev in
+                ScannedTimeSig(numerator: ev.numerator,
+                               denominator: ev.denominator,
+                               mtcSeconds: barToMTC(ev.bar, tempos: tempos, rawTimeSigs: rawTimeSigs))
+            }.sorted { $0.mtcSeconds < $1.mtcSeconds }
+
+            let keySigs = rawKeySigs.map { ev in
+                ScannedKeySig(name: ev.name,
+                              mtcSeconds: barToMTC(ev.bar, tempos: tempos, rawTimeSigs: rawTimeSigs))
+            }.sorted { $0.mtcSeconds < $1.mtcSeconds }
+
+            return (timeSigs, keySigs)
+        }
+        return ([], [])
+    }
+
+    private struct TSKSItem {
+        let kind: String  // "ts" or "ks"
+        let bar: Double
+        let n: Int; let d: Int  // 박자용
+        let name: String        // 조표용
+    }
+
+    private func extractTimeSigsAndKeySigs(from table: AXUIElement) -> [TSKSItem] {
+        var seenPtrs = Set<UnsafeRawPointer>()
+        var rows: [AXUIElement] = []
+        func addRows(_ r: [AXUIElement]) {
+            for row in r {
+                let ptr = Unmanaged.passUnretained(row).toOpaque()
+                if seenPtrs.insert(ptr).inserted { rows.append(row) }
+            }
+        }
+        if let r = axArray(of: table, key: kAXRowsAttribute)       { addRows(r) }
+        if let r = axArray(of: table, key: kAXVisibleRowsAttribute) { addRows(r) }
+        if rows.isEmpty, let r = axArray(of: table, key: kAXChildrenAttribute) { addRows(r) }
+
+        var items: [TSKSItem] = []
+        for row in rows {
+            let cells = axArray(of: row, key: kAXChildrenAttribute) ?? []
+            guard cells.count >= 2 else { continue }
+
+            // 3셀(위치, 유형, 값) 또는 2셀(유형, 값) 모두 처리
+            let bar: Double; let typeIdx: Int; let valueIdx: Int
+            if cells.count >= 3,
+               let posChildren = axArray(of: cells[0], key: kAXChildrenAttribute),
+               let posGroup = posChildren.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXGroup" }),
+               let posText = axString(posGroup, key: kAXDescriptionAttribute),
+               let pos = parseBarBeat(posText) {
+                // 위치 있는 행
+                bar = Double(pos.bar); typeIdx = 1; valueIdx = 2
+            } else if cells.count >= 3 {
+                // 3셀이지만 위치 비어있음 (프로젝트 시작 기본값 행)
+                bar = 1; typeIdx = 1; valueIdx = 2
+            } else {
+                // 2셀 행
+                bar = 1; typeIdx = 0; valueIdx = 1
+            }
+
+            guard let typeChildren = axArray(of: cells[typeIdx], key: kAXChildrenAttribute),
+                  let typeCell = typeChildren.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXCell" }) else { continue }
+            let typeText = axString(typeCell, key: kAXDescriptionAttribute) ?? ""
+
+            if typeText == "박자" {
+                let vc = axArray(of: cells[valueIdx], key: kAXChildrenAttribute) ?? []
+                guard let slider = vc.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXSlider" }),
+                      let num = axNumber(slider).map({ Int(round($0)) }), num > 0 else { continue }
+                let denomStr = vc.compactMap { el -> String? in
+                    guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXPopUpButton" else { return nil }
+                    return axString(el, key: kAXValueAttribute)
+                }.first ?? "/4"
+                let den = Int(denomStr.replacingOccurrences(of: "/", with: "")) ?? 4
+                items.append(TSKSItem(kind: "ts", bar: bar, n: num, d: den, name: ""))
+            } else if typeText == "키" {
+                let vc = axArray(of: cells[valueIdx], key: kAXChildrenAttribute) ?? []
+                let keyName = vc.compactMap { el -> String? in
+                    guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXPopUpButton" else { return nil }
+                    return axString(el, key: kAXValueAttribute)
+                }.first ?? ""
+                guard !keyName.isEmpty else { continue }
+                items.append(TSKSItem(kind: "ks", bar: bar, n: 0, d: 0, name: parseKey(keyName)))
+            }
+        }
+        return items
+    }
+
+    // MARK: 마디 → MTC 변환 (tempo.barPosition을 anchor로 사용)
+    private func barToMTC(_ targetBar: Double,
+                           tempos: [ScannedTempo],
+                           rawTimeSigs: [(bar: Double, numerator: Int, denominator: Int)]) -> Double {
+        guard !tempos.isEmpty else { return 0 }
+        let tempo   = tempos.last(where: { $0.barPosition <= targetBar }) ?? tempos[0]
+        let tsInRange = rawTimeSigs.filter { $0.bar > tempo.barPosition && $0.bar <= targetBar }.sorted { $0.bar < $1.bar }
+        var segBPB  = rawTimeSigs.last(where: { $0.bar <= tempo.barPosition })?.numerator ?? 4
+        var accMTC  = tempo.mtcSeconds
+        var segBar  = tempo.barPosition
+        for ts in tsInRange {
+            accMTC += (ts.bar - segBar) * Double(segBPB) * (60.0 / tempo.bpm)
+            segBar  = ts.bar
+            segBPB  = ts.numerator
+        }
+        accMTC += (targetBar - segBar) * Double(segBPB) * (60.0 / tempo.bpm)
+        return accMTC
+    }
+
+    // MARK: MTC → 마디 역산 (barHint 계산용)
+    private func mtcToBar(_ targetMTC: Double,
+                           tempos: [ScannedTempo],
+                           rawTimeSigs: [(bar: Double, numerator: Int, denominator: Int)]) -> Double {
+        guard !tempos.isEmpty else { return 1 }
+        let tempo = tempos.last(where: { $0.mtcSeconds <= targetMTC }) ?? tempos[0]
+        let bpb   = Double(rawTimeSigs.last(where: { $0.bar <= tempo.barPosition })?.numerator ?? 4)
+        let elapsed = targetMTC - tempo.mtcSeconds
+        return tempo.barPosition + elapsed / (bpb * (60.0 / tempo.bpm))
+    }
+
+    // 조표/박자표 목록에서 박자 이벤트만 간단히 읽기 (barHint 계산 전용)
+    private func rawTimeSigsForBarHint(axApp: AXUIElement) -> [(bar: Double, numerator: Int, denominator: Int)] {
+        guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return [] }
+        for window in windows {
+            let title = axString(window, key: kAXTitleAttribute) ?? ""
+            guard title.contains("조표 및 박자표 목록"),
+                  let table = findByRole(window, "AXTable") else { continue }
+            let rows = axArray(of: table, key: kAXRowsAttribute)
+                    ?? axArray(of: table, key: kAXChildrenAttribute) ?? []
+            var result: [(bar: Double, numerator: Int, denominator: Int)] = []
+            for row in rows {
+                let cells = axArray(of: row, key: kAXChildrenAttribute) ?? []
+                guard cells.count >= 3 else { continue }
+                guard let pc = axArray(of: cells[0], key: kAXChildrenAttribute),
+                      let pg = pc.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXGroup" }),
+                      let pt = axString(pg, key: kAXDescriptionAttribute),
+                      let pos = parseBarBeat(pt) else { continue }
+                guard let tc = axArray(of: cells[1], key: kAXChildrenAttribute),
+                      let tCell = tc.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXCell" }),
+                      (axString(tCell, key: kAXDescriptionAttribute) ?? "") == "박자" else { continue }
+                let vc = axArray(of: cells[2], key: kAXChildrenAttribute) ?? []
+                guard let slider = vc.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXSlider" }),
+                      let num = axNumber(slider).map({ Int(round($0)) }), num > 0 else { continue }
+                let denomStr = vc.compactMap { el -> String? in
+                    guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXPopUpButton" else { return nil }
+                    return axString(el, key: kAXValueAttribute)
+                }.first ?? "/4"
+                let denom = Int(denomStr.replacingOccurrences(of: "/", with: "")) ?? 4
+                result.append((bar: Double(pos.bar), numerator: num, denominator: denom))
+            }
+            return result.sorted { $0.bar < $1.bar }
+        }
+        return []
+    }
+
+    // MARK: MTC 문자열 → 초 변환
+    // "HH:MM:SS:FF.sf" → seconds (25fps 고정)
+    private func parseMTC(_ s: String) -> Double? {
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        let colonParts = trimmed.components(separatedBy: ":")
+        guard colonParts.count == 4,
+              let hh = Double(colonParts[0]),
+              let mm = Double(colonParts[1]),
+              let ss = Double(colonParts[2]) else { return nil }
+        let frameParts = colonParts[3].components(separatedBy: ".")
+        guard let ff = Double(frameParts[0]) else { return nil }
+        let sf = frameParts.count > 1 ? Double(frameParts[1]) ?? 0 : 0
+        return hh * 3600 + mm * 60 + ss + ff / 25.0 + sf / 2500.0
     }
 
     // MARK: - Parsers
