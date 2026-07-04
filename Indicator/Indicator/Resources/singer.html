@@ -152,6 +152,7 @@
     font-weight: 700;
     line-height: 1.35;
     color: #ffffff;
+    letter-spacing: 0.14em;
   }
   #nxt-lyric-wrap .lyric-char {
     font-size: clamp(15px, 3vw, 32px);
@@ -164,6 +165,7 @@
     color: #5DCAA5;
     white-space: nowrap;
     line-height: 1.3;
+    letter-spacing: 0;
   }
   .chord-label-empty { color: transparent; }
   #nxt-lyric-wrap .chord-label {
@@ -284,10 +286,10 @@
   }
   .hidden { display: none !important; }
   .inst-disp-grid { display: flex; align-items: center; justify-content: center; flex-wrap: nowrap; gap: 0; padding: 4px 0; width: 100%; overflow-x: auto; }
-  .inst-disp-bar { display: flex; flex: 0 0 auto; flex-direction: column; align-items: center; justify-content: center; min-width: 56px; padding: 2px 8px; gap: 2px; }
+  .inst-disp-bar { display: flex; flex: 0 0 auto; flex-direction: row; align-items: center; justify-content: center; gap: 12px; padding: 2px 14px; }
   .inst-disp-div { width: 1px; flex-shrink: 0; height: 36px; background: #333; margin: 0 4px; }
   .inst-disp-chord { font-size: clamp(16px,3vw,30px); color: #5DCAA5; font-weight: 700; line-height: 1.2; white-space: nowrap; }
-  .inst-disp-empty { font-size: clamp(13px,2.2vw,22px); color: #333; }
+  .inst-disp-dot { font-size: clamp(16px,3vw,30px); color: #2a2a3a; font-weight: 700; line-height: 1.2; }
 </style>
 </head>
 <body>
@@ -563,12 +565,16 @@
       const barEl = document.createElement('div');
       barEl.className = 'inst-disp-bar';
       const slots = ((instChords || [])[b] || []).slice().sort((a,c) => a.pos - c.pos);
-      if (slots.length === 0) {
-        const emp = document.createElement('span'); emp.className = 'inst-disp-empty'; emp.textContent = '—'; barEl.appendChild(emp);
-      } else {
-        slots.forEach(s => {
-          const c = document.createElement('span'); c.className = 'inst-disp-chord'; c.textContent = s.name; barEl.appendChild(c);
-        });
+      const beatMap = {};
+      slots.forEach(s => { const beat = Math.floor((s.pos || 0) / 2); if (!beatMap[beat]) beatMap[beat] = s.name; });
+      for (let beat = 0; beat < 4; beat++) {
+        const cell = document.createElement('span');
+        if (beatMap[beat]) {
+          cell.className = 'inst-disp-chord'; cell.textContent = beatMap[beat];
+        } else {
+          cell.className = 'inst-disp-dot'; cell.textContent = '·';
+        }
+        barEl.appendChild(cell);
       }
       grid.appendChild(barEl);
     }

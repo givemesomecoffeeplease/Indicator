@@ -262,8 +262,6 @@ class WebServer {
             return "{\"song\":\"\(j(song.name))\",\"sections\":\(secs)}"
         }.joined(separator: ",") + "]"
 
-        let exportBtns = buildSongExportButtons(songs: songs.map { ($0.name, $0.sections.map { $0.sec }) })
-
         return """
         <!DOCTYPE html>
         <html lang="ko">
@@ -372,21 +370,6 @@ class WebServer {
               <div id="song-title"></div>
               <div id="sections-list"></div>
             </div>
-          </div>
-        </div>
-        <div id="export-box">
-          <h2>내보내기</h2>
-          <div class="btn-row">
-            <a href="/export/setlist" class="btn btn-sm btn-sec" style="text-decoration:none">이번 세트리스트</a>
-            \(exportBtns)
-          </div>
-          <h2 style="margin-top:12px">가져오기</h2>
-          <div class="btn-row" style="align-items:center;gap:8px">
-            <label class="btn btn-sm btn-sec" style="cursor:pointer">
-              파일 선택
-              <input type="file" accept=".json,.csv" style="display:none" onchange="handleImportFile(this)">
-            </label>
-            <span id="import-status" style="font-size:11px;color:var(--sub)"></span>
           </div>
         </div>
         <script>
@@ -795,9 +778,18 @@ class WebServer {
             const inp=document.createElement('input');inp.className='chord-inp-pop';
             inp.value=t.chord||'';inp.placeholder='코드';
             inp.addEventListener('keydown',e=>handleChordKey(e,ti,inp,song,sec,gidx,segIdx,ceKey));
+            inp.addEventListener('compositionend',e=>{
+              // 한글 IME 입력 완료 시 → 영문 변환 시도 (한→영 키 매핑)
+              const map={'ㅁ':'a','ㄴ':'b','ㅇ':'c','ㄹ':'d','ㅎ':'e','ㅛ':'f','ㅣ':'g','ㅏ':'h','ㅗ':'i','ㅓ':'j','ㅏ':'k','ㅣ':'l','ㅡ':'m','ㄴ':'n','ㅛ':'o','ㅖ':'p','ㅂ':'q','ㄱ':'r','ㄴ':'s','ㅅ':'t','ㅕ':'u','ㅍ':'v','ㅈ':'w','ㅌ':'x','ㅛ':'y','ㅈ':'z'};
+              const raw=e.data||'';const mapped=raw.split('').map(c=>map[c]||c).join('');
+              const cur=inp.value;const replaced=cur.slice(0,cur.length-raw.length)+mapped;
+              inp.value=replaced;inp.dispatchEvent(new Event('input'));
+            });
             inp.addEventListener('input',()=>{
+              const pos=inp.selectionStart;
               inp.value=inp.value.replace(/[^A-Za-z0-9#♭/]/g,'');
-              inp.value=inp.value.slice(0,1).toUpperCase()+inp.value.slice(1);
+              // 첫 글자 + / 뒤 첫 글자 대문자
+              inp.value=inp.value.replace(/^([a-z])/,(m,c)=>c.toUpperCase()).replace(/\\/([a-z])/,(m,c)=>'\\/'+c.toUpperCase());
             });
             inp.addEventListener('blur',()=>{if(ces.editIdx===ti){ces.editIdx=null;confirmChord(song,sec,gidx,segIdx,ceKey,ti,inp.value);}});
             el.appendChild(inp);setTimeout(()=>{inp.focus();inp.select();},0);
@@ -819,7 +811,7 @@ class WebServer {
             });
             el.appendChild(del);
           }
-          el.addEventListener('click',()=>{if(ti!==ces.editIdx)openChordInput(song,sec,gidx,segIdx,ceKey,ti);});
+          el.addEventListener('mousedown',e=>{if(ti!==ces.editIdx){e.preventDefault();openChordInput(song,sec,gidx,segIdx,ceKey,ti);}});
           return el;
         }
 
