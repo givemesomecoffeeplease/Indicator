@@ -502,18 +502,17 @@ class LogicPoller {
 
     // 수동 또는 자동 스캔 진입점
     func performScan() {
-        ScheduleStore.shared.markScanning()
         queue.async { [weak self] in self?.scanMTC() }
     }
 
     private func scanMTC() {
         guard AXIsProcessTrusted() else {
-            DispatchQueue.main.async { ScheduleStore.shared.markFailed("접근성 권한 없음") }
+            DispatchQueue.main.async { debugLog("접근성 권한 없음") }
             return
         }
         guard let app = NSRunningApplication
             .runningApplications(withBundleIdentifier: Self.bundleID).first else {
-            DispatchQueue.main.async { ScheduleStore.shared.markFailed("Logic Pro가 실행중이지 않음") }
+            DispatchQueue.main.async { debugLog("Logic Pro가 실행중이지 않음") }
             return
         }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
@@ -521,10 +520,10 @@ class LogicPoller {
         // 1. 마커 읽기 (MTC 직접)
         switch readMarkersMTC(axApp: axApp) {
         case nil:
-            DispatchQueue.main.async { ScheduleStore.shared.markFailed("마커 목록 창을 열어주세요") }
+            DispatchQueue.main.async { debugLog("마커 목록 창을 열어주세요") }
             return
         case let m? where m.isEmpty:
-            DispatchQueue.main.async { ScheduleStore.shared.markFailed("마커 목록 > 보기 > '이벤트 위치 및 길이를 시간으로 표시' 체크") }
+            DispatchQueue.main.async { debugLog("마커 목록 > 보기 > '이벤트 위치 및 길이를 시간으로 표시' 체크") }
             return
         case let m?:
             break
@@ -533,7 +532,7 @@ class LogicPoller {
 
         // 2. 템포 읽기 (MTC 직접)
         guard let tempos = readTemposMTC(axApp: axApp), !tempos.isEmpty else {
-            DispatchQueue.main.async { ScheduleStore.shared.markFailed("템포 목록 창을 열어주세요") }
+            DispatchQueue.main.async { debugLog("템포 목록 창을 열어주세요") }
             return
         }
 
@@ -875,12 +874,17 @@ class LogicPoller {
         var segBPB  = rawTimeSigs.last(where: { $0.bar <= tempo.barPosition })?.numerator ?? 4
         var accMTC  = tempo.mtcSeconds
         var segBar  = tempo.barPosition
+        let secPerBeat: Double = 60.0 / tempo.bpm
         for ts in tsInRange {
-            accMTC += (ts.bar - segBar) * Double(segBPB) * (60.0 / tempo.bpm)
+            let bars: Double = ts.bar - segBar
+            let beats: Double = bars * Double(segBPB)
+            accMTC += beats * secPerBeat
             segBar  = ts.bar
             segBPB  = ts.numerator
         }
-        accMTC += (targetBar - segBar) * Double(segBPB) * (60.0 / tempo.bpm)
+        let remainBars: Double = targetBar - segBar
+        let remainBeats: Double = remainBars * Double(segBPB)
+        accMTC += remainBeats * secPerBeat
         return accMTC
     }
 

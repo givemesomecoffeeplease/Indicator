@@ -24,30 +24,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         logicPoller.onSnapshot = { [weak self] snapshot in
             guard let self else { return }
             // timeSigEvents가 새로 생겼고 아직 변박 없이 스캔된 상태면 재스캔 예약
-            if !snapshot.timeSigEvents.isEmpty,
-               ScheduleStore.shared.current?.timeSigs.isEmpty == true {
-                self.hasAutoScanned = false  // MTC 수신 시 재스캔하도록 리셋
-            }
             self.stateEngine.update(snapshot: snapshot)
         }
         mtcReceiver.onTimeUpdate = { [weak self] time in
             guard let self else { return }
             self.logicPoller.mtcActive = true
             self.stateEngine.updateMTC(time: time)
-            // MTC 수신 시 timeSigs가 부족하면 재스캔
-            let needRescan = (ScheduleStore.shared.current?.timeSigs.count ?? 0) < 2
-            if (!self.hasAutoScanned || needRescan),
-               let snap = self.logicPoller.lastSnapshot,
-               !snap.markers.isEmpty, snap.transportBar > 0, !snap.timeSigEvents.isEmpty {
-                self.hasAutoScanned = true
-                ScheduleStore.shared.scan(
-                    markers: snap.markers,
-                    timeSigEvents: snap.timeSigEvents,
-                    anchorBar: snap.transportBar,
-                    anchorMTC: time,
-                    bpm: snap.bpm
-                )
-            }
         }
         mtcReceiver.onStop = { [weak self] in
             self?.logicPoller.mtcActive = false
@@ -253,11 +235,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let liveMarkers = snap?.markers ?? []
             if ScheduleStore.shared.current == nil {
                 updateStatusItemTristate(item, color: .systemGray, title: "사전 스캔 안 됨 (선택)")
-            } else if mtcReceiver.mtcReceived || ScheduleStore.shared.isValid(against: liveMarkers) {
-                // 재생 중엔 공연 전 스캔이 유효하므로 검사 스킵
-                updateStatusItemTristate(item, color: .systemGreen, title: "사전 스캔 완료")
             } else {
-                updateStatusItemTristate(item, color: .systemOrange, title: "마커 변경됨 — 재스캔 필요")
+                updateStatusItemTristate(item, color: .systemGreen, title: "사전 스캔 완료")
             }
         }
     }
@@ -272,19 +251,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func scanSchedule() {
-        guard let snap = logicPoller.lastSnapshot,
-              !snap.markers.isEmpty,
-              !snap.timeSigEvents.isEmpty,
-              snap.transportBar > 0,
-              snap.transportMTC > 0 else { return }
-        hasAutoScanned = true
-        ScheduleStore.shared.scan(
-            markers: snap.markers,
-            timeSigEvents: snap.timeSigEvents,
-            anchorBar: snap.transportBar,
-            anchorMTC: snap.transportMTC,
-            bpm: snap.bpm
-        )
+        logicPoller.refreshMarkers()
     }
 
     @objc private func openAccessibilitySettings() {
