@@ -243,7 +243,7 @@ class WebServer {
                 let occIdx = occCount[occKey] ?? 0
                 occCount[occKey] = occIdx + 1
                 let nextMTC = (i + 1 < markers.count) ? markers[i + 1].mtcSeconds : m.mtcSeconds
-                let totalBars = max(0, Int((nextMTC - m.mtcSeconds) / (60.0 / max(1, 120.0)) / 4))
+                let totalBars = ScheduleStore.shared.barsBetween(startMTC: m.mtcSeconds, endMTC: nextMTC) ?? -1
                 let (d, linked) = getLyricOcc?(curSong, m.displayName, occIdx) ?? (SectionData(), false)
                 let adapted = adaptSlides(d.slides, targetTotalBars: totalBars)
                 let slidesJson = encodeJSON(adapted)
@@ -545,7 +545,8 @@ class WebServer {
           const ukey=ukOf(song,sec.sec,gidx);
           const ui=secUI[ukey];
           const st=loadState(song,sec.sec,sec.occIdx);
-          const total=sec.totalBars||0;
+          const noTempoData=sec.totalBars===-1;
+          const total=noTempoData?0:sec.totalBars;
           const block=document.createElement('div');
           block.className='sec-block';block.dataset.ukey=ukey;
 
@@ -554,7 +555,9 @@ class WebServer {
 
           const arrow=document.createElement('span');arrow.className='sec-arrow';arrow.textContent=ui.open?'▾':'▸';
           const nameEl=document.createElement('span');nameEl.className='sec-name';nameEl.textContent=sec.sec;
-          const barsEl=document.createElement('span');barsEl.className='sec-bars-info';barsEl.textContent=total+'마디';
+          const barsEl=document.createElement('span');barsEl.className='sec-bars-info';
+          barsEl.textContent=noTempoData?'⚠️ 템포 스캔 필요':total+'마디';
+          if(noTempoData)barsEl.style.color='#e05c00';
 
           const linkSel=document.createElement('select');
           linkSel.className='link-select';

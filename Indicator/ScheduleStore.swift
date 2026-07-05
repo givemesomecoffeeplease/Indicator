@@ -41,6 +41,8 @@ class ScheduleStore {
 
     private(set) var current: ScannedSchedule?
 
+    var onSaved: ((ScannedSchedule) -> Void)?
+
     private var saveURL: URL? {
         guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
         let folder = dir.appendingPathComponent("Indicator")
@@ -55,9 +57,33 @@ class ScheduleStore {
     func save(schedule: ScannedSchedule) {
         current = schedule
         saveToDisk()
+        onSaved?(schedule)
     }
 
     // MARK: - Query (StateEngine 호출)
+
+    func bpmAt(mtcSeconds: Double) -> Double? {
+        guard let tempos = current?.tempos, !tempos.isEmpty else { return nil }
+        let t = tempos.last(where: { $0.mtcSeconds <= mtcSeconds }) ?? tempos[0]
+        return t.bpm
+    }
+
+    /// 특정 SMPTE 시간이 몇 번째 마디인지 계산 (소수점 포함)
+    /// 가장 가까운 템포 변화 지점의 마디 위치 + 그 이후 경과 시간으로 계산
+    func barPositionAt(mtcSeconds: Double) -> Double? {
+        guard let tempos = current?.tempos, !tempos.isEmpty else { return nil }
+        let t = tempos.last(where: { $0.mtcSeconds <= mtcSeconds }) ?? tempos[0]
+        let bpb = Double(beatsPerBarAt(mtcSeconds: mtcSeconds)?.beatsPerBar ?? 4)
+        let barsElapsed = (mtcSeconds - t.mtcSeconds) * t.bpm / 60.0 / bpb
+        return t.barPosition + barsElapsed
+    }
+
+    /// 두 SMPTE 시간 사이의 마디 수 (정수)
+    func barsBetween(startMTC: Double, endMTC: Double) -> Int? {
+        guard let startBar = barPositionAt(mtcSeconds: startMTC),
+              let endBar = barPositionAt(mtcSeconds: endMTC) else { return nil }
+        return max(0, Int(endBar - startBar))
+    }
 
     func beatsPerBarAt(mtcSeconds: Double) -> (beatsPerBar: Int, beatUnit: Int)? {
         guard let timeSigs = current?.timeSigs, !timeSigs.isEmpty else { return nil }

@@ -46,6 +46,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.webServer.broadcast(state: state)
         }
 
+        ScheduleStore.shared.onSaved = { [weak self] schedule in
+            DispatchQueue.main.async {
+                self?.updateScanResultMenuItem(schedule: schedule)
+            }
+        }
+
         webServer.getMarkers = { [weak self] in
             self?.logicPoller.lastSnapshot?.markers ?? []
         }
@@ -231,12 +237,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // 사전 스캔 상태 (3단계: 완료 / 재스캔 필요 / 안 됨 — 선택 기능이라 빨강 대신 회색 사용)
         if let item = menu.item(withTag: tagSchedule) {
-            let snap = logicPoller.lastSnapshot
-            let liveMarkers = snap?.markers ?? []
-            if ScheduleStore.shared.current == nil {
-                updateStatusItemTristate(item, color: .systemGray, title: "사전 스캔 안 됨 (선택)")
+            if let schedule = ScheduleStore.shared.current {
+                let title = "사전 스캔 완료 · 마커 \(schedule.markers.count) / 템포 \(schedule.tempos.count) / 박자 \(schedule.timeSigs.count) / 조표 \(schedule.keySigs.count)"
+                updateStatusItemTristate(item, color: .systemGreen, title: title)
             } else {
-                updateStatusItemTristate(item, color: .systemGreen, title: "사전 스캔 완료")
+                updateStatusItemTristate(item, color: .systemGray, title: "사전 스캔 안 됨 (선택)")
             }
         }
     }
@@ -251,7 +256,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func scanSchedule() {
-        logicPoller.refreshMarkers()
+        logicPoller.performScan()
+    }
+
+    private func updateScanResultMenuItem(schedule: ScannedSchedule) {
+        guard let item = statusItem?.menu?.item(withTag: tagSchedule) else { return }
+        let title = "사전 스캔 완료 · 마커 \(schedule.markers.count) / 템포 \(schedule.tempos.count) / 박자 \(schedule.timeSigs.count) / 조표 \(schedule.keySigs.count)"
+        updateStatusItemTristate(item, color: .systemGreen, title: title)
     }
 
     @objc private func openAccessibilitySettings() {
