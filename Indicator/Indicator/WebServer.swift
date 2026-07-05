@@ -1035,20 +1035,22 @@ class WebServer {
             let importedData;
             try{importedData=JSON.parse(match[1]);}catch{showMsg('파싱 오류');return;}
             const payload={};
+            // 슬라이드에 singerNote 없는 구버전 파일 호환
+            function fixSlides(slides){return(slides||[]).map(sl=>({...sl,singerNote:sl.singerNote||''}));}
             if(targetSongName){
               const srcSong=importedData.find(s=>s.song===targetSongName)||importedData[0];
               if(!srcSong){showMsg('데이터 없음');return;}
               payload[targetSongName]={};
               srcSong.sections.forEach(sec=>{
                 const occKey=sec.sec+'@@'+(sec.occIdx??0);
-                payload[targetSongName][occKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:sec.slides||[],linked:false};
+                payload[targetSongName][occKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:fixSlides(sec.slides),linked:false};
               });
             } else {
               importedData.forEach(song=>{
                 payload[song.song]={};
                 song.sections.forEach(sec=>{
                   const occKey=sec.sec+'@@'+(sec.occIdx??0);
-                  payload[song.song][occKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:sec.slides||[],linked:false};
+                  payload[song.song][occKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:fixSlides(sec.slides),linked:false};
                 });
               });
             }
