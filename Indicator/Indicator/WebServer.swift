@@ -429,7 +429,8 @@ class WebServer {
           return getSegs(st,total).map(sg=>({
             startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,
             tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),
-            instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[]
+            instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],
+            singerNote:''
           }));
         }
 
@@ -535,7 +536,7 @@ class WebServer {
           if(!songData)return;
           songData.sections.forEach((sec,secIdx)=>{
             const ukey=ukOf(song,sec.sec,secIdx);
-            if(!secUI[ukey])secUI[ukey]={open:false};
+            if(!secUI[ukey])secUI[ukey]={open:STANDALONE};
             list.appendChild(createSecBlock(song,sec,secIdx));
           });
         }
@@ -1075,6 +1076,11 @@ class WebServer {
         if(STANDALONE){
           const bi=$('btn-import');if(bi)bi.style.display='none';
           const be=$('btn-export');if(be)be.style.display='none';
+          // 안내 배너
+          const banner=document.createElement('div');
+          banner.style.cssText='background:#fff8e1;border-bottom:1px solid #ffe082;padding:10px 20px;font-size:13px;color:#7a5c00;flex-shrink:0;display:flex;align-items:center;gap:8px';
+          banner.innerHTML='<span>✏️</span><span>가사를 편집하고 <b>저장</b> 버튼을 누르면 편집 완료 파일이 다운로드됩니다. 그 파일을 리더에게 보내주세요.</span>';
+          document.body.insertBefore(banner,document.getElementById('layout'));
         }
 
         renderSidebar();
