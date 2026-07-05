@@ -1,5 +1,25 @@
 # Indicator
 
+## 2026-07-06 작업 내역
+
+### 마디 수 계산 개선 + 스캔 버튼 복원 + 결과 표시 (v0.2.2)
+
+#### 마디 수 계산 개선 (`ScheduleStore.swift`, `WebServer.swift`)
+- **기존 문제**: 가사 편집 화면에서 섹션 마디 수를 섹션 시작 지점의 BPM 하나로만 계산 → 레퍼런스 곡 기반 제작처럼 BPM이 매 마디마다 바뀌는 곡에서 오차 발생
+- **수정**: `ScheduleStore`에 `barPositionAt(mtcSeconds:)` / `barsBetween(startMTC:endMTC:)` 메서드 추가. 스캔된 모든 템포 변화 지점의 SMPTE 시간과 마디 위치를 활용해 정확하게 계산
+- **템포 데이터 없을 때**: BPM 120 폴백 대신 마디 그리드 자리에 주황색 `⚠️ 템포 스캔 필요` 경고 표시
+
+#### 스캔 버튼 복원 (`AppDelegate.swift`)
+- **원인**: `c66f00a` 커밋("ScheduleStore 구조 통합") 에서 `scanSchedule()`이 전체 스캔(`performScan`) 대신 마커만 읽는 `refreshMarkers()`를 호출하도록 잘못 교체됨
+- **수정**: `scanSchedule()` → `performScan()` 호출로 복원 (마커/템포/박자표/조표 모두 스캔)
+
+#### 스캔 결과 표시 (`AppDelegate.swift`, `ScheduleStore.swift`)
+- `ScheduleStore.onSaved` 콜백 추가
+- 스캔 완료 후 메뉴 항목이 `사전 스캔 완료 · 마커 66 / 템포 21 / 박자 7 / 조표 4` 형식으로 업데이트
+- 앱 재시작 후에도 저장된 스캔 결과 항목 수 그대로 표시
+
+---
+
 ## 2026-07-05 작업 내역
 
 ### HTML 내보내기/가져오기 버그 수정 (v0.2.1)
