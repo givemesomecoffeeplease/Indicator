@@ -959,10 +959,10 @@ class WebServer {
           const s=DATA.find(d=>d.song===song);
           if(!s)return null;
           const sections=s.sections.map(sec=>{
-            const k=dkOf(song,sec.sec,sec.startBar);
-            const st=dirty[k]||loadState(song,sec.sec,sec.startBar);
+            const k=dkOf(song,sec.sec,sec.occIdx);
+            const st=dirty[k]||loadState(song,sec.sec,sec.occIdx);
             const slides=rawSlidesFromState(st,sec.totalBars);
-            return{sec:sec.sec,startBar:sec.startBar,slides,sessionNote:st.sessionNote||'',singerNote:st.singerNote||''};
+            return{sec:sec.sec,occIdx:sec.occIdx,totalBars:sec.totalBars,slides,sessionNote:st.sessionNote||'',singerNote:st.singerNote||''};
           });
           return[{song,sections}];
         }
@@ -1035,21 +1035,19 @@ class WebServer {
             try{importedData=JSON.parse(match[1]);}catch{showMsg('파싱 오류');return;}
             const payload={};
             if(targetSongName){
-              const srcSong=importedData[0];
+              const srcSong=importedData.find(s=>s.song===targetSongName)||importedData[0];
               if(!srcSong){showMsg('데이터 없음');return;}
               payload[targetSongName]={};
               srcSong.sections.forEach(sec=>{
-                payload[targetSongName][sec.sec]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:sec.slides||[]};
-                const noteKey=sec.sec+'|||'+sec.startBar;
-                payload[targetSongName][noteKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:[]};
+                const occKey=sec.sec+'@@'+(sec.occIdx??0);
+                payload[targetSongName][occKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:sec.slides||[],linked:false};
               });
             } else {
               importedData.forEach(song=>{
                 payload[song.song]={};
                 song.sections.forEach(sec=>{
-                  payload[song.song][sec.sec]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:sec.slides||[]};
-                  const noteKey=sec.sec+'|||'+sec.startBar;
-                  payload[song.song][noteKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:[]};
+                  const occKey=sec.sec+'@@'+(sec.occIdx??0);
+                  payload[song.song][occKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:sec.slides||[],linked:false};
                 });
               });
             }
