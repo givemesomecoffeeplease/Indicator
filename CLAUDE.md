@@ -1,5 +1,32 @@
 # Indicator
 
+## 2026-07-05 작업 내역
+
+### HTML 내보내기/가져오기 버그 수정 (v0.2.1)
+
+#### 문제 1 — slides 디코딩 실패 (가장 근본 원인)
+- **원인**: `rawSlidesFromState` JS 함수가 슬라이드 객체에 `singerNote` 필드를 빠뜨림. Swift `LyricSlide` 구조체는 이 필드가 필수(`var singerNote: String`)이므로 자동 Codable 디코딩 실패 → `SectionData.slides`가 항상 `[]`로 저장됨.
+- **영향**: 내보내기→가져오기 경로 전체 (일반 `saveAll`은 직접 슬라이드 빌드 시 `singerNote:''` 포함하므로 정상). 가져오기한 가사가 하나도 저장되지 않는 버그.
+- **수정**: `rawSlidesFromState`에 `singerNote:''` 추가 (`WebServer.swift`).
+
+#### 문제 2 — `buildExportData` 잘못된 필드 참조
+- **원인**: `sec.startBar`(없는 필드, `undefined`)를 `occIdx`로 사용 → dirty 수정사항이 내보내기에 미포함, 반복 섹션(Chorus×2 등) 데이터 오염.
+- **수정**: `sec.occIdx`로 교정, 내보낸 섹션 객체에도 `occIdx` 포함 (`WebServer.swift`).
+
+#### 문제 3 — `handleImportFile` 잘못된 저장 키
+- **원인**: 서버에 POST할 때 키를 `sec이름`으로만 사용 → 서버가 기대하는 `sec@@occIdx` 형식 불일치. `sec.startBar`(undefined)로 garbage 키 추가 생성.
+- **수정**: `sec.sec+'@@'+(sec.occIdx??0)` 형식으로 교정, garbage 키 제거 (`WebServer.swift`).
+
+#### 문제 4 — 구버전 파일 호환 (singerNote 없는 slides)
+- **원인**: 이전 버전으로 내보낸 HTML 파일의 slides에 `singerNote` 없음 → 가져오기 시 동일하게 디코딩 실패.
+- **수정**: `handleImportFile`에서 `fixSlides()` 헬퍼로 `singerNote` 자동 보완 (`WebServer.swift`).
+
+#### UX 개선
+- standalone 모드(팀원 파일)에서 섹션 기본 펼침 (`open:STANDALONE`) — 마디 그리드 즉시 표시.
+- standalone 모드 진입 시 안내 배너 표시 ("가사 편집 후 저장 버튼 → 편집 완료 파일 다운로드").
+
+---
+
 ## 2026-07-02 작업 내역
 
 ### 사전 스캔 v2 완성 — MTC 기반 변박/섹션 결정론적 계산
