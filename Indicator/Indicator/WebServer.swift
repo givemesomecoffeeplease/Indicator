@@ -1047,6 +1047,14 @@ class WebServer {
             let importedData;
             try{importedData=JSON.parse(html.slice(si+startMark.length,ei));}catch{showMsg('파싱 오류');return;}
             // /save 호출 없이 로컬 DATA만 업데이트 — 뷰어 적용 버튼으로만 서버에 반영
+            // 노트(세션/싱어)는 덮어쓰지 않고 병합: 파일에 값이 있으면 채우고, 없으면 기존 값 유지
+            const importedSongs=new Set();
+            const mergeSec=(destSec,srcSec)=>{
+              destSec.slides=fixSlides(srcSec.slides);
+              destSec.sessionNote=srcSec.sessionNote||destSec.sessionNote||'';
+              destSec.singerNote=srcSec.singerNote||destSec.singerNote||'';
+              destSec.linked=false;
+            };
             if(targetSongName){
               const srcSong=importedData.find(s=>s.song===targetSongName)||importedData[0];
               if(!srcSong){showMsg('데이터 없음');return;}
@@ -1054,18 +1062,29 @@ class WebServer {
               if(!dest){showMsg('현재 세트리스트에 없는 곡');return;}
               srcSong.sections.forEach(srcSec=>{
                 const destSec=dest.sections.find(s=>s.sec===srcSec.sec&&(s.occIdx??0)===(srcSec.occIdx??0));
-                if(destSec){destSec.slides=fixSlides(srcSec.slides);destSec.sessionNote=srcSec.sessionNote||'';destSec.singerNote=srcSec.singerNote||'';destSec.linked=false;}
+                if(destSec)mergeSec(destSec,srcSec);
               });
+              importedSongs.add(targetSongName);
             } else {
               importedData.forEach(importSong=>{
                 const dest=DATA.find(s=>s.song===importSong.song);
                 if(!dest)return;
                 importSong.sections.forEach(srcSec=>{
                   const destSec=dest.sections.find(s=>s.sec===srcSec.sec&&(s.occIdx??0)===(srcSec.occIdx??0));
-                  if(destSec){destSec.slides=fixSlides(srcSec.slides);destSec.sessionNote=srcSec.sessionNote||'';destSec.singerNote=srcSec.singerNote||'';destSec.linked=false;}
+                  if(destSec)mergeSec(destSec,srcSec);
                 });
+                importedSongs.add(importSong.song);
               });
             }
+            // 노트 입력창 캐시(secUI)가 옛 값으로 남아있으면 화면이 안 갱신되니 비워서
+            // 다음 렌더에서 병합된 최신 값(DATA)을 다시 읽어오게 함
+            Object.keys(secUI).forEach(ukey=>{
+              if(importedSongs.has(ukey.split('|||')[0])){
+                delete secUI[ukey].sessionNote;
+                delete secUI[ukey].singerNote;
+              }
+            });
+            if(importedSongs.has(curSong))renderSections(curSong);
             renderSidebar();
             showMsg('가져왔어요! 뷰어 적용을 눌러주세요.');
           };
