@@ -375,9 +375,12 @@
   async function fetchLyricCache() {
     try {
       const html = await fetch('/edit').then(r => r.text());
-      const m = html.match(/const DATA=(\[[\s\S]*?\]);/);
-      if (!m) return;
-      const data = JSON.parse(m[1]);
+      const startMark = 'const DATA=';
+      const endMark = ';//EXPORT_DATA_LINE';
+      const si = html.indexOf(startMark);
+      const ei = html.indexOf(endMark);
+      if (si < 0 || ei < 0 || ei <= si) return;
+      const data = JSON.parse(html.slice(si + startMark.length, ei));
       lyricSlides = {};
       data.forEach(song => {
         const arr = [];

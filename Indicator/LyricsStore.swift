@@ -5,16 +5,7 @@ class LyricsStore {
 
     private var data: [String: [String: SectionData]] = [:]
 
-    private var autoSaveURL: URL? {
-        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-        let folder = dir.appendingPathComponent("Indicator")
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("master.json")
-    }
-
-    init() {
-        loadFromDisk()
-    }
+    init() {}
 
     // MARK: - Query
 
@@ -64,7 +55,6 @@ class LyricsStore {
                 data[song]?[sec] = val
             }
         }
-        saveToDisk()
     }
 
     // MARK: - Export
@@ -121,21 +111,6 @@ class LyricsStore {
         else { return false }
         merge(decoded)
         return true
-    }
-
-    // MARK: - Auto save/load
-
-    private func saveToDisk() {
-        guard let url = autoSaveURL, let data = exportAll() else { return }
-        try? data.write(to: url)
-    }
-
-    private func loadFromDisk() {
-        guard let url = autoSaveURL,
-              let raw = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode([String: [String: SectionData]].self, from: raw)
-        else { return }
-        data = decoded
     }
 
     // MARK: - Helper

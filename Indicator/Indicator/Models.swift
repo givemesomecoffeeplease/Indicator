@@ -2,15 +2,41 @@ import Foundation
 
 // ── 가사+코드 토큰 ──────────────────────────────────────────
 struct LyricToken: Codable, Equatable {
-    enum TokenType: String, Codable { case char, ghost, br }
+    enum TokenType: String, Codable {
+        case char, ghost, br
+        // 미래에 새 타입이 추가돼도 파싱 실패 방지
+        init(from decoder: Decoder) throws {
+            let s = try decoder.singleValueContainer().decode(String.self)
+            self = TokenType(rawValue: s) ?? .char
+        }
+    }
     var type: TokenType
-    var char: String?   // type==char 일 때 글자
-    var chord: String?  // 이 토큰 위에 붙는 코드 (옵셔널)
+    var char: String?
+    var chord: String?
+
+    enum CodingKeys: String, CodingKey { case type, char, chord }
+    init(type: TokenType = .char, char: String? = nil, chord: String? = nil) {
+        self.type = type; self.char = char; self.chord = chord
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type  = (try? c.decode(TokenType.self, forKey: .type)) ?? .char
+        char  = try? c.decode(String.self, forKey: .char)
+        chord = try? c.decode(String.self, forKey: .chord)
+    }
 }
 
 struct InstChordSlot: Codable, Equatable {
-    var pos: Int     // 8분음표 그리드 위치 (0…7)
+    var pos: Int
     var name: String
+
+    enum CodingKeys: String, CodingKey { case pos, name }
+    init(pos: Int = 0, name: String = "") { self.pos = pos; self.name = name }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pos  = (try? c.decode(Int.self,    forKey: .pos))  ?? 0
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+    }
 }
 
 struct LyricSlide: Codable, Equatable {
@@ -20,6 +46,21 @@ struct LyricSlide: Codable, Equatable {
     var tokens: [LyricToken]
     var instChords: [[InstChordSlot]]  // 마디별 간주 코드 슬롯
     var singerNote: String
+
+    enum CodingKeys: String, CodingKey { case startBar, barCount, isInstrumental, tokens, instChords, singerNote }
+    init(startBar: Int = 0, barCount: Int = 0, isInstrumental: Bool = false, tokens: [LyricToken] = [], instChords: [[InstChordSlot]] = [], singerNote: String = "") {
+        self.startBar = startBar; self.barCount = barCount; self.isInstrumental = isInstrumental
+        self.tokens = tokens; self.instChords = instChords; self.singerNote = singerNote
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        startBar        = (try? c.decode(Int.self,              forKey: .startBar))        ?? 0
+        barCount        = (try? c.decode(Int.self,              forKey: .barCount))        ?? 0
+        isInstrumental  = (try? c.decode(Bool.self,             forKey: .isInstrumental))  ?? false
+        tokens          = (try? c.decode([LyricToken].self,     forKey: .tokens))          ?? []
+        instChords      = (try? c.decode([[InstChordSlot]].self, forKey: .instChords))     ?? []
+        singerNote      = (try? c.decode(String.self,           forKey: .singerNote))      ?? ""
+    }
 }
 
 struct SectionData: Codable {

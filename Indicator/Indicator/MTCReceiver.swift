@@ -89,7 +89,10 @@ class MTCReceiver {
             DispatchQueue.main.async { self?.onStop?() }
         }
         silenceTimer = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
+        // 실제 정지는 0xFC(MIDI Stop)가 즉시 처리하므로 이 타이머는 0xFC 유실 시의
+        // 비상 안전망일 뿐. 짧으면(0.15s) 시스템 부하로 MIDI가 잠깐 밀릴 때
+        // 재생 중인데 정지로 오판 → 섹션/카운트 리셋 요동이 발생했음.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: item)
     }
 
     private func process(_ pkt: MIDIPacket) {
@@ -143,8 +146,9 @@ class MTCReceiver {
                         qfCount      = 0
                         qfIndex      = 0
                         idx += 9  // F7까지 소비 (루프 끝 idx+=1 포함 시 10바이트 전진)
-                        let t = total
-                        DispatchQueue.main.async { self.onTimeUpdate?(t) }
+                        // onTimeUpdate 호출하지 않음: 정지 상태에서 재생헤드만 점프해도
+                        // Logic이 Full Frame을 보내는데, 이때 재생 중으로 오판하면 안 됨.
+                        // 위치만 기억해두면 재생 시작 시 Quarter Frame이 즉시(10ms) 이어받음.
                     }
 
                 case 0xF1 where idx + 1 < count:

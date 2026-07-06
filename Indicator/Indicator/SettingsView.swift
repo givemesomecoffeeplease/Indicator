@@ -8,7 +8,8 @@ class SettingsStore {
 
     var countdownBars: Int = {
         let v = UserDefaults.standard.integer(forKey: "countdownBars")
-        return v == 0 ? 3 : v  // 미설정(0)이면 기본 3
+        if v == 0 { return 2 }        // 미설정이면 기본 2마디
+        return min(v, 2)              // 0(비활성), 1, 2마디만 유효
     }() {
         didSet { UserDefaults.standard.set(countdownBars, forKey: "countdownBars") }
     }
@@ -33,9 +34,9 @@ struct SettingsView: View {
                 detail: settings.countdownBars == 0 ? "사용 안 함" : "\(settings.countdownBars)마디 전",
                 caption: settings.countdownBars == 0
                     ? "카운트다운이 표시되지 않습니다."
-                    : "다음 섹션 전환 \(settings.countdownBars)마디 전부터 카운트다운이 표시됩니다."
+                    : "사전 스캔 후 다음 섹션 전환 \(settings.countdownBars)마디 전부터 표시됩니다."
             ) {
-                Stepper("", value: $settings.countdownBars, in: 0...8)
+                Stepper("", value: $settings.countdownBars, in: 0...2)
                     .labelsHidden()
             }
 

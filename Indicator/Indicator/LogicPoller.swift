@@ -6,6 +6,7 @@ class LogicPoller {
     static let bundleID = "com.apple.logic10"
 
     var onSnapshot: ((LogicSnapshot) -> Void)?
+    var onScanFailed: ((String) -> Void)?
     var dumpAXTree = false
     private(set) var lastSnapshot: LogicSnapshot?
 
@@ -25,9 +26,6 @@ class LogicPoller {
     // MARK: - 시작 / 종료
 
     func start() {
-        // 앱 시작 시 풀스캔 1회
-        queue.async { [weak self] in self?.fullScan() }
-
         // 500ms마다 bar/beat 보정 (정지 중 재생헤드 이동 포함)
         let t = DispatchSource.makeTimerSource(queue: syncQueue)
         t.schedule(deadline: .now() + 1, repeating: .milliseconds(500))
@@ -35,8 +33,6 @@ class LogicPoller {
         t.resume()
         driftTimer = t
 
-        // 접근성 권한 부여 감지 → 3초 후 자동 스캔
-        scheduleAutoScanAfterPermission()
     }
 
     func stop() {
@@ -46,34 +42,7 @@ class LogicPoller {
         axPermissionTimer = nil
     }
 
-    // MARK: - 접근성 권한 감지 후 자동 스캔
-
     private var axPermissionTimer: DispatchSourceTimer?
-    private var axWasGranted = false
-
-    private func scheduleAutoScanAfterPermission() {
-        if AXIsProcessTrusted() {
-            // 이미 권한 있음 → 3초 후 스캔
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                self?.performScan()
-            }
-            return
-        }
-        // 권한 없음 → 0.5초마다 체크, 부여되면 3초 후 스캔 (1회만)
-        let t = DispatchSource.makeTimerSource(queue: .main)
-        t.schedule(deadline: .now() + 0.5, repeating: .milliseconds(500))
-        t.setEventHandler { [weak self] in
-            guard let self, !self.axWasGranted, AXIsProcessTrusted() else { return }
-            self.axWasGranted = true
-            self.axPermissionTimer?.cancel()
-            self.axPermissionTimer = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                self.performScan()
-            }
-        }
-        t.resume()
-        axPermissionTimer = t
-    }
 
     // 수동 새로고침 (메뉴 버튼)
     func refreshMarkers() {
@@ -131,8 +100,8 @@ class LogicPoller {
 
     // 점프 감지 호출 — 재생 중도 강제 실행
     private func readBarBeatForced() {
-        // 마커가 아직 없으면 풀스캔으로 대체 (앱 시작 직후 race condition 방지)
-        guard !cachedMarkers.isEmpty else { fullScan(); return }
+        // 마커가 없으면 스킵 (수동 스캔 전까지 대기)
+        guard !cachedMarkers.isEmpty else { return }
 
         guard AXIsProcessTrusted() else { return }
         guard let app = NSRunningApplication
@@ -505,14 +474,21 @@ class LogicPoller {
         queue.async { [weak self] in self?.scanMTC() }
     }
 
+    private func fail(_ msg: String) {
+        DispatchQueue.main.async {
+            debugLog(msg)
+            self.onScanFailed?(msg)
+        }
+    }
+
     private func scanMTC() {
         guard AXIsProcessTrusted() else {
-            DispatchQueue.main.async { debugLog("접근성 권한 없음") }
+            fail("접근성 권한이 없어요")
             return
         }
         guard let app = NSRunningApplication
             .runningApplications(withBundleIdentifier: Self.bundleID).first else {
-            DispatchQueue.main.async { debugLog("Logic Pro가 실행중이지 않음") }
+            fail("Logic Pro가 실행중이지 않아요")
             return
         }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
@@ -520,10 +496,10 @@ class LogicPoller {
         // 1. 마커 읽기 (MTC 직접)
         switch readMarkersMTC(axApp: axApp) {
         case nil:
-            DispatchQueue.main.async { debugLog("마커 목록 창을 열어주세요") }
+            fail("마커 목록 창을 열어주세요 (탐색 → 마커 목록 열기)")
             return
         case let m? where m.isEmpty:
-            DispatchQueue.main.async { debugLog("마커 목록 > 보기 > '이벤트 위치 및 길이를 시간으로 표시' 체크") }
+            fail("마커 목록 > 보기 > '이벤트 위치 및 길이를 시간으로 표시' 체크 후 다시 스캔하세요")
             return
         case let m?:
             break
@@ -532,7 +508,7 @@ class LogicPoller {
 
         // 2. 템포 읽기 (MTC 직접)
         guard let tempos = readTemposMTC(axApp: axApp), !tempos.isEmpty else {
-            DispatchQueue.main.async { debugLog("템포 목록 창을 열어주세요") }
+            fail("템포 목록 창을 열어주세요 (탐색 → 템포 목록 열기)")
             return
         }
 
@@ -951,15 +927,11 @@ class LogicPoller {
 
     // MARK: - Parsers
 
-    // "HH:MM:SS:FF.sub" → 초 (프레임 무시)
+    // "HH:MM:SS:FF.sub" → 초 (프레임·서브프레임 포함)
+    // 주의: 예전엔 프레임을 버려서 마커 시각이 항상 최대 1초(≈2박) 일찍 잡혔음 —
+    // 카운트다운·섹션 전환이 마커마다 다르게 일찍 나오던 원인.
     private func parseMTCSeconds(_ s: String) -> Double? {
-        let parts = s.split(separator: ":").map(String.init)
-        guard parts.count == 4,
-              let hh = Double(parts[0]),
-              let mm = Double(parts[1]),
-              let ss = Double(parts[2].split(separator: ".").first.map(String.init) ?? parts[2])
-        else { return nil }
-        return hh * 3600 + mm * 60 + ss
+        return parseMTC(s)
     }
 
     private func parseBarBeat(_ s: String) -> (bar: Int, beat: Int)? {

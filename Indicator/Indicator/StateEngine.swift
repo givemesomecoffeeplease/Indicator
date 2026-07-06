@@ -33,7 +33,11 @@ class StateEngine {
     private var anchorMTC: TimeInterval = 0
 
     // ── 카운트다운 ─────────────────────────────────────────
-    private var countdownBeats: Int = 0
+    // 스캔된 템포맵 기준 진짜 박 그리드(MTC)로 표시 시각을 정하고,
+    // 한 번 표시된 숫자는 절대 되돌아가지 않는 단방향 가드로 MTC 지터 깜빡임 차단.
+    // (MIDI Clock 펄스는 재생 시작 위치에 따라 박 그리드와 어긋나므로 사용하지 않음)
+    private var cdTargets: [(beat: Int, mtc: Double)] = []  // 섹션 진입 시 계산
+    private var cdShown: Int = 0                             // 0 = 미표시
     private var currentSectionBeatsPerBar: Int = 4
     private var currentSectionBeatUnit: Int = 4
 
@@ -107,7 +111,8 @@ class StateEngine {
             currentChordIdx    = -1
             chordPending       = false
             nextChordMTC       = 0
-            countdownBeats     = 0
+            cdTargets          = []
+            cdShown            = 0
             onJump?()
         }
         prevMTCTime  = mtcTime
@@ -134,7 +139,7 @@ class StateEngine {
 
     func mtcStopped() {
         mtcIsPlaying   = false
-        countdownBeats = 0
+        cdShown        = 0
         let state = compute()
         lastState     = state
         lastBroadcast = 0
@@ -157,8 +162,6 @@ class StateEngine {
         }
         lastBeatWall = wall
 
-        // 비트마다 1씩 감소 (MTC 재계산 없이 — 같은 숫자 반복 방지)
-        if countdownBeats > 0 { countdownBeats -= 1 }
         checkSectionEnd()
 
         if chordPending {
@@ -180,7 +183,7 @@ class StateEngine {
     private func applySection(idx: Int, retroactive: Bool) {
         guard let bounds = sectionBounds(idx: idx) else { return }
         let name = sectionName(at: idx)
-        debugLog("[Apply] section='\(name)' idx=\(idx) start=\(String(format:"%.1f",bounds.start)) end=\(String(format:"%.1f",bounds.end)) retro=\(retroactive)")
+        debugLog("[Apply] section='\(name)' idx=\(idx) start=\(String(format:"%.3f",bounds.start)) end=\(String(format:"%.3f",bounds.end)) retro=\(retroactive)")
 
         currentSectionIdx  = idx
         currentSectionName = name
@@ -206,11 +209,12 @@ class StateEngine {
 
     // MARK: - 카운트다운
 
-    // 섹션 진입 시 MTC로 초기 비트 수 계산 (이후 onBeat마다 -1)
+    // 섹션 진입 시 이 섹션 끝 기준 박 그리드 MTC를 미리 계산
     private func initCountdown() {
-        guard let bounds = sectionBounds(idx: currentSectionIdx) else { return }
-        let remainingSec = bounds.end - mtcTime
-        countdownBeats = max(0, Int((remainingSec / beatDuration()).rounded()))
+        cdShown = 0
+        guard let bounds = sectionBounds(idx: currentSectionIdx) else { cdTargets = []; return }
+        cdTargets = ScheduleStore.shared.countdownBeatMTCs(
+            sectionEndMTC: bounds.end, barsBack: countdownThresholdBars)
     }
 
     // 섹션 끝 지났는지 확인 (onBeat에서 호출)
@@ -328,13 +332,15 @@ class StateEngine {
     }
 
     // 섹션 내 상대 bar 위치 (슬라이드 표시용, index.html findCurrentEntry 기준)
+    // slideEarlyEighths: 팔분음표 N개만큼 앞당겨 슬라이드 전환 (1 eighth = beatDuration / 2)
     private func realtimeBarFloat() -> Double {
         guard sectionEntryMTC > 0 else { return 0 }
         let elapsed = mtcTime - sectionEntryMTC
         guard elapsed >= 0 else { return 0 }
         let bpb = Double(currentBeatsPerBar())
         let bd  = beatDuration()
-        return elapsed / (bpb * bd)
+        let earlySeconds = Double(SettingsStore.shared.slideEarlyEighths) * bd / 2.0
+        return (elapsed + earlySeconds) / (bpb * bd)
     }
 
     // occurrence 인덱스 계산 (같은 이름 섹션이 몇 번째인지)
@@ -413,10 +419,14 @@ class StateEngine {
             state.sectionLengthBars = sectionDurationSec / (Double(currentBeatsPerBar()) * beatDuration())
         }
 
-        // 카운트다운 — MIDI Clock 비트마다 recalcCountdown()이 갱신한 값 사용
-        // (MTC로 매번 재계산하면 beatDuration 오차로 버벅임 발생)
-        let threshold = countdownThresholdBars * currentSectionBeatsPerBar
-        state.countdownBars = (countdownBeats > 0 && countdownBeats <= threshold) ? countdownBeats : 0
+        // 카운트다운 — 스캔된 박 그리드(MTC) 도달 시점에 표시.
+        // 단방향 가드: 한 번 표시된 숫자는 커지지 않음 (MTC 지터로 시간이 뒤로 튀어도 깜빡임 없음)
+        if mtcIsPlaying, !cdTargets.isEmpty,
+           let bounds = sectionBounds(idx: idx), mtcTime < bounds.end,
+           let cur = cdTargets.last(where: { mtcTime >= $0.mtc }) {
+            if cdShown == 0 || cur.beat < cdShown { cdShown = cur.beat }
+        }
+        state.countdownBars = cdShown
 
         // 코드
         let sectionChords = chordsInCurrentSection()

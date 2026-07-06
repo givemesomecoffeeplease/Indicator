@@ -360,7 +360,7 @@ class WebServer {
           <input type="file" id="import-song-inp" accept=".html" style="display:none" onchange="handleImportFile(this.files[0],pendingImportSong)">
           <button id="btn-import" class="btn btn-sm btn-sec" onclick="document.getElementById('import-file-inp').click()">전체 가져오기</button>
           <button id="btn-export" class="btn btn-sm btn-sec" onclick="exportForTeam()">전체 내보내기</button>
-          <button class="btn" onclick="STANDALONE?standaloneDownload():saveAll()">저장</button>
+          <button class="btn" onclick="STANDALONE?standaloneDownload():saveAll()">뷰어 적용</button>
         </div>
         <div id="layout">
           <div id="sidebar"><div class="sb-hd">곡 목록</div></div>
@@ -434,29 +434,28 @@ class WebServer {
           }));
         }
 
-        // 캐노니컬(같은 이름 가장 이른 occurrence)의 최신 데이터를 내 마디 수에 맞춰 즉시 계산 (세션 중 캐노니컬 수정도 반영)
-        // 노트는 연결 여부와 무관하게 항상 자기 occurrence 것을 쓴다 (가사/코드만 캐노니컬을 따라감)
-        function buildLinkedPreview(song,sec,occIdx){
-          const canon=origSecOf(song,sec); // occIdx 생략 -> 이름으로 첫 occurrence(캐노니컬) 탐색
-          const canonDirty=dirty[dkOf(song,sec,0)];
+        // targetSec: 가사를 가져올 섹션명 (같은 이름이면 동일, 다른 이름이면 크로스 연결)
+        // ownSec/ownOccIdx: 마디 수·노트를 가져올 자기 섹션
+        function buildLinkedPreview(song,targetSec,ownSec,ownOccIdx){
+          const canon=origSecOf(song,targetSec);
+          const canonDirty=dirty[dkOf(song,targetSec,0)];
           let rawSlides;
           if(canonDirty&&!canonDirty.linked){
             rawSlides=rawSlidesFromState(canonDirty,canon.totalBars||0);
           } else {
             rawSlides=canon.slides;
           }
-          const target=origSecOf(song,sec,occIdx).totalBars||0;
-          const adapted=adaptRawSlides(rawSlides,target);
+          const own=origSecOf(song,ownSec,ownOccIdx);
+          const adapted=adaptRawSlides(rawSlides,own.totalBars||0);
           const{splits,segData}=slidesFromRaw(adapted,0);
-          const own=origSecOf(song,sec,occIdx);
-          return{splits,segData,sessionNote:own.sessionNote||'',singerNote:own.singerNote||'',capo:0,linked:true};
+          return{splits,segData,sessionNote:own.sessionNote||'',singerNote:own.singerNote||'',capo:0,linked:true,linkedTo:targetSec};
         }
 
         function loadState(song,sec,occIdx){
           const k=dkOf(song,sec,occIdx);
           if(dirty[k])return dirty[k];
           const o=origSecOf(song,sec,occIdx);
-          if(!!o.linked)return buildLinkedPreview(song,sec,occIdx);
+          if(!!o.linked){const targetSec=o.linkedTo||sec;return buildLinkedPreview(song,targetSec,sec,occIdx);}
           const slides=(o.slides||[]).filter(sl=>(sl.tokens&&sl.tokens.length>0)||sl.isInstrumental);
           if(slides.length===0){
             return{splits:[],segData:[{isInstrumental:false,tokens:[],instChords:[]}],sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0,linked:false};
@@ -468,9 +467,9 @@ class WebServer {
         }
 
         function setState(song,sec,occIdx,st){
-          dirty[dkOf(song,sec,occIdx)]={...st,linked:false};
+          dirty[dkOf(song,sec,occIdx)]={...st,linked:false,linkedTo:''};
           document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
-          updateLinkUI(song,sec,occIdx,false);
+          updateLinkUI(song,sec,occIdx,'');
         }
 
         function setNote(song,sec,occIdx,field,value){
@@ -479,19 +478,19 @@ class WebServer {
           document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
         }
 
-        function setLinked(song,sec,occIdx,linked){
-          if(linked){
-            dirty[dkOf(song,sec,occIdx)]={...buildLinkedPreview(song,sec,occIdx)};
+        function setLinked(song,sec,occIdx,targetSec){
+          if(targetSec){
+            dirty[dkOf(song,sec,occIdx)]=buildLinkedPreview(song,targetSec,sec,occIdx);
           } else {
             const cur=loadState(song,sec,occIdx);
-            dirty[dkOf(song,sec,occIdx)]={...cur,linked:false};
+            dirty[dkOf(song,sec,occIdx)]={...cur,linked:false,linkedTo:''};
           }
           document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
         }
 
-        function updateLinkUI(song,sec,occIdx,linked){
+        function updateLinkUI(song,sec,occIdx,linkedTo){
           const sel=document.querySelector('select.link-select[data-song="'+song+'"][data-sec="'+sec+'"][data-sb="'+occIdx+'"]');
-          if(sel)sel.value=linked?'linked':'independent';
+          if(sel)sel.value=linkedTo||'independent';
         }
 
         function tokensToPlain(toks){return(toks||[]).map(t=>t.type==='br'?'\\n':t.type==='char'?(t.char||''):'').join('');}
@@ -563,12 +562,19 @@ class WebServer {
           linkSel.className='link-select';
           linkSel.dataset.song=song;linkSel.dataset.sec=sec.sec;linkSel.dataset.sb=sec.occIdx;
           const isCanonical=(sec.occIdx===0);
-          linkSel.innerHTML='<option value="independent">독립적으로 편집</option>'+(isCanonical?'':'<option value="linked">'+sec.sec+' 자동 연결</option>');
-          linkSel.value=st.linked?'linked':'independent';
-          if(isCanonical)linkSel.disabled=true;
+          const myBase=sec.sec.replace(/[0-9]+$/,'');
+          const songSections=(DATA.find(s=>s.song===song)||{sections:[]}).sections;
+          // 같은 이름 반복 섹션 연결 옵션 (occIdx>0만)
+          const sameNameOpt=isCanonical?'':'<option value="'+sec.sec+'">'+sec.sec+' 자동 연결</option>';
+          // 숫자 제외 이름이 같은 다른 섹션 연결 옵션 (occIdx=0인 것들)
+          const crossOpts=songSections.filter(s=>s.occIdx===0&&s.sec!==sec.sec&&s.sec.replace(/[0-9]+$/,'')===myBase).map(s=>'<option value="'+s.sec+'">'+s.sec+' 자동 연결</option>').join('');
+          linkSel.innerHTML='<option value="independent">독립적으로 편집</option>'+sameNameOpt+crossOpts;
+          const currentLinkedTo=st.linkedTo||(st.linked?sec.sec:'');
+          linkSel.value=currentLinkedTo||'independent';
+          linkSel.disabled=(!sameNameOpt&&!crossOpts);
           linkSel.addEventListener('click',e=>e.stopPropagation());
           linkSel.addEventListener('change',()=>{
-            setLinked(song,sec.sec,sec.occIdx,linkSel.value==='linked');
+            setLinked(song,sec.sec,sec.occIdx,linkSel.value==='independent'?'':linkSel.value);
             refreshBlock(block,song,sec,gidx);
           });
 
@@ -919,41 +925,40 @@ class WebServer {
         }
 
         function saveAll(){
-          if(Object.keys(dirty).length===0){showMsg('변경사항 없음');return;}
           const payload={};
+          // dirty 항목: 편집된 내용 우선
           for(const[k,st]of Object.entries(dirty)){
             const{song,sec,occIdx}=parseDk(k);
             if(!payload[song])payload[song]={};
             const occKey=sec+'@@'+occIdx;
             if(st.linked){
-              payload[song][occKey]={lyricCue:'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides:[],linked:true};
+              payload[song][occKey]={lyricCue:'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides:[],linked:true,linkedTo:st.linkedTo||''};
               continue;
             }
             const o=origSecOf(song,sec,occIdx);
             const total=o.totalBars||0;
             const segs=getSegs(st,total);
-            const slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:''}));
+            const slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:sg.segData.singerNote||''}));
             const plain=tokensToPlain(segs[0]?.segData.tokens||[]);
             payload[song][occKey]={lyricCue:plain.split('\\n')[0]||'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides,linked:false};
           }
+          // dirty에 없는 나머지 섹션도 DATA에서 그대로 전송
+          DATA.forEach(song=>{
+            if(!payload[song.song])payload[song.song]={};
+            (song.sections||[]).forEach(sec=>{
+              const occKey=sec.sec+'@@'+sec.occIdx;
+              if(payload[song.song][occKey])return; // dirty 우선
+              const slides=(sec.slides||[]).map(sl=>({startBar:sl.startBar||0,barCount:sl.barCount||0,isInstrumental:!!sl.isInstrumental,tokens:sl.tokens||[],instChords:sl.instChords||[],singerNote:sl.singerNote||''}));
+              const plain=tokensToPlain(sec.slides?.[0]?.tokens||[]);
+              payload[song.song][occKey]={lyricCue:plain.split('\\n')[0]||'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides,linked:!!sec.linked,linkedTo:sec.linkedTo||''};
+            });
+          });
           fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
             .then(r=>r.json())
             .then(()=>{
-              for(const[k,st]of Object.entries(dirty)){
-                const{song,sec,occIdx}=parseDk(k);
-                const sd=DATA.find(x=>x.song===song)?.sections.find(x=>x.sec===sec&&x.occIdx===occIdx);
-                if(sd){
-                  sd.linked=!!st.linked;
-                  sd.sessionNote=st.sessionNote||'';sd.singerNote=st.singerNote||'';
-                  if(!st.linked){
-                    const segs=getSegs(st,sd.totalBars||0);
-                    sd.slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:''}));
-                  }
-                }
-              }
               for(const k in dirty)delete dirty[k];
-              renderSidebar();showMsg('저장됐어요!');
-            }).catch(()=>showMsg('저장 실패'));
+              renderSidebar();showMsg('뷰어에 적용됐어요!');
+            }).catch(()=>showMsg('적용 실패'));
         }
 
         function showMsg(m){const el=$('save-msg');el.textContent=m;el.style.opacity='1';setTimeout(()=>el.style.opacity='0',2200);}
@@ -1028,38 +1033,41 @@ class WebServer {
           showMsg('저장됐어요!');
         }
 
+        // 구버전 파일 호환: 필드 누락 시 기본값으로 채움
+        function fixSlides(slides){return(slides||[]).map(sl=>({startBar:sl.startBar||0,barCount:sl.barCount||0,isInstrumental:sl.isInstrumental||false,tokens:(sl.tokens||[]).map(t=>({type:t.type||'char',char:t.char??null,chord:t.chord??null})),instChords:sl.instChords||[],singerNote:sl.singerNote||''}));}
+
         function handleImportFile(file,targetSongName){
           if(!file)return;
           const reader=new FileReader();
           reader.onload=e=>{
             const html=e.target.result;
-            const match=html.match(/const DATA=([^;]*);\\/\\/EXPORT_DATA_LINE/);
-            if(!match){showMsg('파일 형식 오류');return;}
+            const startMark='const DATA=';const endMark=';//EXPORT_DATA_LINE';
+            const si=html.indexOf(startMark);const ei=html.indexOf(endMark);
+            if(si<0||ei<0){showMsg('파일 형식 오류');return;}
             let importedData;
-            try{importedData=JSON.parse(match[1]);}catch{showMsg('파싱 오류');return;}
-            const payload={};
-            // 슬라이드에 singerNote 없는 구버전 파일 호환
-            function fixSlides(slides){return(slides||[]).map(sl=>({...sl,singerNote:sl.singerNote||''}));}
+            try{importedData=JSON.parse(html.slice(si+startMark.length,ei));}catch{showMsg('파싱 오류');return;}
+            // /save 호출 없이 로컬 DATA만 업데이트 — 뷰어 적용 버튼으로만 서버에 반영
             if(targetSongName){
               const srcSong=importedData.find(s=>s.song===targetSongName)||importedData[0];
               if(!srcSong){showMsg('데이터 없음');return;}
-              payload[targetSongName]={};
-              srcSong.sections.forEach(sec=>{
-                const occKey=sec.sec+'@@'+(sec.occIdx??0);
-                payload[targetSongName][occKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:fixSlides(sec.slides),linked:false};
+              const dest=DATA.find(s=>s.song===targetSongName);
+              if(!dest){showMsg('현재 세트리스트에 없는 곡');return;}
+              srcSong.sections.forEach(srcSec=>{
+                const destSec=dest.sections.find(s=>s.sec===srcSec.sec&&(s.occIdx??0)===(srcSec.occIdx??0));
+                if(destSec){destSec.slides=fixSlides(srcSec.slides);destSec.sessionNote=srcSec.sessionNote||'';destSec.singerNote=srcSec.singerNote||'';destSec.linked=false;}
               });
             } else {
-              importedData.forEach(song=>{
-                payload[song.song]={};
-                song.sections.forEach(sec=>{
-                  const occKey=sec.sec+'@@'+(sec.occIdx??0);
-                  payload[song.song][occKey]={lyricCue:'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides:fixSlides(sec.slides),linked:false};
+              importedData.forEach(importSong=>{
+                const dest=DATA.find(s=>s.song===importSong.song);
+                if(!dest)return;
+                importSong.sections.forEach(srcSec=>{
+                  const destSec=dest.sections.find(s=>s.sec===srcSec.sec&&(s.occIdx??0)===(srcSec.occIdx??0));
+                  if(destSec){destSec.slides=fixSlides(srcSec.slides);destSec.sessionNote=srcSec.sessionNote||'';destSec.singerNote=srcSec.singerNote||'';destSec.linked=false;}
                 });
               });
             }
-            fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-              .then(()=>{showMsg('가져오기 완료!');setTimeout(()=>location.reload(),1000);})
-              .catch(()=>showMsg('가져오기 실패'));
+            renderSidebar();
+            showMsg('가져왔어요! 뷰어 적용을 눌러주세요.');
           };
           reader.readAsText(file);
         }
@@ -1067,13 +1075,13 @@ class WebServer {
         // ── 드래그앤드롭 ──
         let pendingImportSong=null;
         const mainEl=$('main');
-        mainEl.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();if(curSong)mainEl.classList.add('drop-hover');});
+        mainEl.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();mainEl.classList.add('drop-hover');});
         mainEl.addEventListener('dragleave',e=>{if(!mainEl.contains(e.relatedTarget))mainEl.classList.remove('drop-hover');});
         mainEl.addEventListener('drop',e=>{
           e.preventDefault();e.stopPropagation();mainEl.classList.remove('drop-hover');
-          if(!curSong){showMsg('먼저 곡을 선택하세요');return;}
           const file=[...e.dataTransfer.files].find(f=>f.name.endsWith('.html'));
-          if(file)handleImportFile(file,curSong);else showMsg('.html 파일만 가져올 수 있어요');
+          if(!file){showMsg('.html 파일만 가져올 수 있어요');return;}
+          handleImportFile(file,curSong||null);
         });
         document.addEventListener('dragover',e=>{e.preventDefault();});
         document.addEventListener('drop',e=>{e.preventDefault();});

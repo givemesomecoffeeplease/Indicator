@@ -48,12 +48,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         ScheduleStore.shared.onSaved = { [weak self] schedule in
             DispatchQueue.main.async {
+                self?.lastScanFailReason = nil
                 self?.updateScanResultMenuItem(schedule: schedule)
             }
         }
 
-        webServer.getMarkers = { [weak self] in
-            self?.logicPoller.lastSnapshot?.markers ?? []
+        logicPoller.onScanFailed = { [weak self] reason in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.lastScanFailReason = reason
+                if let item = self.statusItem?.menu?.item(withTag: self.tagSchedule) {
+                    self.updateStatusItemTristate(item, color: .systemOrange, title: "⚠️ \(reason)")
+                }
+            }
+        }
+
+        webServer.getMarkers = {
+            (ScheduleStore.shared.current?.markers ?? []).map {
+                Marker(name: $0.name, mtcSeconds: $0.mtcSeconds, bar: $0.barHint)
+            }
         }
         webServer.getLyric = { song, section in
             LyricsStore.shared.get(song: song, section: section)
@@ -134,6 +147,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let tagClock   = 104
     private let tagMarkers = 105
     private let tagSchedule = 106
+    private var lastScanFailReason: String? = nil
 
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -219,7 +233,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         debugLog("[MIDI Sources] \(srcNames)")
         let mtcOk     = mtcReceiver.mtcReceived
         let clockOk   = mtcReceiver.clockReceived
-        let markersOk = !(logicPoller.lastSnapshot?.markers.isEmpty ?? true)
+        let markersOk = !(ScheduleStore.shared.current?.markers.isEmpty ?? true)
 
         let checks: [(Int, Bool, String)] = [
             (tagAX,      axOk,      "손쉬운 사용 권한"),
@@ -240,6 +254,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let schedule = ScheduleStore.shared.current {
                 let title = "사전 스캔 완료 · 마커 \(schedule.markers.count) / 템포 \(schedule.tempos.count) / 박자 \(schedule.timeSigs.count) / 조표 \(schedule.keySigs.count)"
                 updateStatusItemTristate(item, color: .systemGreen, title: title)
+            } else if let reason = lastScanFailReason {
+                updateStatusItemTristate(item, color: .systemOrange, title: "⚠️ \(reason)")
             } else {
                 updateStatusItemTristate(item, color: .systemGray, title: "사전 스캔 안 됨 (선택)")
             }
