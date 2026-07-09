@@ -134,8 +134,8 @@ class LogicPoller {
         }
         guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return }
         for window in windows {
-            guard let outerBar = findByDesc(window, "컨트롤 막대"),
-                  let innerBar = findByDescAmongChildren(of: outerBar, desc: "컨트롤 막대")
+            guard let outerBar = findByDescAny(window, LX.controlBar),
+                  let innerBar = findByDescAmongChildrenAny(of: outerBar, descs: LX.controlBar)
             else { continue }
             cachedInnerBar = innerBar
             readTransportValues(innerBar: innerBar, into: &snapshot)
@@ -148,28 +148,28 @@ class LogicPoller {
             // Bar / Beat + 타임코드 (두 개의 "재생헤드 위치" 그룹)
             let children = axArray(of: innerBar, key: kAXChildrenAttribute) ?? []
             let posGroups = children.filter {
-                (axString($0, key: kAXDescriptionAttribute) ?? "") == "재생헤드 위치"
+                eq(axString($0, key: kAXDescriptionAttribute), LX.playheadPosition)
             }
             if let posGroup = posGroups.first,
-               let barSlider  = findByDesc(posGroup, "마디"),
-               let beatSlider = findByDesc(posGroup, "비트") {
+               let barSlider  = findByDescAny(posGroup, LX.bar),
+               let beatSlider = findByDescAny(posGroup, LX.beat) {
                 if let bar  = axNumber(barSlider),  bar  >= 1 { snapshot.transportBar  = Int(bar)  }
                 if let beat = axNumber(beatSlider), beat >= 1 { snapshot.transportBeat = Int(beat) }
             }
             if posGroups.count >= 2,
-               let desc = axString(posGroups[1], key: kAXDescriptionAttribute), desc == "재생헤드 위치",
+               eq(axString(posGroups[1], key: kAXDescriptionAttribute), LX.playheadPosition),
                let tcStr = axString(posGroups[1], key: kAXValueAttribute) ?? axString(posGroups[1], key: kAXTitleAttribute) {
                 if let tc = parseMTCSeconds(tcStr) { snapshot.transportMTC = tc }
             }
 
             // BPM
-            if let tempoSlider = findByDesc(innerBar, "템포"),
+            if let tempoSlider = findByDescAny(innerBar, LX.tempo),
                let bpm = axNumber(tempoSlider), bpm > 20, bpm < 500 {
                 snapshot.bpm = bpm
             }
 
             // Time signature  (val = "4/4")
-            if let tsButton = findByDesc(innerBar, "박자표"),
+            if let tsButton = findByDescAny(innerBar, LX.timeSigButton),
                let val = axString(tsButton, key: kAXValueAttribute) {
                 snapshot.timeSignature = val
                 if let num = parseTimeSigNumerator(val) {
@@ -177,8 +177,8 @@ class LogicPoller {
                 }
             }
 
-            // Key signature  (val = "C 메이저", "G 메이저", "A 마이너" …)
-            if let keyButton = findByDesc(innerBar, "조표"),
+            // Key signature  (val = "C 메이저", "G 메이저", "A 마이너" / "C Major" …)
+            if let keyButton = findByDescAny(innerBar, LX.keySigButton),
                let val = axString(keyButton, key: kAXValueAttribute) {
                 snapshot.key = parseKey(val)
             }
@@ -195,21 +195,21 @@ class LogicPoller {
         }
         for window in windows {
             let title = axString(window, key: kAXTitleAttribute) ?? ""
-            guard title.contains("트랙"), !title.contains("마커"), !title.contains("조표") else { continue }
+            guard containsAny(title, LX.tracksTitle), !containsAny(title, LX.markerListTitle), !containsAny(title, LX.signatureListTitle) else { continue }
             debugLog("[Chord] found track window: \(title)")
-            guard let ruler = findByDesc(window, "트랙 시간 눈금자") else {
+            guard let ruler = findByDescAny(window, LX.trackRuler) else {
                 debugLog("[Chord] 트랙 시간 눈금자 not found"); continue
             }
-            guard let track = findByDesc(ruler, "코드 트랙") else {
+            guard let track = findByDescAny(ruler, LX.chordTrack) else {
                 debugLog("[Chord] 코드 트랙 not found"); continue
             }
             let groups = axArray(of: track, key: kAXChildrenAttribute)?
-                .filter { (axString($0, key: kAXDescriptionAttribute) ?? "").hasPrefix("코드 그룹") } ?? []
+                .filter { d in LX.chordGroupPrefix.contains { (axString(d, key: kAXDescriptionAttribute) ?? "").lowercased().hasPrefix($0.lowercased()) } } ?? []
             debugLog("[Chord] found \(groups.count) chord groups")
 
             var chords: [ChordEvent] = []
             for group in groups {
-                guard let container = findByDesc(group, "코드 컨테이너"),
+                guard let container = findByDescAny(group, LX.chordContainer),
                       let items = axArray(of: container, key: kAXChildrenAttribute) else { continue }
                 for item in items {
                     let desc = axString(item, key: kAXDescriptionAttribute) ?? ""
@@ -227,12 +227,12 @@ class LogicPoller {
     // "g major 219 마디 25 틱" / "b minor 7 221 마디 4 비트 4 디비전 240 틱" → ChordEvent
     private func parseChordDesc(_ desc: String) -> ChordEvent? {
         let tokens = desc.components(separatedBy: " ")
-        guard let barIdx = tokens.firstIndex(of: "마디"), barIdx > 0,
+        guard let barIdx = tokens.firstIndex(where: { eq($0, LX.bar) }), barIdx > 0,
               let bar = Int(tokens[barIdx - 1]) else { return nil }
 
         // beat: "마디" 다음에 숫자 "비트" 순서
         var beat = 1
-        if barIdx + 2 < tokens.count, tokens[barIdx + 2] == "비트",
+        if barIdx + 2 < tokens.count, eq(tokens[barIdx + 2], LX.beat),
            let b = Int(tokens[barIdx + 1]) { beat = b }
 
         // 코드명: 마디 앞 숫자 이전까지 모든 토큰
@@ -277,7 +277,7 @@ class LogicPoller {
         guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return }
         for window in windows {
             let title = axString(window, key: kAXTitleAttribute) ?? ""
-            guard title.contains("마커 목록") else { continue }
+            guard containsAny(title, LX.markerListTitle) else { continue }
             guard let scrollArea = findByRole(window, "AXScrollArea"),
                   let table      = findByRole(scrollArea, "AXTable") else { continue }
 
@@ -375,7 +375,7 @@ class LogicPoller {
         guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return }
         for window in windows {
             let title = axString(window, key: kAXTitleAttribute) ?? ""
-            guard title.contains("조표 및 박자표 목록") else { continue }
+            guard containsAny(title, LX.signatureListTitle) else { continue }
             guard let table = findByRole(window, "AXTable") else { continue }
             let (timeSigs, keys) = extractTimeSigsAndKeys(from: table)
             if !timeSigs.isEmpty { snapshot.timeSigEvents = timeSigs }
@@ -427,7 +427,7 @@ class LogicPoller {
 
             let valueChildren = axArray(of: cells[2], key: kAXChildrenAttribute) ?? []
 
-            if typeDesc == "박자" {
+            if eq(typeDesc, LX.sigTypeTime) {
                 // 값: AXSlider(분자) + AXPopUpButton val="/N"(분모)
                 guard let slider = valueChildren.first(where: {
                           (axString($0, key: kAXRoleAttribute) ?? "") == "AXSlider"
@@ -444,7 +444,7 @@ class LogicPoller {
 
                 timeSigs.append(TimeSigEvent(bar: bar, beatsPerBar: numerator, beatUnit: beatUnit))
 
-            } else if typeDesc == "키" {
+            } else if eq(typeDesc, LX.sigTypeKey) {
                 // 값: AXPopUpButton val = "C 메이저" / "A 단조" 등
                 let rawKey = valueChildren.compactMap { el -> String? in
                     guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXPopUpButton" else { return nil }
@@ -538,7 +538,7 @@ class LogicPoller {
         guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return nil }
         for window in windows {
             let title = axString(window, key: kAXTitleAttribute) ?? ""
-            guard title.contains("마커 목록") else { continue }
+            guard containsAny(title, LX.markerListTitle) else { continue }
             guard let scrollArea = findByRole(window, "AXScrollArea"),
                   let table      = findByRole(scrollArea, "AXTable") else { return nil }
 
@@ -635,7 +635,7 @@ class LogicPoller {
         guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return nil }
         for window in windows {
             let title = axString(window, key: kAXTitleAttribute) ?? ""
-            guard title.contains("템포"), !title.contains("트랙") else { continue }
+            guard containsAny(title, LX.tempoListTitle), !containsAny(title, LX.tracksTitle) else { continue }
             guard let table = findByRole(window, "AXTable") else { return nil }
 
             let scrollContainer = findByRole(window, "AXScrollArea") ?? window
@@ -714,7 +714,7 @@ class LogicPoller {
         guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return ([], []) }
         for window in windows {
             let title = axString(window, key: kAXTitleAttribute) ?? ""
-            guard title.contains("조표 및 박자표 목록") else { continue }
+            guard containsAny(title, LX.signatureListTitle) else { continue }
             guard let table = findByRole(window, "AXTable") else { return ([], []) }
 
             let scrollArea = findByRole(window, "AXScrollArea")
@@ -817,7 +817,7 @@ class LogicPoller {
                   let typeCell = typeChildren.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXCell" }) else { continue }
             let typeText = axString(typeCell, key: kAXDescriptionAttribute) ?? ""
 
-            if typeText == "박자" {
+            if eq(typeText, LX.sigTypeTime) {
                 let vc = axArray(of: cells[valueIdx], key: kAXChildrenAttribute) ?? []
                 guard let slider = vc.first(where: { (axString($0, key: kAXRoleAttribute) ?? "") == "AXSlider" }),
                       let num = axNumber(slider).map({ Int(round($0)) }), num > 0 else { continue }
@@ -827,7 +827,7 @@ class LogicPoller {
                 }.first ?? "/4"
                 let den = Int(denomStr.replacingOccurrences(of: "/", with: "")) ?? 4
                 items.append(TSKSItem(kind: "ts", bar: bar, n: num, d: den, name: ""))
-            } else if typeText == "키" {
+            } else if eq(typeText, LX.sigTypeKey) {
                 let vc = axArray(of: cells[valueIdx], key: kAXChildrenAttribute) ?? []
                 let keyName = vc.compactMap { el -> String? in
                     guard (axString(el, key: kAXRoleAttribute) ?? "") == "AXPopUpButton" else { return nil }
@@ -880,7 +880,7 @@ class LogicPoller {
         guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return [] }
         for window in windows {
             let title = axString(window, key: kAXTitleAttribute) ?? ""
-            guard title.contains("조표 및 박자표 목록"),
+            guard containsAny(title, LX.signatureListTitle),
                   let table = findByRole(window, "AXTable") else { continue }
             let rows = axArray(of: table, key: kAXRowsAttribute)
                     ?? axArray(of: table, key: kAXChildrenAttribute) ?? []
@@ -944,7 +944,7 @@ class LogicPoller {
     private func parseKey(_ s: String) -> String {
         let parts = s.split(separator: " ")
         guard let root = parts.first.map(String.init) else { return s }
-        let isMinor = s.contains("마이너")
+        let isMinor = LX.minorMarkers.contains { s.lowercased().contains($0.lowercased()) }
         return isMinor ? root + "m" : root
     }
 
@@ -966,15 +966,57 @@ class LogicPoller {
         return nil
     }
 
-    // Find first child of `el` whose desc matches (non-recursive)
-    private func findByDescAmongChildren(of el: AXUIElement, desc target: String) -> AXUIElement? {
+    // ── 한/영 Logic UI 문자열 대응 ──────────────────────────
+    // Logic의 AX 문자열은 시스템 언어를 따라가므로, 영어 macOS에서도 동작하도록
+    // 모든 매칭을 후보 목록(한국어 + 영어)에 대해 대소문자 무시로 수행한다.
+    private func eq(_ s: String?, _ candidates: [String]) -> Bool {
+        guard let v = s?.trimmingCharacters(in: .whitespaces).lowercased(), !v.isEmpty else { return false }
+        return candidates.contains { v == $0.lowercased() }
+    }
+    private func containsAny(_ s: String, _ candidates: [String]) -> Bool {
+        let v = s.lowercased()
+        return candidates.contains { v.contains($0.lowercased()) }
+    }
+    private func findByDescAny(_ root: AXUIElement, _ targets: [String]) -> AXUIElement? {
+        if eq(axString(root, key: kAXDescriptionAttribute), targets) { return root }
+        guard let children = axArray(of: root, key: kAXChildrenAttribute) else { return nil }
+        for child in children {
+            if let found = findByDescAny(child, targets) { return found }
+        }
+        return nil
+    }
+
+    // Logic 한국어/영어 UI 문자열 후보 (영어 문자열은 영어 Logic에서 확인 필요 시 여기만 수정)
+    private enum LX {
+        static let playheadPosition = ["재생헤드 위치", "playhead position"]
+        static let bar              = ["마디", "bar"]
+        static let beat             = ["비트", "beat"]
+        static let tempo            = ["템포", "tempo"]
+        static let timeSigButton    = ["박자표", "time signature"]
+        static let keySigButton     = ["조표", "key signature"]
+        static let markerListTitle  = ["마커 목록", "marker list"]
+        static let tempoListTitle   = ["템포", "tempo"]
+        static let signatureListTitle = ["조표 및 박자표 목록", "signature list"]
+        static let tracksTitle      = ["트랙", "tracks"]
+        static let sigTypeTime      = ["박자", "time"]
+        static let sigTypeKey       = ["키", "key"]
+        static let minorMarkers     = ["마이너", "단조", "minor"]
+        static let controlBar       = ["컨트롤 막대", "control bar"]
+        static let trackRuler       = ["트랙 시간 눈금자", "tracks time ruler", "track time ruler"]
+        static let chordTrack       = ["코드 트랙", "chord track"]
+        static let chordGroupPrefix = ["코드 그룹", "chord group"]
+        static let chordContainer   = ["코드 컨테이너", "chord container"]
+    }
+
+    // Find first child of `el` whose desc matches (non-recursive, 두 단계 깊이까지)
+    private func findByDescAmongChildrenAny(of el: AXUIElement, descs targets: [String]) -> AXUIElement? {
         guard let children = axArray(of: el, key: kAXChildrenAttribute) else { return nil }
         for child in children {
-            if (axString(child, key: kAXDescriptionAttribute) ?? "") == target { return child }
+            if eq(axString(child, key: kAXDescriptionAttribute), targets) { return child }
             // One level deeper to handle the nested group structure
             if let sub = axArray(of: child, key: kAXChildrenAttribute) {
                 for s in sub {
-                    if (axString(s, key: kAXDescriptionAttribute) ?? "") == target { return s }
+                    if eq(axString(s, key: kAXDescriptionAttribute), targets) { return s }
                 }
             }
         }

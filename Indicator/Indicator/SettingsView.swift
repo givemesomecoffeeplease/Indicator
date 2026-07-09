@@ -1,12 +1,13 @@
 import SwiftUI
-import Observation
+import Combine
 
-@Observable
-class SettingsStore {
+// ObservableObject 사용: @Observable(Observation)은 macOS 14+ 전용이라
+// macOS 12~13 기기 호환을 위해 하위 호환 API로 유지
+class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
     private init() {}
 
-    var countdownBars: Int = {
+    @Published var countdownBars: Int = {
         let v = UserDefaults.standard.integer(forKey: "countdownBars")
         if v == 0 { return 2 }        // 미설정이면 기본 2마디
         return min(v, 2)              // 0(비활성), 1, 2마디만 유효
@@ -15,7 +16,7 @@ class SettingsStore {
     }
 
     // 슬라이드 조기 전환: 전 마디의 N번째 팔분음표에서 전환 (기본 3)
-    var slideEarlyEighths: Int = UserDefaults.standard.integer(forKey: "slideEarlyEighths").nonZero ?? 3 {
+    @Published var slideEarlyEighths: Int = UserDefaults.standard.integer(forKey: "slideEarlyEighths").nonZero ?? 3 {
         didSet { UserDefaults.standard.set(slideEarlyEighths, forKey: "slideEarlyEighths") }
     }
 }
@@ -25,7 +26,7 @@ private extension Int {
 }
 
 struct SettingsView: View {
-    @State private var settings = SettingsStore.shared
+    @ObservedObject private var settings = SettingsStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
