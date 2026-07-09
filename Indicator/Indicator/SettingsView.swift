@@ -7,22 +7,21 @@ class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
     private init() {}
 
-    @Published var countdownBars: Int = {
-        let v = UserDefaults.standard.integer(forKey: "countdownBars")
-        if v == 0 { return 2 }        // 미설정이면 기본 2마디
-        return min(v, 2)              // 0(비활성), 1, 2마디만 유효
-    }() {
+    // 미설정(object == nil)과 사용자가 저장한 0(사용 안 함)을 구분해서 읽음
+    private static func stored(_ key: String, default def: Int, max maxV: Int) -> Int {
+        guard UserDefaults.standard.object(forKey: key) != nil else { return def }
+        return min(max(UserDefaults.standard.integer(forKey: key), 0), maxV)
+    }
+
+    // 카운트다운 표시 시작: 0(사용 안 함), 1, 2마디 전 (기본 2)
+    @Published var countdownBars: Int = stored("countdownBars", default: 2, max: 2) {
         didSet { UserDefaults.standard.set(countdownBars, forKey: "countdownBars") }
     }
 
-    // 슬라이드 조기 전환: 전 마디의 N번째 팔분음표에서 전환 (기본 3)
-    @Published var slideEarlyEighths: Int = UserDefaults.standard.integer(forKey: "slideEarlyEighths").nonZero ?? 3 {
+    // 슬라이드 조기 전환: 팔분음표 N개만큼 먼저 전환, 0 = 사용 안 함 (기본 3)
+    @Published var slideEarlyEighths: Int = stored("slideEarlyEighths", default: 3, max: 16) {
         didSet { UserDefaults.standard.set(slideEarlyEighths, forKey: "slideEarlyEighths") }
     }
-}
-
-private extension Int {
-    var nonZero: Int? { self == 0 ? nil : self }
 }
 
 struct SettingsView: View {
@@ -45,10 +44,12 @@ struct SettingsView: View {
 
             settingRow(
                 label: "슬라이드 조기 전환",
-                detail: "전 마디 \(settings.slideEarlyEighths)번째 팔분음표",
-                caption: "슬라이드를 원래 마디 시작보다 일찍 전환합니다. (스캔 후 적용)"
+                detail: settings.slideEarlyEighths == 0 ? "사용 안 함" : "팔분음표 \(settings.slideEarlyEighths)개 먼저",
+                caption: settings.slideEarlyEighths == 0
+                    ? "슬라이드가 원래 마디 시작에 맞춰 전환됩니다."
+                    : "같은 섹션 안의 슬라이드가 팔분음표 \(settings.slideEarlyEighths)개만큼 일찍 전환됩니다. (섹션 첫 슬라이드는 정각 전환)"
             ) {
-                Stepper("", value: $settings.slideEarlyEighths, in: 1...16)
+                Stepper("", value: $settings.slideEarlyEighths, in: 0...16)
                     .labelsHidden()
             }
         }

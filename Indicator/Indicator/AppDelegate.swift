@@ -2,6 +2,7 @@ import Cocoa
 import SwiftUI
 import Darwin
 import CoreMIDI
+import CoreImage
 import UniformTypeIdentifiers
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -16,6 +17,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var hasAutoScanned = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        debugLog("[App] 시작 v\(version) macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        // 크래시 원인 추적: 잡히지 않은 예외를 로그에 남김 (Swift 런타임 크래시는 시스템 리포트 참조)
+        NSSetUncaughtExceptionHandler { exc in
+            debugLog("[CRASH] \(exc.name.rawValue): \(exc.reason ?? "-")\n\(exc.callStackSymbols.joined(separator: "\n"))")
+        }
+
         NSApp.setActivationPolicy(.accessory)
         requestAccessibilityIfNeeded()
         setupIACDriver()
@@ -38,6 +46,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         mtcReceiver.onBeat = { [weak self] in
             self?.stateEngine.onBeat()
+        }
+        // 프로젝트 프레임레이트가 스캔 당시와 다르면 마커 시각이 전부 어긋남 → 재스캔 경고
+        mtcReceiver.onFPSChange = { [weak self] newFPS in
+            guard let self, let schedule = ScheduleStore.shared.current, schedule.fps != newFPS else { return }
+            let msg = "프레임레이트 변경 감지(\(schedule.fps) → \(newFPS)fps) — 다시 스캔하세요"
+            debugLog("[FPS] \(msg)")
+            self.lastScanFailReason = msg
+            if let item = self.statusItem?.menu?.item(withTag: self.tagSchedule) {
+                self.updateStatusItemTristate(item, color: .systemOrange, title: "⚠️ \(msg)")
+            }
         }
         stateEngine.onJump = { [weak self] in
             self?.logicPoller.syncBarBeat()
@@ -96,6 +114,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        debugLog("[App] 정상 종료")
         logicPoller.stop()
         mtcReceiver.stop()
         webServer.stop()
@@ -147,6 +166,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let tagClock   = 104
     private let tagMarkers = 105
     private let tagSchedule = 106
+    private let tagViewers  = 107
     private var lastScanFailReason: String? = nil
 
     private func setupMenuBar() {
@@ -167,11 +187,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(makeStatusItem("MIDI Clock 수신 중", tag: tagClock, action: #selector(openLogicSyncSettings)))
         menu.addItem(makeStatusItem("마커 목록 창 열림", tag: tagMarkers, action: nil))
         menu.addItem(makeStatusItem("사전 스캔 안 됨 (선택)", tag: tagSchedule, action: #selector(scanSchedule)))
+        menu.addItem(makeStatusItem("뷰어 연결 0대", tag: tagViewers, action: nil))
         menu.addItem(.separator())
 
         let addrItem = NSMenuItem(title: "http://\(ip):8888", action: #selector(copyAddress), keyEquivalent: "")
         addrItem.representedObject = "http://\(ip):8888"
         menu.addItem(addrItem)
+        menu.addItem(NSMenuItem(title: "뷰어 접속 QR 보기", action: #selector(showQRPanel), keyEquivalent: ""))
         menu.addItem(.separator())
         let editItem = NSMenuItem(title: "가사·노트 편집 열기", action: #selector(openEditPage), keyEquivalent: "")
         editItem.representedObject = "http://\(ip):8888/edit"
@@ -183,6 +205,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Master 불러오기", action: #selector(loadMaster), keyEquivalent: "o"))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "AX 트리 덤프 (디버그)", action: #selector(dumpAXTree), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "로그 파일 열기", action: #selector(openLogFile), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "종료", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
@@ -249,16 +272,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
-        // 사전 스캔 상태 (3단계: 완료 / 재스캔 필요 / 안 됨 — 선택 기능이라 빨강 대신 회색 사용)
+        // 사전 스캔 상태 (경고 > 완료 > 안 됨 — fps 불일치/프로젝트 전환 경고가 완료 표시에 덮이지 않도록)
         if let item = menu.item(withTag: tagSchedule) {
-            if let schedule = ScheduleStore.shared.current {
+            if let reason = lastScanFailReason {
+                updateStatusItemTristate(item, color: .systemOrange, title: "⚠️ \(reason)")
+            } else if let schedule = ScheduleStore.shared.current {
                 let title = "사전 스캔 완료 · 마커 \(schedule.markers.count) / 템포 \(schedule.tempos.count) / 박자 \(schedule.timeSigs.count) / 조표 \(schedule.keySigs.count)"
                 updateStatusItemTristate(item, color: .systemGreen, title: title)
-            } else if let reason = lastScanFailReason {
-                updateStatusItemTristate(item, color: .systemOrange, title: "⚠️ \(reason)")
             } else {
                 updateStatusItemTristate(item, color: .systemGray, title: "사전 스캔 안 됨 (선택)")
             }
+        }
+
+        // 뷰어 연결 수
+        if let item = menu.item(withTag: tagViewers) {
+            let n = webServer.viewerCount
+            updateStatusItemTristate(item, color: n > 0 ? .systemGreen : .systemGray, title: "뷰어 연결 \(n)대")
         }
     }
 
@@ -381,8 +410,75 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         logicPoller.dumpAXTree = true
     }
 
+    @objc private func openLogFile() {
+        NSWorkspace.shared.activateFileViewerSelecting([debugLogURL])
+    }
+
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+
+    // MARK: - 뷰어 접속 QR
+
+    private var qrWindow: NSWindow?
+
+    @objc private func showQRPanel() {
+        let ip = localIP()
+        let entries: [(String, String)] = [
+            ("밴드 뷰", "http://\(ip):8888/band"),
+            ("싱어 뷰", "http://\(ip):8888/singer"),
+        ]
+
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = 28
+        stack.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 20, right: 24)
+
+        for (label, url) in entries {
+            let col = NSStackView()
+            col.orientation = .vertical
+            col.spacing = 8
+            let title = NSTextField(labelWithString: label)
+            title.font = .boldSystemFont(ofSize: 14)
+            title.alignment = .center
+            let imgView = NSImageView()
+            imgView.image = Self.qrImage(for: url, size: 180)
+            imgView.translatesAutoresizingMaskIntoConstraints = false
+            imgView.widthAnchor.constraint(equalToConstant: 180).isActive = true
+            imgView.heightAnchor.constraint(equalToConstant: 180).isActive = true
+            let urlLabel = NSTextField(labelWithString: url)
+            urlLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            urlLabel.alignment = .center
+            urlLabel.isSelectable = true
+            col.addArrangedSubview(title)
+            col.addArrangedSubview(imgView)
+            col.addArrangedSubview(urlLabel)
+            stack.addArrangedSubview(col)
+        }
+
+        let win = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        win.title = "뷰어 접속 — 같은 Wi-Fi에서 카메라로 스캔"
+        win.contentView = stack
+        win.setContentSize(stack.fittingSize)
+        win.center()
+        win.isReleasedWhenClosed = false
+        qrWindow = win
+        NSApp.activate(ignoringOtherApps: true)
+        win.makeKeyAndOrderFront(nil)
+    }
+
+    private static func qrImage(for string: String, size: CGFloat) -> NSImage? {
+        guard let data = string.data(using: .utf8),
+              let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(data, forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage else { return nil }
+        let scale = size / output.extent.width
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let rep = NSCIImageRep(ciImage: scaled)
+        let img = NSImage(size: NSSize(width: size, height: size))
+        img.addRepresentation(rep)
+        return img
     }
 
     // MARK: - Network

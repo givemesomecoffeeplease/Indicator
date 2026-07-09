@@ -34,6 +34,13 @@ struct ScannedSchedule: Codable {
     var timeSigs: [ScannedTimeSig]
     var keySigs: [ScannedKeySig]
     var scannedAt: Date
+    var fps: Double = 25.0   // 스캔 당시 SMPTE 프레임레이트 (MTC 수신 fps와 불일치 시 재스캔 필요)
+}
+
+// 프로젝트 SMPTE 프레임레이트 공유 상태
+// MTC 수신부가 rateCode를 디코딩해 갱신하고, 스캔 파서(parseMTC)가 읽어 사용
+enum SMPTEConfig {
+    static var fps: Double = 25.0
 }
 
 class ScheduleStore {

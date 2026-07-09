@@ -7,6 +7,12 @@ class SSEBroadcaster {
     private var connections: [NWConnection] = []
     private let lock = NSLock()
 
+    // 현재 연결된 뷰어 수 (메뉴 표시용)
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return connections.count
+    }
+
     func add(_ conn: NWConnection) {
         lock.lock()
         connections.append(conn)

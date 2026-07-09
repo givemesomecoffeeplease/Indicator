@@ -1,13 +1,30 @@
 import Foundation
 
-let debugLogURL = URL(fileURLWithPath: NSHomeDirectory() + "/Desktop/indicator_debug.txt")
+// 디버그 로그: ~/Library/Logs/Indicator/indicator_debug.txt
+// 실행할 때마다 새로 시작, 한 세션 최대 20MB (라이브 중 디스크 폭주 방지)
+let debugLogURL: URL = {
+    let dir = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Logs/Indicator")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir.appendingPathComponent("indicator_debug.txt")
+}()
 var debugLogHandle: FileHandle? = {
     FileManager.default.createFile(atPath: debugLogURL.path, contents: nil)
     return try? FileHandle(forWritingTo: debugLogURL)
 }()
+private let debugLogMaxBytes: UInt64 = 20 * 1024 * 1024
+private var debugLogBytes: UInt64 = 0
+private var debugLogCapped = false
 func debugLog(_ msg: String) {
+    guard !debugLogCapped else { return }
     let line = "\(Date()) \(msg)\n"
-    debugLogHandle?.write(line.data(using: .utf8) ?? Data())
+    let data = line.data(using: .utf8) ?? Data()
+    debugLogBytes += UInt64(data.count)
+    if debugLogBytes > debugLogMaxBytes {
+        debugLogCapped = true
+        debugLogHandle?.write("--- 로그 용량 한도(20MB) 도달, 이후 기록 중단 ---\n".data(using: .utf8)!)
+        return
+    }
+    debugLogHandle?.write(data)
 }
 
 class StateEngine {

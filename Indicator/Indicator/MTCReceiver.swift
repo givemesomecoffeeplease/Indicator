@@ -6,6 +6,16 @@ class MTCReceiver {
     var onTimeUpdate: ((TimeInterval) -> Void)?
     var onStop: (() -> Void)?
     var onBeat: (() -> Void)?   // MIDI Clock 24펄스마다 호출 (= 1박자)
+    var onFPSChange: ((Double) -> Void)?   // 프로젝트 SMPTE 프레임레이트 변경 감지
+
+    // rateCode 디코딩 → 공유 fps 갱신, 변경 시 콜백 (스캔 데이터와 불일치 경고용)
+    private func updateFPS(_ newFPS: Double) {
+        fps = newFPS
+        if SMPTEConfig.fps != newFPS {
+            SMPTEConfig.fps = newFPS
+            DispatchQueue.main.async { self.onFPSChange?(newFPS) }
+        }
+    }
 
     private(set) var currentTime: TimeInterval = 0
 
@@ -138,7 +148,7 @@ class MTCReceiver {
                         let ss       = raw[idx+7]
                         let ff       = raw[idx+8]
                         let rateCode = Int((hh >> 5) & 0x03)
-                        fps          = [24.0, 25.0, 29.97, 30.0][rateCode]
+                        updateFPS([24.0, 25.0, 29.97, 30.0][rateCode])
                         let hours    = Int(hh & 0x1F)
                         let total    = Double(hours)*3600 + Double(mm)*60 + Double(ss) + Double(ff)/fps
                         currentTime  = total
@@ -167,7 +177,7 @@ class MTCReceiver {
                         let mins     = Int(qfBits[4]) | (Int(qfBits[5]) << 4)
                         let hours    = Int(qfBits[6]) | (Int(qfBits[7] & 0x01) << 4)
                         let rateCode = Int((qfBits[7] >> 1) & 0x03)
-                        fps          = [24.0, 25.0, 29.97, 30.0][rateCode]
+                        updateFPS([24.0, 25.0, 29.97, 30.0][rateCode])
                         let total    = Double(hours)*3600 + Double(mins)*60 + Double(secs) + Double(frames)/fps
                         currentTime  = total
                         synced       = true

@@ -90,6 +90,42 @@ class LogicPoller {
         }
     }
 
+    // MARK: - 프로젝트 전환 감지
+    // 스캔 당시의 프로젝트명(트랙 창 제목)을 기억해두고, 정지 중 폴링에서 주기적으로
+    // 비교 — 다른 프로젝트가 열려 있으면 옛 스캔 데이터로 오동작하므로 재스캔 경고
+    private var scannedProjectTitle: String?
+    private var projectCheckCounter = 0
+    private var projectMismatchNotified = false
+
+    private func currentProjectTitle(axApp: AXUIElement) -> String? {
+        guard let windows = axArray(of: axApp, key: kAXWindowsAttribute) else { return nil }
+        for window in windows {
+            let title = axString(window, key: kAXTitleAttribute) ?? ""
+            guard containsAny(title, LX.tracksTitle),
+                  !containsAny(title, LX.markerListTitle),
+                  !containsAny(title, LX.signatureListTitle) else { continue }
+            // "<프로젝트명> - 트랙" / "<name> - Tracks" → 프로젝트명만
+            if let range = title.range(of: " - ", options: .backwards) {
+                return String(title[..<range.lowerBound])
+            }
+            return title
+        }
+        return nil
+    }
+
+    private func checkProjectSwitch(axApp: AXUIElement) {
+        projectCheckCounter += 1
+        guard projectCheckCounter % 10 == 0 else { return }   // 500ms × 10 = 5초마다
+        guard let scanned = scannedProjectTitle, !projectMismatchNotified,
+              ScheduleStore.shared.current != nil,
+              let cur = currentProjectTitle(axApp: axApp), cur != scanned else { return }
+        projectMismatchNotified = true
+        debugLog("[ProjectSwitch] '\(scanned)' → '\(cur)' — 재스캔 필요")
+        DispatchQueue.main.async {
+            self.onScanFailed?("다른 프로젝트가 열려 있습니다('\(cur)') — 다시 스캔하세요")
+        }
+    }
+
     // MARK: - bar/beat 보정만 (드리프트 + MTC 점프)
 
     // 타이머 호출 — 재생 중엔 스킵
@@ -113,6 +149,7 @@ class LogicPoller {
         snapshot.chords         = cachedChords
         snapshot.timeSigEvents  = cachedTimeSigEvents
         readTransport(axApp: axApp, into: &snapshot)
+        checkProjectSwitch(axApp: axApp)
 
         DispatchQueue.main.async {
             self.lastSnapshot = snapshot
@@ -522,15 +559,20 @@ class LogicPoller {
             return ScannedMarker(name: m.name, isSong: m.isSong, mtcSeconds: m.mtcSeconds, barHint: max(1, Int(round(bar))))
         }
 
+        // 프로젝트 전환 감지용 기준 저장
+        scannedProjectTitle = currentProjectTitle(axApp: axApp)
+        projectMismatchNotified = false
+
         let schedule = ScannedSchedule(
             markers:   markersWithBar,
             tempos:    tempos,
             timeSigs:  timeSigs,
             keySigs:   keySigs,
-            scannedAt: Date()
+            scannedAt: Date(),
+            fps:       SMPTEConfig.fps
         )
         DispatchQueue.main.async { ScheduleStore.shared.save(schedule: schedule) }
-        debugLog("[Scan] 완료: 마커 \(markers.count)개, 템포 \(tempos.count)개, 박자 \(timeSigs.count)개, 조표 \(keySigs.count)개")
+        debugLog("[Scan] 완료: 마커 \(markers.count)개, 템포 \(tempos.count)개, 박자 \(timeSigs.count)개, 조표 \(keySigs.count)개, fps \(SMPTEConfig.fps)")
     }
 
     // MARK: 마커 목록 읽기 (MTC)
@@ -911,7 +953,9 @@ class LogicPoller {
     }
 
     // MARK: MTC 문자열 → 초 변환
-    // "HH:MM:SS:FF.sf" → seconds (25fps 고정)
+    // "HH:MM:SS:FF.sf" → seconds
+    // fps는 MTC 수신부가 디코딩한 프로젝트 프레임레이트(SMPTEConfig.fps) 사용.
+    // MTC 수신 전 스캔이면 기본 25fps — 이후 fps 불일치가 감지되면 재스캔 경고 표시.
     private func parseMTC(_ s: String) -> Double? {
         let trimmed = s.trimmingCharacters(in: .whitespaces)
         let colonParts = trimmed.components(separatedBy: ":")
@@ -922,7 +966,8 @@ class LogicPoller {
         let frameParts = colonParts[3].components(separatedBy: ".")
         guard let ff = Double(frameParts[0]) else { return nil }
         let sf = frameParts.count > 1 ? Double(frameParts[1]) ?? 0 : 0
-        return hh * 3600 + mm * 60 + ss + ff / 25.0 + sf / 2500.0
+        let fps = SMPTEConfig.fps
+        return hh * 3600 + mm * 60 + ss + (ff + sf / 100.0) / fps
     }
 
     // MARK: - Parsers

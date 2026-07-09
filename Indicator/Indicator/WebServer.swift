@@ -5,6 +5,9 @@ class WebServer {
 
     private var listener: NWListener?
     private let broadcaster = SSEBroadcaster()
+
+    // 현재 SSE로 연결된 뷰어 수 (메뉴 표시용)
+    var viewerCount: Int { broadcaster.count }
     private var bandContent: String = ""
     private var singerContent: String = ""
 
