@@ -208,9 +208,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "설정...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Master 저장 (전체 내보내기)", action: #selector(saveMaster), keyEquivalent: "s"))
-        menu.addItem(NSMenuItem(title: "Master 불러오기", action: #selector(loadMaster), keyEquivalent: "o"))
-        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "AX 트리 덤프 (디버그)", action: #selector(dumpAXTree), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "로그 파일 열기", action: #selector(openLogFile), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -363,50 +360,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    @objc private func saveMaster() {
-        guard let data = LyricsStore.shared.exportAll() else { return }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "master.json"
-        panel.allowedContentTypes = [.json]
-        panel.begin { resp in
-            guard resp == .OK, let url = panel.url else { return }
-            try? data.write(to: url)
-        }
-    }
-
-    @objc private func loadMaster() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.begin { [weak self] resp in
-            guard resp == .OK, let url = panel.url else { return }
-            LyricsStore.shared.importJSON(from: url)
-            self?.logicPoller.forceUpdate()
-        }
-    }
-
-    @objc private func exportLyrics() {
-        let markers = logicPoller.lastSnapshot?.markers ?? []
-        guard let data = LyricsStore.shared.exportTemplate(markers: markers) else { return }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "lyrics.json"
-        panel.allowedContentTypes = [.json]
-        panel.begin { resp in
-            guard resp == .OK, let url = panel.url else { return }
-            try? data.write(to: url)
-        }
-    }
-
-    @objc private func importLyrics() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.begin { [weak self] resp in
-            guard resp == .OK, let url = panel.url else { return }
-            LyricsStore.shared.importJSON(from: url)
-            // Force recompute so browsers get updated state immediately
-            self?.logicPoller.forceUpdate()
-        }
     }
 
     @objc private func refreshMarkers() {

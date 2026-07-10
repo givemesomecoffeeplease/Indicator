@@ -59,11 +59,6 @@ class LyricsStore {
 
     // MARK: - Export
 
-    // 전체 (master.json)
-    func exportAll() -> Data? {
-        encode(data)
-    }
-
     // 현재 세트리스트 곡만
     func exportSetlist(markers: [Marker]) -> Data? {
         var result: [String: [String: SectionData]] = [:]
@@ -86,36 +81,7 @@ class LyricsStore {
         return encode([name: sections])
     }
 
-    // 리더용 빈 템플릿 (현재 마커 기준)
-    func exportTemplate(markers: [Marker]) -> Data? {
-        var template: [String: [String: SectionData]] = [:]
-        var currentSong: String? = nil
-        for marker in markers {
-            if marker.isSong {
-                currentSong = marker.displayName
-                template[marker.displayName] = [:]
-            } else if let song = currentSong {
-                let existing = data[song]?[marker.displayName]
-                template[song]?[marker.displayName] = existing ?? SectionData(lyricCue: "", note: "")
-            }
-        }
-        return encode(template)
-    }
-
-    // MARK: - Import
-
-    @discardableResult
-    func importJSON(from url: URL) -> Bool {
-        guard let raw = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode([String: [String: SectionData]].self, from: raw)
-        else { return false }
-        merge(decoded)
-        return true
-    }
-
     // MARK: - Helper
-
-    private func occKeyPublic(_ section: String, _ occIdx: Int) -> String { occKey(section, occIdx) }
 
     private func encode(_ val: [String: [String: SectionData]]) -> Data? {
         let encoder = JSONEncoder()
