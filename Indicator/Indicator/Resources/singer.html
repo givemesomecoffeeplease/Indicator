@@ -55,11 +55,11 @@
     white-space: nowrap; flex-shrink: 0;
     transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
   }
-  .s-name.p2 { font-size: 11px; color: #28283e; }
-  .s-name.p1 { font-size: 15px; color: #36365a; }
-  .s-name.active { font-size: 22px; font-weight: 800; color: #f0f0f0; }
-  .s-name.n1 { font-size: 15px; color: #36365a; }
-  .s-name.n2 { font-size: 11px; color: #28283e; }
+  .s-name.p2 { font-size: clamp(10px, 1.3vw, 17px); color: #28283e; }
+  .s-name.p1 { font-size: clamp(13px, 1.8vw, 24px); color: #36365a; }
+  .s-name.active { font-size: clamp(18px, 2.6vw, 36px); font-weight: 800; color: #f0f0f0; }
+  .s-name.n1 { font-size: clamp(13px, 1.8vw, 24px); color: #36365a; }
+  .s-name.n2 { font-size: clamp(10px, 1.3vw, 17px); color: #28283e; }
 
   /* 키 */
   #key-label {
@@ -80,7 +80,7 @@
 
   /* ── 현재 섹션 카드 ── */
   #cur-box {
-    flex: 3;
+    flex: 1;                 /* 다음 박스가 한 줄로 얇아진 만큼 현재 가사가 최대한 차지 */
     min-height: 0;
     border: 2px solid #5DCAA5;
     border-radius: 12px;
@@ -107,14 +107,14 @@
     min-width: 0;
   }
   #cur-section-label {
-    font-size: 13px;
+    font-size: clamp(14px, 2.2vw, 32px);
     font-weight: 700;
     color: #5DCAA5;
     letter-spacing: 0.06em;
     flex-shrink: 0;
   }
   #cur-singer-note {
-    font-size: 12px;
+    font-size: clamp(13px, 2vw, 30px);
     font-weight: 700;
     color: #E8A840;
     text-align: right;
@@ -131,6 +131,8 @@
     align-items: center;
     gap: 6px;
     min-height: 0;
+    min-width: 0;
+    overflow: hidden;   /* 자동 맞춤 실패 시에도 카드 밖으로 넘치지 않게 */
   }
 
   /* 가사+코드 줄별 렌더 */
@@ -147,21 +149,30 @@
     align-items: center;
   }
   .lyric-char.ghost { min-width: 0.8em; }
+  /* 크기 체계: 줄(.lyric-line)에 기준 폰트를 걸고 글자는 상속 —
+     자동 맞춤(fitLyricLines)이 줄 단위로 축소할 수 있게 함 */
+  #cur-lyric-wrap .lyric-line {
+    font-size: clamp(24px, 7.5vw, 120px);
+  }
   #cur-lyric-wrap .lyric-char {
-    font-size: clamp(20px, 4vw, 48px);
+    font-size: inherit;
     font-weight: 700;
-    line-height: 1.35;
+    line-height: 1.3;
     color: #ffffff;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.1em;
+  }
+  #nxt-lyric-wrap .lyric-line {
+    font-size: clamp(18px, 4.2vw, 64px);  /* 스트립 안에서 최대한 크게 (자동 맞춤이 높이 제한) */
   }
   #nxt-lyric-wrap .lyric-char {
-    font-size: clamp(15px, 3vw, 32px);
+    font-size: inherit;
     font-weight: 600;
-    line-height: 1.35;
+    line-height: 1.3;
     color: #555;
   }
+  /* 코드는 가사 크기에 비례 (가사 조절 시 자동 연동) */
   .chord-label {
-    font-size: 15px; font-weight: 700;
+    font-size: 0.42em; font-weight: 700;
     color: #5DCAA5;
     white-space: nowrap;
     line-height: 1.3;
@@ -169,7 +180,6 @@
   }
   .chord-label-empty { color: transparent; }
   #nxt-lyric-wrap .chord-label {
-    font-size: 13px;
     color: #3d7a6a;
   }
   #nxt-lyric-wrap .chord-label-empty { color: transparent; }
@@ -185,7 +195,7 @@
   }
 
   #cd-num {
-    font-size: clamp(32px, 7vw, 52px);
+    font-size: clamp(28px, 5vw, 72px);
     font-weight: 900;
     color: #5DCAA5;
     line-height: 1;
@@ -204,7 +214,7 @@
 
   /* ── 다음 섹션 카드 ── */
   #nxt-box {
-    flex: 2;
+    flex: 0 0 clamp(96px, 20vh, 210px);  /* 고정 높이 스트립 — 내용 유무와 무관 */
     min-height: 0;
     border: 1.5px solid #2a2a3a;
     border-radius: 10px;
@@ -216,7 +226,7 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 10px 12px;
+    padding: 6px 12px 8px;
     min-width: 0;
   }
 
@@ -225,19 +235,19 @@
     justify-content: space-between;
     align-items: baseline;
     flex-shrink: 0;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     gap: 6px;
     min-width: 0;
   }
   #nxt-section-label {
-    font-size: 11px;
+    font-size: clamp(12px, 1.8vw, 26px);
     font-weight: 700;
     color: #3a3a52;
     letter-spacing: 0.06em;
     flex-shrink: 0;
   }
   #nxt-singer-note {
-    font-size: 10px;
+    font-size: clamp(11px, 1.6vw, 24px);
     font-weight: 700;
     color: #b07820;
     text-align: right;
@@ -254,6 +264,8 @@
     align-items: center;
     gap: 4px;
     min-height: 0;
+    min-width: 0;
+    overflow: hidden;
   }
 
   /* 다음 섹션이 곡 전환일 때 — 키컬러로 크게 */
@@ -262,7 +274,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: clamp(18px, 4vw, 28px);
+    font-size: clamp(18px, 3vw, 44px);
     font-weight: 800;
     color: #5DCAA5;
     letter-spacing: -0.02em;
@@ -584,7 +596,7 @@
     blockEl.appendChild(grid);
   }
 
-  function renderSlide(blockEl, slide, fallback) {
+  function renderSlide(blockEl, slide, fallback, firstLineOnly) {
     blockEl.innerHTML = '';
     if (slide && slide.isInstrumental) {
       const ic = slide.instChords;
@@ -594,7 +606,45 @@
         renderLyricBlock(blockEl, slide.tokens, fallback);
       }
     } else {
-      renderLyricBlock(blockEl, slide ? slide.tokens : null, fallback);
+      let tokens = slide ? slide.tokens : null;
+      // 다음 가사 미리보기: 첫 줄만 표시 (박스를 얇게 유지해 현재 가사 공간 확보)
+      if (firstLineOnly && tokens && tokens.length > 0) {
+        const brIdx = tokens.findIndex(t => t.type === 'br');
+        if (brIdx > 0) tokens = tokens.slice(0, brIdx);
+      }
+      renderLyricBlock(blockEl, tokens, firstLineOnly ? (fallback || '').split('\n')[0] : fallback);
+    }
+  }
+
+  // ── 가사 자동 맞춤: 줄이 영역보다 넓으면 그 줄만 폰트 축소 (노래방 방식) ──
+  window.addEventListener('resize', () => {
+    fitLyricLines($('cur-lyric-block'));
+    fitLyricLines($('nxt-lyric-block'));
+  });
+  function fitLyricLines(blockEl) {
+    if (!blockEl) return;
+    const lines = [...blockEl.querySelectorAll('.lyric-line')];
+    if (lines.length === 0) return;
+    // 폭이 고정된 부모 컨테이너(wrap) 기준으로 측정
+    const container = blockEl.parentElement || blockEl;
+    const avail = container.clientWidth - 4;
+    if (avail <= 0) return;
+    // 기본 크기로 리셋 후, 슬라이드 전체에 적용할 공통 축소 비율 계산
+    // (줄마다 따로 줄이면 같은 슬라이드 안에서 글자 크기가 제각각이 됨)
+    lines.forEach(l => l.style.fontSize = '');
+    const base = parseFloat(getComputedStyle(lines[0]).fontSize);
+    let ratio = 1;
+    lines.forEach(l => {
+      const w = l.scrollWidth;
+      if (w > avail) ratio = Math.min(ratio, avail / w);
+    });
+    const availH = container.clientHeight - 4;
+    if (availH > 0 && blockEl.scrollHeight > 0) {
+      ratio = Math.min(ratio, availH / blockEl.scrollHeight);
+    }
+    if (ratio < 1) {
+      const size = Math.max(12, Math.floor(base * ratio * 0.97));
+      lines.forEach(l => l.style.fontSize = size + 'px');
     }
   }
 
@@ -634,6 +684,7 @@
     const curLabel = s.currentSection || curEntry?.secName || '';
     $('cur-section-label').textContent = curLabel.startsWith('#') ? '' : (curLabel || '—');
     renderSlide($('cur-lyric-block'), curEntry?.slide || null, s.lyricCue);
+    fitLyricLines($('cur-lyric-block'));
     const curNote = s.singerNote || '';
     $('cur-singer-note').textContent = curNote;
     $('cur-singer-note').classList.toggle('hidden', !curNote);
@@ -654,7 +705,8 @@
       $('nxt-section-label').textContent = nxtEntry ? nxtEntry.secName : '';
       $('nxt-lyric-wrap').classList.remove('hidden');
       $('nxt-song-display').classList.add('hidden');
-      renderSlide($('nxt-lyric-block'), nxtEntry?.slide || null, '');
+      renderSlide($('nxt-lyric-block'), nxtEntry?.slide || null, '', true);  // 첫 줄만
+      fitLyricLines($('nxt-lyric-block'));
       // 다음 슬라이드가 같은 섹션(occurrence)이면 현재 노트 재사용, 다른 섹션이면 다음 섹션 노트 사용
       const nxtNote = (nxtEntry && curEntry && nxtEntry.secName === curEntry.secName) ? curNote : (s.nextSingerNote || '');
       $('nxt-singer-note').textContent = nxtNote;

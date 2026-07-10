@@ -50,13 +50,37 @@ class ScheduleStore {
 
     var onSaved: ((ScannedSchedule) -> Void)?
 
-    init() {}
+    // 디스크 영속화: 앱 재시작 후에도 (목록 창이 닫혀 있어도) 스캔 데이터 유지
+    private var saveURL: URL? {
+        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let folder = dir.appendingPathComponent("Indicator")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("schedule_v2.json")
+    }
+
+    init() { loadFromDisk() }
 
     // MARK: - Save (LogicPoller 호출)
 
     func save(schedule: ScannedSchedule) {
         current = schedule
+        saveToDisk()
         onSaved?(schedule)
+    }
+
+    private func saveToDisk() {
+        guard let url = saveURL, let current else { return }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(current) else { return }
+        try? data.write(to: url)
+    }
+
+    private func loadFromDisk() {
+        guard let url = saveURL, let raw = try? Data(contentsOf: url) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        current = try? decoder.decode(ScannedSchedule.self, from: raw)
     }
 
     // MARK: - Query (StateEngine 호출)
@@ -109,5 +133,6 @@ class ScheduleStore {
 
     func clear() {
         current = nil
+        if let url = saveURL { try? FileManager.default.removeItem(at: url) }
     }
 }

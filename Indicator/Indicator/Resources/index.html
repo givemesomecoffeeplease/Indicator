@@ -76,7 +76,7 @@
     flex: 1; min-height: 0;
     display: flex;
     justify-content: space-around;
-    align-items: center;
+    align-items: stretch;      /* 컬럼을 세로로 꽉 채워 내부에서 중앙 정렬 */
     padding: 8px 16px 4px;
     gap: 12px;
   }
@@ -85,7 +85,9 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;   /* 섹션명+노트 블록을 구역 정중앙에 */
     gap: 3px;
+    min-height: 0;
   }
 
   /* 섹션 라벨 */
@@ -101,12 +103,22 @@
     font-weight: 800; color: #f0f0f0;
     line-height: 1; letter-spacing: -0.02em;
     text-align: center;
+    white-space: nowrap;   /* 한 줄 고정 — 길면 fitSectionName이 축소 */
   }
   #nxt-name {
     font-size: clamp(24px, 5.5vw, 48px);
     font-weight: 800; color: #44445a;
     line-height: 1; letter-spacing: -0.02em;
     text-align: center;
+    white-space: nowrap;   /* 한 줄 고정 — 길면 fitSectionName이 축소 */
+    transition: color 0.25s;
+  }
+  /* 카운트다운 중 다음 섹션 강조 — 카운트 숫자와 같은 박에 '지금' 섹션명처럼 흰색으로 펄스 */
+  #nxt-name.pre-roll { color: #7a7a9a; }
+  #nxt-name.beat-glow { animation: nxtGlow 0.45s ease-out; }
+  @keyframes nxtGlow {
+    0%   { color: #f0f0f0; }
+    100% { color: #7a7a9a; }
   }
 
   /* 메타 필 (곡 마커일 때만) */
@@ -168,10 +180,11 @@
   /* ── 가사 영역 ── */
   #lyric-area {
     flex-shrink: 0;
+    height: clamp(88px, 24vh, 170px);   /* 고정 구역 — 가사 줄 수와 무관 */
     padding: 6px 20px 4px;
     display: flex;
-    align-items: flex-start;
-    overflow: visible;
+    align-items: center;
+    overflow: hidden;
   }
   #lyric-block {
     display: flex;
@@ -193,19 +206,20 @@
   #next-lyric-area .lyric-char { font-size: clamp(11px, 2vw, 18px); }
   #next-lyric-area .chord-label { font-size: clamp(9px, 1.2vw, 11px); }
 
-  /* 가사+코드 줄별 렌더 */
+  /* 가사+코드 줄별 렌더 — 줄에 기준 폰트, 글자는 상속 (자동 맞춤이 줄 단위로 축소) */
   .lyric-line {
     display: flex;
     flex-direction: row;
     align-items: flex-end;
     justify-content: center;
     flex-wrap: nowrap;
+    font-size: clamp(14px, 2.3vw, 22px);
   }
   .lyric-char {
     display: inline-flex;
     flex-direction: column;
     align-items: center;
-    font-size: clamp(15px, 2.8vw, 26px);
+    font-size: inherit;
     font-weight: 700;
     line-height: 1.4;
     color: #c8c8d8;
@@ -213,7 +227,7 @@
   }
   .lyric-char.ghost { min-width: 0.8em; }
   .chord-label {
-    font-size: clamp(11px, 1.8vw, 16px);
+    font-size: 0.62em;    /* 가사 크기에 비례 — 줄이 축소되면 코드도 함께 */
     font-weight: 700;
     color: #5DCAA5;
     white-space: nowrap;
@@ -224,12 +238,14 @@
 
   /* 노트 (row 5) */
   .note {
-    display: flex; align-items: flex-start;
+    display: flex; align-items: flex-start; justify-content: center;
     gap: 4px; font-size: 13px;
     color: #E8A840; line-height: 1.3;
     text-align: center; padding: 0 10px;
+    height: clamp(20px, 3.2vh, 36px);   /* 고정 슬롯 — 노트 유무와 무관하게 자리 유지 */
+    overflow: hidden;
   }
-  .note.hidden { display: none; }
+  .note.hidden { visibility: hidden; }   /* 공간은 유지하고 내용만 숨김 */
   .ndot {
     width: 4px; height: 4px; border-radius: 50%;
     background: #E8A840; flex-shrink: 0; margin-top: 3px;
@@ -540,9 +556,16 @@
     void el.offsetWidth;
     el.classList.add('beat-pop');
     $('cd-wrap').classList.add('visible');
+    // 다음 섹션 이름도 카운트와 같은 박에 은은하게 맥박
+    const nxt = $('nxt-name');
+    nxt.classList.add('pre-roll');
+    nxt.classList.remove('beat-glow');
+    void nxt.offsetWidth;
+    nxt.classList.add('beat-glow');
   }
   function hideCountdown() {
     $('cd-wrap').classList.remove('visible');
+    $('nxt-name').classList.remove('pre-roll', 'beat-glow');
     lastCD = null;
   }
 
@@ -561,6 +584,18 @@
     });
     requestAnimationFrame(() => {
       const ch = track.children;
+      // 긴 곡명 자동 축소 — 위치별 최대 폭(활성 42vw, 이웃 22vw, 그 옆 14vw)
+      const caps = { active: 0.42, p1: 0.22, n1: 0.22, p2: 0.14, n2: 0.14 };
+      for (const el of ch) {
+        el.style.fontSize = '';
+        const key = ['active','p1','n1','p2','n2'].find(k => el.classList.contains(k));
+        if (!key) continue;
+        const max = window.innerWidth * caps[key];
+        if (el.offsetWidth > max) {
+          const base = parseFloat(getComputedStyle(el).fontSize);
+          el.style.fontSize = Math.max(10, Math.floor(base * (max / el.offsetWidth) * 0.96)) + 'px';
+        }
+      }
       let off = 0;
       for (let i = 0; i < idx; i++) off += ch[i].offsetWidth + 24;
       off += ch[idx].offsetWidth / 2;
@@ -597,7 +632,27 @@
     void el.offsetWidth;
     el.textContent = text;
     el.classList.add('sec-fade');
+    fitSectionName(el);
   }
+
+  // 긴 섹션명은 구역 폭에 맞게 자동 축소 (한 줄 유지, 잘림 없음)
+  function fitSectionName(el) {
+    if (!el) return;
+    el.style.fontSize = '';
+    const parent = el.parentElement;
+    if (!parent) return;
+    const avail = parent.clientWidth - 8;
+    if (avail <= 0) return;
+    const w = el.scrollWidth;
+    if (w > avail) {
+      const base = parseFloat(getComputedStyle(el).fontSize);
+      el.style.fontSize = Math.max(14, Math.floor(base * (avail / w) * 0.96)) + 'px';
+    }
+  }
+  window.addEventListener('resize', () => {
+    fitSectionName($('cur-name'));
+    fitSectionName($('nxt-name'));
+  });
 
   // ── 가사+코드 컬럼 렌더 ──
   function renderLyricBlock(blockEl, tokens, fallback) {
@@ -673,6 +728,35 @@
     }
     blockEl.appendChild(grid);
   }
+  // 가사 자동 맞춤: 고정 구역(#lyric-area)을 넘으면 줄/전체를 비례 축소
+  window.addEventListener('resize', () => fitLyricLines($('lyric-block')));
+  function fitLyricLines(blockEl) {
+    if (!blockEl) return;
+    const lines = [...blockEl.querySelectorAll('.lyric-line')];
+    if (lines.length === 0) return;
+    // 폭이 고정된 부모 컨테이너(wrap) 기준으로 측정
+    const container = blockEl.parentElement || blockEl;
+    const avail = container.clientWidth - 4;
+    if (avail <= 0) return;
+    // 기본 크기로 리셋 후, 슬라이드 전체에 적용할 공통 축소 비율 계산
+    // (줄마다 따로 줄이면 같은 슬라이드 안에서 글자 크기가 제각각이 됨)
+    lines.forEach(l => l.style.fontSize = '');
+    const base = parseFloat(getComputedStyle(lines[0]).fontSize);
+    let ratio = 1;
+    lines.forEach(l => {
+      const w = l.scrollWidth;
+      if (w > avail) ratio = Math.min(ratio, avail / w);
+    });
+    const availH = container.clientHeight - 4;
+    if (availH > 0 && blockEl.scrollHeight > 0) {
+      ratio = Math.min(ratio, availH / blockEl.scrollHeight);
+    }
+    if (ratio < 1) {
+      const size = Math.max(12, Math.floor(base * ratio * 0.97));
+      lines.forEach(l => l.style.fontSize = size + 'px');
+    }
+  }
+
   function renderSlide(blockEl, slide, fallback) {
     blockEl.innerHTML = '';
     if (slide && slide.isInstrumental) {
@@ -725,6 +809,8 @@
     // 섹션 이름
     animText('cur-name', s.currentSection || '--');
     animText('nxt-name', s.nextSection    || '--');
+    fitSectionName($('cur-name'));
+    fitSectionName($('nxt-name'));
 
     // 가사+코드 (flat 순서 기준)
     const songName = songs[songIdx] || '';
@@ -734,6 +820,7 @@
     const nxtEntry = findNextEntry(songName, secIdx, barFloat);
     renderSlide($('lyric-block'), curEntry?.slide || null, s.lyricCue);
     renderSlide($('next-lyric-block'), nxtEntry?.slide || null, '');
+    fitLyricLines($('lyric-block'));
 
     // 노트 (세션 노트)
     const curNote = s.note || '';

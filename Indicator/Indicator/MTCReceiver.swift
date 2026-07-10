@@ -24,7 +24,7 @@ class MTCReceiver {
 
     // MTC
     private var qfBits: [UInt8] = Array(repeating: 0, count: 8)
-    private var qfCount = 0
+    private var qfMask: UInt8 = 0   // 수신된 nibble 비트마스크 — 8개 전부(0xFF) 모였을 때만 절대시각 조립
     private var synced  = false
     private var fps: Double = 25.0
     private var qfIndex = 0
@@ -153,7 +153,7 @@ class MTCReceiver {
                         let total    = Double(hours)*3600 + Double(mm)*60 + Double(ss) + Double(ff)/fps
                         currentTime  = total
                         synced       = true
-                        qfCount      = 0
+                        qfMask       = 0
                         qfIndex      = 0
                         idx += 9  // F7까지 소비 (루프 끝 idx+=1 포함 시 10바이트 전진)
                         // onTimeUpdate 호출하지 않음: 정지 상태에서 재생헤드만 점프해도
@@ -167,11 +167,14 @@ class MTCReceiver {
                     let data       = raw[idx]
                     let nibbleType = Int((data >> 4) & 0x07)
                     qfBits[nibbleType] = data & 0x0F
-                    qfCount += 1
+                    qfMask |= (1 << UInt8(nibbleType))
 
                     mtcReceived = true
                     resetMTCTimeout()
-                    if qfCount >= 8 {
+                    // 마지막 nibble(7)이 도착했고 8조각이 전부 모였을 때만 절대시각 조립.
+                    // 개수만 세면 조각 유실/중복 시 옛 조각이 섞인 엉뚱한 시각(수 초~수 분 튐)이
+                    // 만들어져 진행률·슬라이드가 순간적으로 널뛰는 버그가 있었음.
+                    if nibbleType == 7, qfMask == 0xFF {
                         let frames   = Int(qfBits[0]) | (Int(qfBits[1]) << 4)
                         let secs     = Int(qfBits[2]) | (Int(qfBits[3]) << 4)
                         let mins     = Int(qfBits[4]) | (Int(qfBits[5]) << 4)
@@ -181,10 +184,14 @@ class MTCReceiver {
                         let total    = Double(hours)*3600 + Double(mins)*60 + Double(secs) + Double(frames)/fps
                         currentTime  = total
                         synced       = true
-                        qfCount      = 0
+                        qfMask       = 0
                         qfIndex      = 0
                         let t = total
                         DispatchQueue.main.async { self.onTimeUpdate?(t) }
+                    } else if nibbleType == 7 {
+                        // 불완전한 세트 — 버리고 다음 사이클부터 다시 수집
+                        qfMask = 0
+                        qfIndex = 0
                     } else if synced {
                         qfIndex = (qfIndex + 1) % 8
                         currentTime += 1.0 / (4.0 * fps)

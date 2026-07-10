@@ -230,7 +230,7 @@ class WebServer {
 
         // Build songs data (with slides + totalBars)
         struct SecInfo {
-            var sec: String; var occIdx: Int; var totalBars: Int
+            var sec: String; var occIdx: Int; var totalBars: Int; var storedBars: Int
             var slidesJson: String; var sessionNote: String; var singerNote: String; var linked: Bool
         }
         var songs: [(name: String, sections: [SecInfo])] = []
@@ -251,7 +251,7 @@ class WebServer {
                 let adapted = adaptSlides(d.slides, targetTotalBars: totalBars)
                 let slidesJson = encodeJSON(adapted)
                 songs[songs.count - 1].sections.append(
-                    SecInfo(sec: m.displayName, occIdx: occIdx, totalBars: totalBars,
+                    SecInfo(sec: m.displayName, occIdx: occIdx, totalBars: totalBars, storedBars: d.totalBars,
                             slidesJson: slidesJson, sessionNote: d.sessionNote, singerNote: d.singerNote, linked: linked)
                 )
             }
@@ -260,7 +260,7 @@ class WebServer {
         // Embed as JSON
         let songsJson = "[" + songs.map { song in
             let secs = "[" + song.sections.map { sec in
-                "{\"sec\":\"\(j(sec.sec))\",\"occIdx\":\(sec.occIdx),\"totalBars\":\(sec.totalBars),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
+                "{\"sec\":\"\(j(sec.sec))\",\"occIdx\":\(sec.occIdx),\"totalBars\":\(sec.totalBars),\"storedBars\":\(sec.storedBars),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
             }.joined(separator: ",") + "]"
             return "{\"song\":\"\(j(song.name))\",\"sections\":\(secs)}"
         }.joined(separator: ",") + "]"
@@ -305,9 +305,11 @@ class WebServer {
         .sec-arrow{font-size:11px;color:var(--sub);flex-shrink:0;width:14px}
         .sec-name{font-size:16px;font-weight:700;color:var(--text)}
         .sec-bars-info{font-size:12px;color:var(--sub)}
-        .capo-wrap{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--sub);margin-left:auto}
-        .capo-inp{width:36px;border:1px solid var(--border);border-radius:5px;padding:3px 4px;font-size:12px;text-align:center;outline:none}
-        .capo-inp:focus{border-color:var(--accent)}
+        .transpose-wrap{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--sub);margin-left:auto}
+        .transpose-btn{width:24px;height:24px;border:1px solid var(--border);border-radius:6px;background:var(--bg-elev,#fff);cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center}
+        .transpose-btn:active{opacity:.7}
+        .transpose-val{min-width:28px;text-align:center;font-weight:700;color:var(--text)}
+        .transpose-apply{font-size:12px;padding:3px 8px}
         .note-pair{display:flex;gap:6px}
         .note-inp-sm{border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;outline:none;width:130px}
         .note-inp-sm:focus{border-color:var(--accent)}
@@ -393,6 +395,47 @@ class WebServer {
           return out;
         }
 
+        // ── 트랜스포즈: 코드 텍스트의 근음(+슬래시 베이스)을 반음수만큼 이조 ──
+        const NOTE_IDX={C:0,'C#':1,'D♭':1,Db:1,D:2,'D#':3,'E♭':3,Eb:3,E:4,F:5,'F#':6,'G♭':6,Gb:6,G:7,'G#':8,'A♭':8,Ab:8,A:9,'A#':10,'B♭':10,Bb:10,B:11};
+        const SHARP_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+        function transposeChord(chord,semi){
+          if(!chord||!semi)return chord;
+          const m=chord.match(/^([A-G])([#♭]?)/);
+          if(!m)return chord;
+          const rootLen=m[0].length;
+          const rootKey=m[1]+m[2];
+          const idx=NOTE_IDX[rootKey];
+          if(idx===undefined)return chord;
+          const rest=chord.slice(rootLen);
+          const newRoot=SHARP_NAMES[((idx+semi)%12+12)%12];
+          const sm=rest.match(/^([^/]*)\\/([A-G][#♭]?)(.*)$/);
+          if(sm){
+            const bIdx=NOTE_IDX[sm[2]];
+            const newBass=bIdx!==undefined?SHARP_NAMES[((bIdx+semi)%12+12)%12]:sm[2];
+            return newRoot+sm[1]+'/'+newBass+sm[3];
+          }
+          return newRoot+rest;
+        }
+        // 곡 하나의 모든 코드(가사 토큰 + 간주 슬롯)를 실제로 이조 (일회성 액션)
+        // linked 섹션은 원본(occIdx 0)이 바뀌면 자동으로 같이 따라가므로 건너뜀
+        function transposeSong(song,semi){
+          if(!semi)return;
+          const songData=DATA.find(s=>s.song===song);
+          if(!songData)return;
+          songData.sections.forEach(sec=>{
+            const cur=loadState(song,sec.sec,sec.occIdx);
+            if(cur.linked)return;
+            const total=sec.totalBars>0?sec.totalBars:0;
+            const segs=getSegs(cur,total);
+            const newSegData=segs.map(sg=>({
+              isInstrumental:sg.segData.isInstrumental,
+              tokens:(sg.segData.tokens||[]).map(t=>t.chord?{...t,chord:transposeChord(t.chord,semi)}:t),
+              instChords:(sg.segData.instChords||[]).map(bar=>(bar||[]).map(slot=>({...slot,name:transposeChord(slot.name,semi)})))
+            }));
+            setState(song,sec.sec,sec.occIdx,{...cur,segData:newSegData});
+          });
+        }
+
         // occurrence(occIdx) 기반 키 — 같은 이름 섹션이 여러 번 등장해도 독립적으로 식별됨
         function dkOf(song,sec,occIdx){return song+'|||'+sec+'@@'+occIdx;}
         function ukOf(song,sec,idx){return song+'|||'+sec+'|||'+idx;}
@@ -451,7 +494,7 @@ class WebServer {
           const own=origSecOf(song,ownSec,ownOccIdx);
           const adapted=adaptRawSlides(rawSlides,own.totalBars||0);
           const{splits,segData}=slidesFromRaw(adapted,0);
-          return{splits,segData,sessionNote:own.sessionNote||'',singerNote:own.singerNote||'',capo:0,linked:true,linkedTo:targetSec};
+          return{splits,segData,sessionNote:own.sessionNote||'',singerNote:own.singerNote||'',linked:true,linkedTo:targetSec};
         }
 
         function loadState(song,sec,occIdx){
@@ -461,12 +504,21 @@ class WebServer {
           if(!!o.linked){const targetSec=o.linkedTo||sec;return buildLinkedPreview(song,targetSec,sec,occIdx);}
           const slides=(o.slides||[]).filter(sl=>(sl.tokens&&sl.tokens.length>0)||sl.isInstrumental);
           if(slides.length===0){
-            return{splits:[],segData:[{isInstrumental:false,tokens:[],instChords:[]}],sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0,linked:false};
+            return{splits:[],segData:[{isInstrumental:false,tokens:[],instChords:[]}],sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',linked:false};
           }
           const sorted=[...slides].sort((a,b)=>a.startBar-b.startBar);
-          const splits=sorted.slice(0,-1).map(sl=>sl.startBar+sl.barCount-1);
+          let splits=sorted.slice(0,-1).map(sl=>sl.startBar+sl.barCount-1);
           const segData=sorted.map(sl=>({isInstrumental:sl.isInstrumental||false,tokens:sl.tokens||[],instChords:sl.instChords||[]}));
-          return{splits,segData,sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',capo:0,linked:false};
+          // 마디 수가 줄어든 편곡: 범위 밖 분할 제거 + 뒤 세그먼트 가사 병합 (가사 유실 방지)
+          const totalNow=o.totalBars||0;
+          if(totalNow>0){
+            while(splits.length>0&&splits[splits.length-1]>=totalNow-1){
+              splits.pop();
+              const last=segData.pop();
+              if(segData.length>0&&last){segData[segData.length-1]={...segData[segData.length-1],tokens:[...(segData[segData.length-1].tokens||[]),...(last.tokens||[])]};}
+            }
+          }
+          return{splits,segData,sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',linked:false};
         }
 
         function setState(song,sec,occIdx,st){
@@ -518,8 +570,30 @@ class WebServer {
           const titleEl=$('song-title');
           titleEl.innerHTML='';
           const nameSpan=document.createElement('span');nameSpan.textContent=song;titleEl.appendChild(nameSpan);
+
+          // 트랜스포즈: 반음 값을 정하고 '적용'을 누르면 이 곡의 모든 코드가 실제로 이조됨 (일회성)
+          const tW=document.createElement('div');tW.className='transpose-wrap';
+          let tVal=0;
+          const tLabel=document.createElement('span');tLabel.textContent='트랜스포즈';
+          const minusBtn=document.createElement('button');minusBtn.className='transpose-btn';minusBtn.textContent='－';minusBtn.type='button';
+          const valSpan=document.createElement('span');valSpan.className='transpose-val';valSpan.textContent='0';
+          const plusBtn=document.createElement('button');plusBtn.className='transpose-btn';plusBtn.textContent='＋';plusBtn.type='button';
+          const applyBtn=document.createElement('button');applyBtn.className='btn btn-sm btn-sec transpose-apply';applyBtn.textContent='적용';applyBtn.disabled=true;
+          const updateT=d=>{tVal=Math.max(-11,Math.min(11,tVal+d));valSpan.textContent=(tVal>0?'+':'')+tVal;applyBtn.disabled=tVal===0;};
+          minusBtn.onclick=()=>updateT(-1);
+          plusBtn.onclick=()=>updateT(1);
+          applyBtn.onclick=()=>{
+            if(!tVal)return;
+            transposeSong(song,tVal);
+            tVal=0;valSpan.textContent='0';applyBtn.disabled=true;
+            renderSections(song);
+            showMsg('코드를 이조했어요. 뷰어 적용을 눌러 반영하세요.');
+          };
+          tW.appendChild(tLabel);tW.appendChild(minusBtn);tW.appendChild(valSpan);tW.appendChild(plusBtn);tW.appendChild(applyBtn);
+          titleEl.appendChild(tW);
+
           if(!STANDALONE){
-            const actDiv=document.createElement('div');actDiv.style.cssText='display:flex;gap:6px;margin-left:auto';
+            const actDiv=document.createElement('div');actDiv.style.cssText='display:flex;gap:6px;margin-left:12px';
             const exportBtn=document.createElement('button');
             exportBtn.className='btn btn-sm btn-sec';exportBtn.textContent='내보내기';
             exportBtn.onclick=()=>exportSongAsHtml(song);
@@ -560,6 +634,11 @@ class WebServer {
           const barsEl=document.createElement('span');barsEl.className='sec-bars-info';
           barsEl.textContent=noTempoData?'⚠️ 템포 스캔 필요':total+'마디';
           if(noTempoData)barsEl.style.color='#e05c00';
+          // 라이브러리 저장본과 마디 수가 다르면 경고 (편곡 변경 감지 — 분할 위치 확인 필요)
+          if(!noTempoData&&sec.storedBars>0&&total>0&&sec.storedBars!==total){
+            barsEl.textContent+=' ⚠️ 저장본은 '+sec.storedBars+'마디 — 분할 확인';
+            barsEl.style.color='#e05c00';
+          }
 
           const linkSel=document.createElement('select');
           linkSel.className='link-select';
@@ -581,11 +660,6 @@ class WebServer {
             refreshBlock(block,song,sec,gidx);
           });
 
-          const capoW=document.createElement('div');capoW.className='capo-wrap';
-          capoW.innerHTML='카포 <input class="capo-inp" type="number" min="0" max="11" value="'+(st.capo||0)+'">';
-          const capoInp=capoW.querySelector('.capo-inp');
-          capoInp.addEventListener('click',e=>e.stopPropagation());
-          capoInp.addEventListener('change',e=>{e.stopPropagation();setState(song,sec.sec,sec.occIdx,{...loadState(song,sec.sec,sec.occIdx),capo:parseInt(capoInp.value)||0});});
 
           if(secUI[ukey].sessionNote===undefined)secUI[ukey].sessionNote=st.sessionNote||'';
           if(secUI[ukey].singerNote===undefined)secUI[ukey].singerNote=st.singerNote||'';
@@ -597,7 +671,7 @@ class WebServer {
           gnInp.addEventListener('input',()=>{secUI[ukey].singerNote=gnInp.value;setNote(song,sec.sec,sec.occIdx,'singerNote',gnInp.value);});
           noteP.appendChild(snInp);noteP.appendChild(gnInp);
 
-          hdr.appendChild(arrow);hdr.appendChild(nameEl);hdr.appendChild(barsEl);hdr.appendChild(linkSel);hdr.appendChild(capoW);hdr.appendChild(noteP);
+          hdr.appendChild(arrow);hdr.appendChild(nameEl);hdr.appendChild(barsEl);hdr.appendChild(linkSel);hdr.appendChild(noteP);
           block.appendChild(hdr);
 
           if(ui.open){
@@ -630,7 +704,7 @@ class WebServer {
               const gap=document.createElement('div');
               const isActive=st.splits.includes(i);
               gap.className='div-gap'+(isActive?' active':'');
-              gap.title=isActive?'구분 제거':'여기서 나누기';
+              gap.title=isActive?'구분 제거 (◀▶로 이동)':'여기서 나누기';
               gap.addEventListener('click',()=>{
                 const cur=loadState(song,sec.sec,sec.occIdx);
                 let splits=[...cur.splits];let segData=[...cur.segData];
@@ -648,6 +722,30 @@ class WebServer {
                 setState(song,sec.sec,sec.occIdx,{...cur,splits,segData});
                 const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
               });
+              // 구분선 이동 (◀▶): 가사 배분은 그대로 두고 경계 마디만 이동
+              if(isActive){
+                const moveSplit=(delta)=>{
+                  const cur=loadState(song,sec.sec,sec.occIdx);
+                  const splits=[...cur.splits];
+                  const idx=splits.indexOf(i);
+                  if(idx<0)return;
+                  const np=i+delta;
+                  if(np<0||np>=total-1||splits.includes(np))return;
+                  splits[idx]=np;splits.sort((a,b)=>a-b);
+                  setState(song,sec.sec,sec.occIdx,{...cur,splits});
+                  const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
+                };
+                const mkArrow=(txt,delta,side)=>{
+                  const a=document.createElement('span');
+                  a.textContent=txt;a.title='구분선 '+(delta<0?'왼쪽':'오른쪽')+'으로 이동 (가사 유지)';
+                  a.style.cssText='position:absolute;top:-16px;'+side+':-7px;font-size:11px;line-height:1;cursor:pointer;color:#5856d6;background:#fff;border:1px solid #ccd;border-radius:4px;padding:1px 3px;z-index:5;';
+                  a.addEventListener('click',e=>{e.stopPropagation();moveSplit(delta);});
+                  return a;
+                };
+                gap.style.position='relative';
+                gap.appendChild(mkArrow('◀',-1,'left'));
+                gap.appendChild(mkArrow('▶',1,'right'));
+              }
               tl.appendChild(gap);
             }
           }
@@ -935,7 +1033,8 @@ class WebServer {
             if(!payload[song])payload[song]={};
             const occKey=sec+'@@'+occIdx;
             if(st.linked){
-              payload[song][occKey]={lyricCue:'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides:[],linked:true,linkedTo:st.linkedTo||''};
+              const ol=origSecOf(song,sec,occIdx);
+              payload[song][occKey]={lyricCue:'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides:[],linked:true,linkedTo:st.linkedTo||'',totalBars:Math.max(ol.totalBars||0,0)};
               continue;
             }
             const o=origSecOf(song,sec,occIdx);
@@ -943,7 +1042,7 @@ class WebServer {
             const segs=getSegs(st,total);
             const slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:sg.segData.singerNote||''}));
             const plain=tokensToPlain(segs[0]?.segData.tokens||[]);
-            payload[song][occKey]={lyricCue:plain.split('\\n')[0]||'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides,linked:false};
+            payload[song][occKey]={lyricCue:plain.split('\\n')[0]||'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides,linked:false,totalBars:Math.max(total,0)};
           }
           // dirty에 없는 나머지 섹션도 DATA에서 그대로 전송
           DATA.forEach(song=>{
@@ -953,12 +1052,28 @@ class WebServer {
               if(payload[song.song][occKey])return; // dirty 우선
               const slides=(sec.slides||[]).map(sl=>({startBar:sl.startBar||0,barCount:sl.barCount||0,isInstrumental:!!sl.isInstrumental,tokens:sl.tokens||[],instChords:sl.instChords||[],singerNote:sl.singerNote||''}));
               const plain=tokensToPlain(sec.slides?.[0]?.tokens||[]);
-              payload[song.song][occKey]={lyricCue:plain.split('\\n')[0]||'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides,linked:!!sec.linked,linkedTo:sec.linkedTo||''};
+              payload[song.song][occKey]={lyricCue:plain.split('\\n')[0]||'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides,linked:!!sec.linked,linkedTo:sec.linkedTo||'',totalBars:Math.max(sec.totalBars||0,0)};
             });
           });
           fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
             .then(r=>r.json())
             .then(()=>{
+              // 저장 성공: 서버에 반영된 내용을 로컬 DATA에도 병합.
+              // (안 하면 다음 '뷰어 적용' 때 "나머지 섹션은 DATA 그대로 전송" 로직이
+              //  이번에 저장한 내용을 페이지 로드 시점의 옛 값으로 되돌려버림)
+              for(const[song,secs]of Object.entries(payload)){
+                const d=DATA.find(s=>s.song===song);if(!d)continue;
+                for(const[occKey,val]of Object.entries(secs)){
+                  const ii=occKey.lastIndexOf('@@');if(ii<0)continue;
+                  const sec=occKey.slice(0,ii);const occIdx=parseInt(occKey.slice(ii+2))||0;
+                  const ds=d.sections.find(s=>s.sec===sec&&(s.occIdx??0)===occIdx);if(!ds)continue;
+                  ds.slides=val.slides||[];
+                  ds.sessionNote=val.sessionNote||'';
+                  ds.singerNote=val.singerNote||'';
+                  ds.linked=!!val.linked;
+                  ds.linkedTo=val.linkedTo||'';
+                }
+              }
               for(const k in dirty)delete dirty[k];
               renderSidebar();showMsg('뷰어에 적용됐어요!');
             }).catch(()=>showMsg('적용 실패'));
@@ -1128,15 +1243,10 @@ class WebServer {
     // MARK: - /save  (POST JSON)
 
     private func handleSave(_ conn: NWConnection, body: Data) {
-        print("[Save] body bytes: \(body.count)")
-        print("[Save] body: \(String(data: body, encoding: .utf8) ?? "<invalid utf8>")")
         if let decoded = try? JSONDecoder().decode([String: [String: SectionData]].self, from: body) {
-            print("[Save] decoded OK: \(decoded)")
             saveLyrics?(decoded)
             onLyricsSaved?()
             broadcaster.send("event: lyrics-updated\ndata: {}\n\n")
-        } else {
-            print("[Save] decode FAILED")
         }
         send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")
     }
@@ -1207,7 +1317,8 @@ class WebServer {
     }
 
     private func send(_ conn: NWConnection, body: Data, contentType: String) {
-        let header = "HTTP/1.1 200 OK\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+        // no-store: 앱 업데이트 후 브라우저가 옛 HTML/JS를 캐시로 보여주는 문제 방지
+        let header = "HTTP/1.1 200 OK\r\nContent-Type: \(contentType)\r\nCache-Control: no-store\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
         var response = header.data(using: .utf8)!
         response.append(body)
         conn.send(content: response, completion: .contentProcessed { _ in conn.cancel() })

@@ -78,6 +78,12 @@ class LogicPoller {
         var snapshot = LogicSnapshot()
         readTransport(axApp: axApp, into: &snapshot)           // BPM·박자·조표·bar/beat
         readMarkers(axApp: axApp, into: &snapshot)             // 마커
+        // 마커 목록 창이 닫혀 있으면 사전 스캔 데이터로 대체 (스캔 후 창 닫는 워크플로우 지원)
+        if snapshot.markers.isEmpty, let sched = ScheduleStore.shared.current {
+            snapshot.markers = sched.markers.map {
+                Marker(name: $0.name, mtcSeconds: $0.mtcSeconds, bar: $0.barHint)
+            }
+        }
         if !snapshot.markers.isEmpty { cachedMarkers = snapshot.markers }
         readChords(axApp: axApp, into: &snapshot)              // 코드
         if !snapshot.chords.isEmpty { cachedChords = snapshot.chords }

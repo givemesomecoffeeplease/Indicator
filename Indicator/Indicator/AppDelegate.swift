@@ -68,6 +68,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 self?.lastScanFailReason = nil
                 self?.updateScanResultMenuItem(schedule: schedule)
+                // 스캔 데이터로 실시간 스냅샷(마커 폴백) 즉시 갱신 — 목록 창이 닫혀 있어도 뷰어 동작
+                self?.logicPoller.forceUpdate()
             }
         }
 
@@ -111,6 +113,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         logicPoller.start()
         mtcReceiver.start()
         webServer.start(port: 8888)
+
+        // 디스크에서 복원된 스캔 데이터가 있으면 즉시 스냅샷 반영 (목록 창 닫혀 있어도 뷰어 동작)
+        if ScheduleStore.shared.current != nil {
+            logicPoller.forceUpdate()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

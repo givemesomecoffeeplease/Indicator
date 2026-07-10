@@ -115,9 +115,12 @@ class LyricsStore {
 
     // MARK: - Helper
 
+    private func occKeyPublic(_ section: String, _ occIdx: Int) -> String { occKey(section, occIdx) }
+
     private func encode(_ val: [String: [String: SectionData]]) -> Data? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try? encoder.encode(val)
     }
 }
+
