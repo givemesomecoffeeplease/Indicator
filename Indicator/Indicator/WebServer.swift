@@ -212,25 +212,36 @@ class WebServer {
             return s
         }
 
-        // 간주 슬라이드의 instChords를 targetTotalBars에 맞춰 앞마디부터 채우고 남으면 버림/모자라면 빈 마디로 패딩
-        func adaptSlides(_ slides: [LyricSlide], targetTotalBars: Int) -> [LyricSlide] {
-            slides.map { slide in
-                guard slide.isInstrumental else { return slide }
-                var s = slide
-                let n = s.instChords.count
-                if targetTotalBars <= n {
-                    s.instChords = Array(s.instChords.prefix(targetTotalBars))
-                } else {
-                    s.instChords += Array(repeating: [], count: targetTotalBars - n)
+        // 슬라이드 마이그레이션 + 정리:
+        // ① 마디 기반 구버전(startSec 없음, startBar만 있음) → 섹션 길이 비례로 초 환산
+        // ② 섹션 노트(세션/싱어) → 첫 슬라이드 노트로 이전 (노트의 슬라이드 귀속화)
+        // ③ 순서 보장: startSec(없으면 startBar) 기준 정렬, 첫 슬라이드는 0초 고정
+        func migrateSlides(_ raw: [LyricSlide], totalBars: Int, durationSec: Double,
+                           secSessionNote: String, secSingerNote: String) -> [LyricSlide] {
+            var slides = raw
+            let anyStartSec = slides.contains { $0.startSec != nil }
+            if anyStartSec {
+                slides.sort { ($0.startSec ?? Double.greatestFiniteMagnitude) < ($1.startSec ?? Double.greatestFiniteMagnitude) }
+            } else {
+                slides.sort { $0.startBar < $1.startBar }
+                // 구버전 전체 환산 (섹션 길이·마디 수를 알 때만 — 모르면 nil 유지 = 미확정 표시)
+                if totalBars > 0, durationSec > 0 {
+                    for i in slides.indices {
+                        slides[i].startSec = Double(slides[i].startBar) / Double(totalBars) * durationSec
+                    }
                 }
-                s.barCount = targetTotalBars
-                return s
             }
+            if !slides.isEmpty {
+                slides[0].startSec = 0
+                if slides[0].sessionNote.isEmpty { slides[0].sessionNote = secSessionNote }
+                if slides[0].singerNote.isEmpty  { slides[0].singerNote  = secSingerNote }
+            }
+            return slides
         }
 
-        // Build songs data (with slides + totalBars)
+        // Build songs data (with slides + totalBars + durationSec)
         struct SecInfo {
-            var sec: String; var occIdx: Int; var totalBars: Int; var storedBars: Int
+            var sec: String; var occIdx: Int; var totalBars: Int; var storedBars: Int; var durationSec: Double
             var slidesJson: String; var sessionNote: String; var singerNote: String; var linked: Bool
         }
         var songs: [(name: String, sections: [SecInfo])] = []
@@ -247,11 +258,15 @@ class WebServer {
                 occCount[occKey] = occIdx + 1
                 let nextMTC = (i + 1 < markers.count) ? markers[i + 1].mtcSeconds : m.mtcSeconds
                 let totalBars = ScheduleStore.shared.barsBetween(startMTC: m.mtcSeconds, endMTC: nextMTC) ?? -1
+                let durationSec = max(0, nextMTC - m.mtcSeconds)
                 let (d, linked) = getLyricOcc?(curSong, m.displayName, occIdx) ?? (SectionData(), false)
-                let adapted = adaptSlides(d.slides, targetTotalBars: totalBars)
-                let slidesJson = encodeJSON(adapted)
+                let migrated = migrateSlides(d.slides, totalBars: d.totalBars > 0 ? d.totalBars : totalBars,
+                                             durationSec: durationSec,
+                                             secSessionNote: d.sessionNote, secSingerNote: d.singerNote)
+                let slidesJson = encodeJSON(migrated)
                 songs[songs.count - 1].sections.append(
                     SecInfo(sec: m.displayName, occIdx: occIdx, totalBars: totalBars, storedBars: d.totalBars,
+                            durationSec: durationSec,
                             slidesJson: slidesJson, sessionNote: d.sessionNote, singerNote: d.singerNote, linked: linked)
                 )
             }
@@ -260,7 +275,7 @@ class WebServer {
         // Embed as JSON
         let songsJson = "[" + songs.map { song in
             let secs = "[" + song.sections.map { sec in
-                "{\"sec\":\"\(j(sec.sec))\",\"occIdx\":\(sec.occIdx),\"totalBars\":\(sec.totalBars),\"storedBars\":\(sec.storedBars),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
+                "{\"sec\":\"\(j(sec.sec))\",\"occIdx\":\(sec.occIdx),\"totalBars\":\(sec.totalBars),\"storedBars\":\(sec.storedBars),\"durationSec\":\(String(format: "%.3f", sec.durationSec)),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
             }.joined(separator: ",") + "]"
             return "{\"song\":\"\(j(song.name))\",\"sections\":\(secs)}"
         }.joined(separator: ",") + "]"
@@ -313,17 +328,31 @@ class WebServer {
         .note-pair{display:flex;gap:6px}
         .note-inp-sm{border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;outline:none;width:130px}
         .note-inp-sm:focus{border-color:var(--accent)}
-        .bar-tl-area{padding:10px 18px 8px;background:#f8f8fc;border-bottom:1px solid var(--border)}
-        .bar-tl{display:flex;align-items:center;overflow-x:auto;padding:20px 0 4px;user-select:none} /* 위 여백: 구분선 이동 ◀▶ 버튼 자리 */
-        .bar-box{width:34px;height:42px;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;position:relative}
-        .bar-box .bn{font-size:9px;color:rgba(0,0,0,.3);position:absolute;bottom:2px}
-        .bar-box.free{background:#e4e4ee;color:#aaa}
-        .bar-box.seg-owned{color:#fff}
-        .div-gap{width:10px;height:42px;display:flex;align-items:center;justify-content:center;cursor:col-resize;flex-shrink:0;position:relative}
-        .div-gap::after{content:'';width:2px;height:65%;background:transparent;border-radius:1px;transition:background .1s}
-        .div-gap:hover::after{background:rgba(0,122,255,.5)}
-        .div-gap.active::after{background:var(--orange);width:3px;height:85%}
-        .segs-area{padding:10px 18px 14px;display:flex;flex-direction:column;gap:10px}
+        /* ── 세로 타임라인 (MTC 시간 기반 전환 찍기/조절) ── */
+        .sec-body{display:flex;gap:16px;padding:12px 18px 16px;border-top:1px solid var(--border)}
+        .tl-col{width:170px;flex-shrink:0;user-select:none}
+        .tl-rail{position:relative;width:120px;border-radius:10px;background:#ececf4;overflow:visible}
+        .tl-slide{position:absolute;left:0;width:120px;border-radius:6px;display:flex;align-items:flex-start;justify-content:center;padding:5px 6px 0;font-size:11px;font-weight:700;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
+        .tl-slide.playing-slide{outline:3px solid var(--orange);outline-offset:-3px}
+        .tl-handle{position:absolute;left:0;width:120px;height:20px;margin-top:-10px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;z-index:5;touch-action:none}
+        .tl-handle .grip{background:#fff;border:2px solid var(--purple);color:var(--purple);font-size:10px;font-weight:700;border-radius:10px;padding:1px 9px;box-shadow:0 1px 4px rgba(0,0,0,.18);white-space:nowrap;pointer-events:none}
+        .tl-handle.guess .grip{opacity:.45;border-style:dashed}
+        .tl-handle:hover .grip{background:#f3f1ff}
+        .tl-playhead{position:absolute;left:-6px;width:132px;height:0;border-top:2px solid var(--red);z-index:6;pointer-events:none;display:none}
+        .tl-playhead::after{content:'';position:absolute;left:-2px;top:-4px;width:6px;height:6px;border-radius:50%;background:var(--red)}
+        .tl-endtime{position:absolute;left:126px;transform:translateY(-50%);font-size:9px;color:#999;white-space:nowrap}
+        .cards-col{flex:1;display:flex;flex-direction:column;gap:10px;min-width:0}
+        .seg-time{font-size:11px;font-weight:700;color:var(--purple);white-space:nowrap}
+        .seg-time.guess{color:#aaa;font-weight:600}
+        .seg-card.playing-slide{border-color:var(--orange);box-shadow:0 0 0 2px rgba(255,149,0,.25)}
+        .sec-block.playing{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,122,255,.18)}
+        .add-slide-btn{align-self:flex-start;background:transparent;color:var(--accent);border:1.5px dashed var(--accent);border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer}
+        #tap-btn{background:var(--orange);font-size:14px;font-weight:700;padding:8px 20px;border-radius:10px}
+        #tap-btn:active{transform:scale(.94)}
+        #tap-btn.flash{animation:tapFlash .25s ease}
+        @keyframes tapFlash{0%{transform:scale(1.15);background:#ff3b30}100%{transform:scale(1)}}
+        #follow-wrap{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--sub);cursor:pointer;white-space:nowrap}
+        #now-playing{font-size:12px;color:var(--sub);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
         .seg-card{border:1.5px solid var(--border);border-radius:10px;overflow:hidden}
         .seg-hdr{display:flex;align-items:center;gap:8px;padding:7px 12px;background:#f8f8fc;border-bottom:1px solid var(--border)}
         .seg-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
@@ -360,6 +389,9 @@ class WebServer {
         <body>
         <div id="hdr">
           <h1>가사 편집</h1>
+          <button id="tap-btn" class="btn" title="재생 중 이 순간을 슬라이드 전환 시점으로 기록 (스페이스바)">전환 찍기 ␣</button>
+          <label id="follow-wrap"><input type="checkbox" id="follow-chk">재생 따라가기</label>
+          <span id="now-playing"></span>
           <span id="save-msg"></span>
           <input type="file" id="import-file-inp" accept=".html" style="display:none" onchange="handleImportFile(this.files[0],null)">
           <input type="file" id="import-song-inp" accept=".html" style="display:none" onchange="handleImportFile(this.files[0],pendingImportSong)">
@@ -417,22 +449,18 @@ class WebServer {
           return newRoot+rest;
         }
         // 곡 하나의 모든 코드(가사 토큰 + 간주 슬롯)를 실제로 이조 (일회성 액션)
-        // linked 섹션은 원본(occIdx 0)이 바뀌면 자동으로 같이 따라가므로 건너뜀
         function transposeSong(song,semi){
           if(!semi)return;
           const songData=DATA.find(s=>s.song===song);
           if(!songData)return;
           songData.sections.forEach(sec=>{
             const cur=loadState(song,sec.sec,sec.occIdx);
-            if(cur.linked)return;
-            const total=sec.totalBars>0?sec.totalBars:0;
-            const segs=getSegs(cur,total);
-            const newSegData=segs.map(sg=>({
-              isInstrumental:sg.segData.isInstrumental,
-              tokens:(sg.segData.tokens||[]).map(t=>t.chord?{...t,chord:transposeChord(t.chord,semi)}:t),
-              instChords:(sg.segData.instChords||[]).map(bar=>(bar||[]).map(slot=>({...slot,name:transposeChord(slot.name,semi)})))
+            const newSegData=cur.segData.map(sd=>({
+              ...sd,
+              tokens:(sd.tokens||[]).map(t=>t.chord?{...t,chord:transposeChord(t.chord,semi)}:t),
+              instChords:(sd.instChords||[]).map(bar=>(bar||[]).map(slot=>({...slot,name:transposeChord(slot.name,semi)})))
             }));
-            setState(song,sec.sec,sec.occIdx,{...cur,segData:newSegData});
+            setState(song,sec.sec,sec.occIdx,{segData:newSegData});
           });
         }
 
@@ -445,111 +473,80 @@ class WebServer {
           return secs.find(s=>s.sec===sec)||{};
         }
 
-        function getSegs(st,total){
-          const sp=[...st.splits].sort((a,b)=>a-b);
-          const starts=[0,...sp.map(p=>p+1)];
-          const ends=[...sp,total-1];
-          return starts.map((start,i)=>({barStart:start,barEnd:ends[i],barCount:ends[i]-start+1,segData:st.segData[i]||{isInstrumental:false,tokens:[],instChords:[]}}));
+        // ── 시간 유틸 ──
+        function fmtSec(s){
+          if(s==null)return'—';
+          const m=Math.floor(s/60);const r=s-m*60;
+          return m+':'+(r<10?'0':'')+r.toFixed(1);
         }
 
-        // 간주 슬라이드를 targetTotal 마디에 맞춰 앞마디부터 채우고 남으면 버림/모자라면 빈 마디로 패딩 (서버 adaptSlides와 동일 규칙)
-        function adaptRawSlides(rawSlides,targetTotal){
-          return(rawSlides||[]).map(sl=>{
-            if(!sl.isInstrumental)return sl;
-            const n=(sl.instChords||[]).length;
-            const ic=targetTotal<=n?sl.instChords.slice(0,targetTotal):[...sl.instChords,...Array(targetTotal-n).fill([])];
-            return{...sl,instChords:ic,barCount:targetTotal};
-          });
-        }
-        // raw slides 배열 -> {splits,segData} (loadState와 동일 변환 로직)
-        function slidesFromRaw(rawSlides,secStart){
-          const slides=(rawSlides||[]).filter(sl=>(sl.tokens&&sl.tokens.length>0)||sl.isInstrumental);
-          if(slides.length===0)return{splits:[],segData:[{isInstrumental:false,tokens:[],instChords:[]}]};
-          const sorted=[...slides].sort((a,b)=>a.startBar-b.startBar);
-          const splits=sorted.slice(0,-1).map(sl=>{const r=sl.startBar>=secStart&&secStart>0?sl.startBar-secStart:sl.startBar;return r+sl.barCount-1;});
-          const segData=sorted.map(sl=>({isInstrumental:sl.isInstrumental||false,tokens:sl.tokens||[],instChords:sl.instChords||[]}));
-          return{splits,segData};
-        }
-        // {splits,segData} 상태 -> raw slide 배열 (저장/캐노니컬 전파용, saveAll과 동일 변환)
-        function rawSlidesFromState(st,total){
-          return getSegs(st,total).map(sg=>({
-            startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,
-            tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),
-            instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],
-            singerNote:''
-          }));
-        }
-
-        // targetSec: 가사를 가져올 섹션명 (같은 이름이면 동일, 다른 이름이면 크로스 연결)
-        // ownSec/ownOccIdx: 마디 수·노트를 가져올 자기 섹션
-        function buildLinkedPreview(song,targetSec,ownSec,ownOccIdx){
-          const canon=origSecOf(song,targetSec);
-          const canonDirty=dirty[dkOf(song,targetSec,0)];
-          let rawSlides;
-          if(canonDirty&&!canonDirty.linked){
-            rawSlides=rawSlidesFromState(canonDirty,canon.totalBars||0);
-          } else {
-            rawSlides=canon.slides;
+        // 슬라이드 전환 위치 해석: segData[i].startSec = 섹션 마커 시작 기준 오프셋(초).
+        // null(아직 안 찍음)은 앞뒤 확정 위치 사이를 균등 분할한 임시값(guess) — 뷰어와 동일 규칙
+        function resolvePositions(segData,dur){
+          const n=segData.length;const out=new Array(n);
+          if(n===0)return out;
+          out[0]={sec:0,guess:false};
+          let i=1;
+          while(i<n){
+            const v=segData[i].startSec;
+            if(v!=null){out[i]={sec:v,guess:false};i++;continue;}
+            let j=i;while(j<n&&segData[j].startSec==null)j++;
+            const endSec=j<n?segData[j].startSec:(dur>0?dur:out[i-1].sec+(n-i+1)*5);
+            const span=Math.max(0,endSec-out[i-1].sec);const cnt=j-i+1;
+            for(let k=i;k<j;k++)out[k]={sec:out[i-1].sec+span*(k-i+1)/cnt,guess:true};
+            i=j;
           }
-          const own=origSecOf(song,ownSec,ownOccIdx);
-          const adapted=adaptRawSlides(rawSlides,own.totalBars||0);
-          const{splits,segData}=slidesFromRaw(adapted,0);
-          return{splits,segData,sessionNote:own.sessionNote||'',singerNote:own.singerNote||'',linked:true,linkedTo:targetSec};
+          for(let k=1;k<n;k++)if(out[k].sec<out[k-1].sec+0.05)out[k]={sec:out[k-1].sec+0.05,guess:out[k].guess};
+          return out;
         }
 
+        function emptySlide(){return{startSec:null,isInstrumental:false,tokens:[],instChords:[],sessionNote:'',singerNote:''};}
+
+        // 상태 = {segData:[슬라이드...]} — 슬라이드 순서 = 배열 순서, 첫 슬라이드 startSec은 항상 0
         function loadState(song,sec,occIdx){
           const k=dkOf(song,sec,occIdx);
           if(dirty[k])return dirty[k];
           const o=origSecOf(song,sec,occIdx);
-          if(!!o.linked){const targetSec=o.linkedTo||sec;return buildLinkedPreview(song,targetSec,sec,occIdx);}
-          const slides=(o.slides||[]).filter(sl=>(sl.tokens&&sl.tokens.length>0)||sl.isInstrumental);
-          if(slides.length===0){
-            return{splits:[],segData:[{isInstrumental:false,tokens:[],instChords:[]}],sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',linked:false};
-          }
-          const sorted=[...slides].sort((a,b)=>a.startBar-b.startBar);
-          let splits=sorted.slice(0,-1).map(sl=>sl.startBar+sl.barCount-1);
-          const segData=sorted.map(sl=>({isInstrumental:sl.isInstrumental||false,tokens:sl.tokens||[],instChords:sl.instChords||[]}));
-          // 마디 수가 줄어든 편곡: 범위 밖 분할 제거 + 뒤 세그먼트 가사 병합 (가사 유실 방지)
-          const totalNow=o.totalBars||0;
-          if(totalNow>0){
-            while(splits.length>0&&splits[splits.length-1]>=totalNow-1){
-              splits.pop();
-              const last=segData.pop();
-              if(segData.length>0&&last){segData[segData.length-1]={...segData[segData.length-1],tokens:[...(segData[segData.length-1].tokens||[]),...(last.tokens||[])]};}
-            }
-          }
-          return{splits,segData,sessionNote:o.sessionNote||'',singerNote:o.singerNote||'',linked:false};
+          const slides=(o.slides||[]);
+          const segData=slides.length?slides.map(sl=>({
+            startSec:(sl.startSec===undefined?null:sl.startSec),
+            isInstrumental:!!sl.isInstrumental,
+            tokens:sl.tokens||[],
+            instChords:sl.instChords||[],
+            sessionNote:sl.sessionNote||'',
+            singerNote:sl.singerNote||''
+          })):[{...emptySlide(),startSec:0}];
+          segData[0].startSec=0;
+          return{segData};
         }
 
         function setState(song,sec,occIdx,st){
-          dirty[dkOf(song,sec,occIdx)]={...st,linked:false,linkedTo:''};
+          if(st.segData&&st.segData.length)st.segData[0].startSec=0;
+          dirty[dkOf(song,sec,occIdx)]=st;
           document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
-          updateLinkUI(song,sec,occIdx,'');
         }
 
-        function setNote(song,sec,occIdx,field,value){
+        function setSlideField(song,sec,occIdx,segIdx,field,value){
           const cur=loadState(song,sec,occIdx);
-          dirty[dkOf(song,sec,occIdx)]={...cur,[field]:value};
-          document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
+          const segData=cur.segData.map(s=>({...s}));
+          segData[segIdx]={...segData[segIdx],[field]:value};
+          setState(song,sec,occIdx,{segData});
         }
 
-        // "연결" 드롭다운은 지속되는 실시간 미러링이 아니라 일회성 복사 액션.
-        // 선택하는 그 순간 원본의 현재 내용을 스냅샷으로 떠와서 독립 데이터로 저장하고,
-        // 이후 원본이 바뀌어도 다시 선택하기 전까지는 저절로 따라가지 않음.
+        // "복사" 드롭다운: 선택하는 순간 원본의 현재 내용(가사·코드·노트·전환 타이밍)을 스냅샷 복사.
+        // 섹션 길이가 다르면 전환 타이밍은 길이 비례로 환산. 이후 원본이 바뀌어도 따라가지 않음.
         function copyFromSection(song,destSec,destOccIdx,srcSec,srcOccIdx){
-          const srcTotal=origSecOf(song,srcSec,srcOccIdx).totalBars||0;
           const srcState=loadState(song,srcSec,srcOccIdx);
-          const rawSlides=rawSlidesFromState(srcState,srcTotal);
-          const destTotal=origSecOf(song,destSec,destOccIdx).totalBars||0;
-          const adapted=adaptRawSlides(rawSlides,destTotal);
-          const{splits,segData}=slidesFromRaw(adapted,0);
-          const cur=loadState(song,destSec,destOccIdx);
-          setState(song,destSec,destOccIdx,{...cur,splits,segData});
-        }
-
-        function updateLinkUI(song,sec,occIdx,linkedTo){
-          const sel=document.querySelector('select.link-select[data-song="'+song+'"][data-sec="'+sec+'"][data-sb="'+occIdx+'"]');
-          if(sel)sel.value=linkedTo||'independent';
+          const srcDur=origSecOf(song,srcSec,srcOccIdx).durationSec||0;
+          const destDur=origSecOf(song,destSec,destOccIdx).durationSec||0;
+          const ratio=(srcDur>0&&destDur>0)?destDur/srcDur:1;
+          const segData=srcState.segData.map(sd=>({
+            ...sd,
+            startSec:sd.startSec==null?null:Math.round(sd.startSec*ratio*100)/100,
+            tokens:(sd.tokens||[]).map(t=>({...t})),
+            instChords:(sd.instChords||[]).map(bar=>(bar||[]).map(s=>({...s})))
+          }));
+          setState(song,destSec,destOccIdx,{segData});
         }
 
         function tokensToPlain(toks){return(toks||[]).map(t=>t.type==='br'?'\\n':t.type==='char'?(t.char||''):'').join('');}
@@ -625,8 +622,7 @@ class WebServer {
           const ukey=ukOf(song,sec.sec,gidx);
           const ui=secUI[ukey];
           const st=loadState(song,sec.sec,sec.occIdx);
-          const noTempoData=sec.totalBars===-1;
-          const total=noTempoData?0:sec.totalBars;
+          const dur=sec.durationSec||0;
           const block=document.createElement('div');
           block.className='sec-block';block.dataset.ukey=ukey;
 
@@ -636,11 +632,12 @@ class WebServer {
           const arrow=document.createElement('span');arrow.className='sec-arrow';arrow.textContent=ui.open?'▾':'▸';
           const nameEl=document.createElement('span');nameEl.className='sec-name';nameEl.textContent=sec.sec;
           const barsEl=document.createElement('span');barsEl.className='sec-bars-info';
-          barsEl.textContent=noTempoData?'⚠️ 템포 스캔 필요':total+'마디';
-          if(noTempoData)barsEl.style.color='#e05c00';
-          // 라이브러리 저장본과 마디 수가 다르면 경고 (편곡 변경 감지 — 분할 위치 확인 필요)
-          if(!noTempoData&&sec.storedBars>0&&total>0&&sec.storedBars!==total){
-            barsEl.textContent+=' ⚠️ 저장본은 '+sec.storedBars+'마디 — 분할 확인';
+          barsEl.textContent=(dur>0?fmtSec(dur):'길이 미상')+' · 슬라이드 '+st.segData.length+'장';
+          if(sec.totalBars===-1){
+            barsEl.textContent+=' · ⚠️ 템포 스캔 필요';barsEl.style.color='#e05c00';
+          }else if(sec.storedBars>0&&sec.totalBars>0&&sec.storedBars!==sec.totalBars){
+            // 편곡 변경 감지 — 저장 당시와 마디 수가 다르면 전환 위치 확인 필요
+            barsEl.textContent+=' · ⚠️ 편곡 변경 감지(저장 당시 '+sec.storedBars+'마디 → 지금 '+sec.totalBars+'마디) — 전환 위치 확인';
             barsEl.style.color='#e05c00';
           }
 
@@ -667,28 +664,20 @@ class WebServer {
             const ii=val.lastIndexOf('@@');
             copyFromSection(song,sec.sec,sec.occIdx,val.slice(0,ii),parseInt(val.slice(ii+2)));
             refreshBlock(block,song,sec,gidx);
-            showMsg('복사했어요. 다시 선택하면 원본의 최신 내용으로 다시 복사돼요.');
+            showMsg('복사했어요 (전환 타이밍 포함). 다시 선택하면 최신 내용으로 다시 복사돼요.');
           });
 
-
-          if(secUI[ukey].sessionNote===undefined)secUI[ukey].sessionNote=st.sessionNote||'';
-          if(secUI[ukey].singerNote===undefined)secUI[ukey].singerNote=st.singerNote||'';
-          const noteP=document.createElement('div');noteP.className='note-pair';
-          const snInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'세션 노트',value:secUI[ukey].sessionNote});
-          const gnInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'싱어 노트',value:secUI[ukey].singerNote});
-          [snInp,gnInp].forEach(inp=>inp.addEventListener('click',e=>e.stopPropagation()));
-          snInp.addEventListener('input',()=>{secUI[ukey].sessionNote=snInp.value;setNote(song,sec.sec,sec.occIdx,'sessionNote',snInp.value);});
-          gnInp.addEventListener('input',()=>{secUI[ukey].singerNote=gnInp.value;setNote(song,sec.sec,sec.occIdx,'singerNote',gnInp.value);});
-          noteP.appendChild(snInp);noteP.appendChild(gnInp);
-
-          hdr.appendChild(arrow);hdr.appendChild(nameEl);hdr.appendChild(barsEl);hdr.appendChild(linkSel);hdr.appendChild(noteP);
+          hdr.appendChild(arrow);hdr.appendChild(nameEl);hdr.appendChild(barsEl);hdr.appendChild(linkSel);
           block.appendChild(hdr);
 
           if(ui.open){
-            const tlArea=document.createElement('div');tlArea.className='bar-tl-area';
-            renderBarTl(tlArea,song,sec,gidx);block.appendChild(tlArea);
-            const sa=document.createElement('div');sa.className='segs-area';
-            renderSegsArea(sa,song,sec,gidx);block.appendChild(sa);
+            const body=document.createElement('div');body.className='sec-body';
+            const tlCol=document.createElement('div');tlCol.className='tl-col';
+            renderTimeline(tlCol,song,sec,gidx);
+            const cards=document.createElement('div');cards.className='cards-col';
+            renderCards(cards,song,sec,gidx);
+            body.appendChild(tlCol);body.appendChild(cards);
+            block.appendChild(body);
           }
           return block;
         }
@@ -696,150 +685,189 @@ class WebServer {
         function refreshBlock(block,song,sec,gidx){block.replaceWith(createSecBlock(song,sec,gidx));}
         function getBlock(ukey){return document.querySelector('.sec-block[data-ukey="'+ukey+'"]');}
 
-        function renderBarTl(container,song,sec,gidx){
+        function firstLineOf(tokens){
+          let s='';
+          for(const t of(tokens||[])){if(t.type==='br')break;if(t.type==='char')s+=t.char||'';}
+          return s||'(빈 슬라이드)';
+        }
+
+        function tlHeight(dur){return Math.max(180,Math.min(620,Math.round(dur*4)));}
+
+        // 세로 타임라인: 슬라이드 = 시간 비례 높이 블록, 경계 = 드래그 가능한 전환 아이콘,
+        // 재생 중엔 재생헤드 라인 표시 (tickPlayhead가 갱신)
+        function renderTimeline(container,song,sec,gidx){
           container.innerHTML='';
           const ukey=ukOf(song,sec.sec,gidx);
           const st=loadState(song,sec.sec,sec.occIdx);
-          const total=sec.totalBars||0;
-          const segs=getSegs(st,total);
-          const tl=document.createElement('div');tl.className='bar-tl';
-          for(let i=0;i<total;i++){
-            const segIdx=segs.findIndex(sg=>i>=sg.barStart&&i<=sg.barEnd);
-            const box=document.createElement('div');box.className='bar-box';
-            if(segIdx>=0){box.classList.add('seg-owned');box.style.background=COLORS[segIdx%COLORS.length];}
-            else box.classList.add('free');
-            const bn=document.createElement('span');bn.className='bn';bn.textContent=String(i+1);box.appendChild(bn);
-            tl.appendChild(box);
-            if(i<total-1){
-              const gap=document.createElement('div');
-              const isActive=st.splits.includes(i);
-              gap.className='div-gap'+(isActive?' active':'');
-              gap.title=isActive?'구분 제거 (◀▶로 이동)':'여기서 나누기';
-              gap.addEventListener('click',()=>{
-                const cur=loadState(song,sec.sec,sec.occIdx);
-                let splits=[...cur.splits];let segData=[...cur.segData];
-                const segs2=getSegs(cur,total);
-                if(splits.includes(i)){
-                  const idx=splits.indexOf(i);splits.splice(idx,1);
-                  const merged={isInstrumental:segData[idx].isInstrumental,tokens:[...(segData[idx].tokens||[]),...(segData[idx+1]?.tokens||[])]};
-                  segData.splice(idx,2,merged);
-                }else{
-                  const idx=segs2.findIndex(sg=>i>=sg.barStart&&i<=sg.barEnd);
-                  splits.push(i);splits.sort((a,b)=>a-b);
-                  const orig=segData[idx]||{isInstrumental:false,tokens:[]};
-                  segData.splice(idx,1,{isInstrumental:orig.isInstrumental,tokens:orig.tokens},{isInstrumental:orig.isInstrumental,tokens:[]});
-                }
-                setState(song,sec.sec,sec.occIdx,{...cur,splits,segData});
-                const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
-              });
-              // 구분선 이동 (◀▶): 가사 배분은 그대로 두고 경계 마디만 이동
-              if(isActive){
-                const moveSplit=(delta)=>{
-                  const cur=loadState(song,sec.sec,sec.occIdx);
-                  const splits=[...cur.splits];
-                  const idx=splits.indexOf(i);
-                  if(idx<0)return;
-                  const np=i+delta;
-                  if(np<0||np>=total-1||splits.includes(np))return;
-                  splits[idx]=np;splits.sort((a,b)=>a-b);
-                  setState(song,sec.sec,sec.occIdx,{...cur,splits});
-                  const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
-                };
-                const mkArrow=(txt,delta,side)=>{
-                  const a=document.createElement('span');
-                  a.textContent=txt;a.title='구분선 '+(delta<0?'왼쪽':'오른쪽')+'으로 이동 (가사 유지)';
-                  a.style.cssText='position:absolute;top:-19px;'+side+':-16px;font-size:11px;line-height:1;cursor:pointer;color:#5856d6;background:#fff;border:1px solid #ccd;border-radius:4px;padding:2px 4px;z-index:5;';
-                  a.addEventListener('click',e=>{e.stopPropagation();moveSplit(delta);});
-                  return a;
-                };
-                gap.style.position='relative';
-                gap.appendChild(mkArrow('◀',-1,'left'));
-                gap.appendChild(mkArrow('▶',1,'right'));
-              }
-              tl.appendChild(gap);
-            }
+          const dur=sec.durationSec||0;
+          const n=st.segData.length;
+          const pos=resolvePositions(st.segData,dur);
+          const effDur=dur>0?dur:((pos[n-1]?pos[n-1].sec:0)+8);
+          const H=tlHeight(effDur);
+          const rail=document.createElement('div');rail.className='tl-rail';rail.style.height=H+'px';
+          const yOf=s=>Math.max(0,Math.min(H,s/effDur*H));
+          for(let i=0;i<n;i++){
+            const top=yOf(pos[i].sec);
+            const bottom=i+1<n?yOf(pos[i+1].sec):H;
+            const el=document.createElement('div');el.className='tl-slide';el.dataset.si=String(i);
+            el.style.top=top+'px';el.style.height=Math.max(14,bottom-top)+'px';
+            el.style.background=COLORS[i%COLORS.length];
+            el.textContent=(i+1)+'. '+(st.segData[i].isInstrumental?'간주':firstLineOf(st.segData[i].tokens));
+            el.title='클릭하면 오른쪽 카드로 이동';
+            el.addEventListener('click',()=>{
+              const card=getBlock(ukey)?.querySelector('.seg-card[data-si="'+i+'"]');
+              if(card)card.scrollIntoView({behavior:'smooth',block:'center'});
+            });
+            rail.appendChild(el);
           }
-          container.appendChild(tl);
+          for(let i=1;i<n;i++){
+            const h=document.createElement('div');
+            h.className='tl-handle'+(pos[i].guess?' guess':'');
+            h.style.top=yOf(pos[i].sec)+'px';
+            h.title=pos[i].guess?'임시 위치 — 드래그하거나 재생 중 찍어서 확정':'드래그로 전환 시점 조절 (위=일찍, 아래=늦게)';
+            const grip=document.createElement('span');grip.className='grip';
+            grip.textContent=(pos[i].guess?'~':'')+fmtSec(pos[i].sec);
+            h.appendChild(grip);
+            attachHandleDrag(h,rail,song,sec,gidx,i,effDur,H);
+            rail.appendChild(h);
+          }
+          const ph=document.createElement('div');ph.className='tl-playhead';rail.appendChild(ph);
+          const end=document.createElement('div');end.className='tl-endtime';end.style.top=H+'px';end.textContent=fmtSec(effDur);
+          rail.appendChild(end);
+          container.appendChild(rail);
+        }
+
+        // 전환 아이콘 드래그: 위=일찍, 아래=늦게. 이웃 경계를 넘지 못함.
+        // 드래그 중엔 스타일만 직접 갱신(재렌더 시 포인터 캡처가 끊기므로), 놓을 때 상태 확정.
+        function attachHandleDrag(h,rail,song,sec,gidx,i,effDur,H){
+          h.addEventListener('pointerdown',e=>{
+            e.preventDefault();e.stopPropagation();
+            h.setPointerCapture(e.pointerId);
+            const railTop=rail.getBoundingClientRect().top;
+            const st0=loadState(song,sec.sec,sec.occIdx);
+            const pos0=resolvePositions(st0.segData,effDur);
+            const lo=pos0[i-1].sec+0.15;
+            const hi=(i+1<st0.segData.length?pos0[i+1].sec:effDur)-0.15;
+            const blocks=rail.querySelectorAll('.tl-slide');
+            const grip=h.querySelector('.grip');
+            let cur=pos0[i].sec;
+            const apply=t=>{
+              cur=t;
+              const y=t/effDur*H;
+              h.style.top=y+'px';
+              h.classList.remove('guess');
+              if(grip)grip.textContent=fmtSec(t);
+              const prev=blocks[i-1],me=blocks[i];
+              if(prev)prev.style.height=Math.max(14,y-parseFloat(prev.style.top))+'px';
+              if(me){const meBottom=parseFloat(me.style.top)+parseFloat(me.style.height);me.style.top=y+'px';me.style.height=Math.max(14,meBottom-y)+'px';}
+            };
+            const move=ev=>{
+              let t=(ev.clientY-railTop)/H*effDur;
+              t=Math.max(lo,Math.min(Math.max(lo,hi),t));
+              apply(Math.round(t*100)/100);
+            };
+            const up=()=>{
+              h.removeEventListener('pointermove',move);
+              h.removeEventListener('pointerup',up);
+              const st=loadState(song,sec.sec,sec.occIdx);
+              const segData=st.segData.map(s=>({...s}));
+              segData[i].startSec=cur;
+              setState(song,sec.sec,sec.occIdx,{segData});
+              const bl=getBlock(ukOf(song,sec.sec,gidx));
+              if(bl)refreshBlock(bl,song,sec,gidx);
+            };
+            h.addEventListener('pointermove',move);
+            h.addEventListener('pointerup',up);
+          });
         }
 
         const chordEditState={};
 
-        function renderSegsArea(container,song,sec,gidx){
+        function renderCards(container,song,sec,gidx){
           container.innerHTML='';
           const st=loadState(song,sec.sec,sec.occIdx);
-          const total=sec.totalBars||0;
-          const segs=getSegs(st,total);
-          const secStart=0;
-          segs.forEach((sg,i)=>container.appendChild(createSegCard(song,sec,gidx,i,sg,segs.length,secStart,total)));
+          st.segData.forEach((sd,i)=>container.appendChild(createSegCard(song,sec,gidx,i)));
+          const addBtn=document.createElement('button');addBtn.className='add-slide-btn';addBtn.textContent='＋ 슬라이드 추가';
+          addBtn.addEventListener('click',()=>{
+            const cur=loadState(song,sec.sec,sec.occIdx);
+            setState(song,sec.sec,sec.occIdx,{segData:[...cur.segData.map(s=>({...s})),emptySlide()]});
+            const bl=getBlock(ukOf(song,sec.sec,gidx));if(bl)refreshBlock(bl,song,sec,gidx);
+          });
+          container.appendChild(addBtn);
         }
 
-        function createSegCard(song,sec,gidx,segIdx,sg,totalSegs,secStart,total){
+        function createSegCard(song,sec,gidx,segIdx){
           const ukey=ukOf(song,sec.sec,gidx);
           const ceKey=ukey+'|||'+segIdx;
           if(!chordEditState[ceKey])chordEditState[ceKey]={chordMode:false,editIdx:null};
           const ces=chordEditState[ceKey];
+          const st=loadState(song,sec.sec,sec.occIdx);
+          const sd=st.segData[segIdx];
+          const pos=resolvePositions(st.segData,sec.durationSec||0);
           const card=document.createElement('div');card.className='seg-card';card.dataset.si=String(segIdx);
 
           const hd=document.createElement('div');hd.className='seg-hdr';
           const dot=document.createElement('div');dot.className='seg-dot';dot.style.background=COLORS[segIdx%COLORS.length];
-          const info=document.createElement('div');info.className='seg-info';
-          info.textContent='마디 '+(sg.barStart+1)+(sg.barCount>1?'~'+(sg.barEnd+1):'');
+          const info=document.createElement('div');info.className='seg-info';info.textContent='슬라이드 '+(segIdx+1);
+          info.style.flex='0 0 auto';
+          const time=document.createElement('span');
+          const isGuess=pos[segIdx]&&pos[segIdx].guess;
+          time.className='seg-time'+(isGuess?' guess':'');
+          time.textContent=segIdx===0?'섹션 시작':(isGuess?'~'+fmtSec(pos[segIdx].sec)+' (임시)':'전환 '+fmtSec(pos[segIdx].sec));
           const typeBtn=document.createElement('button');typeBtn.className='btn btn-sm btn-ghost';
-          typeBtn.textContent=sg.segData.isInstrumental?'🎵 간주':'🎤 가사';
+          typeBtn.textContent=sd.isInstrumental?'🎵 간주':'🎤 가사';
           typeBtn.addEventListener('click',()=>{
-            const st=loadState(song,sec.sec,sec.occIdx);const segData=[...st.segData];
-            segData[segIdx]={...segData[segIdx],isInstrumental:!segData[segIdx].isInstrumental};
-            setState(song,sec.sec,sec.occIdx,{...st,segData});
+            setSlideField(song,sec.sec,sec.occIdx,segIdx,'isInstrumental',!sd.isInstrumental);
             const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
           });
-          if(totalSegs>1){
+          hd.appendChild(dot);hd.appendChild(info);hd.appendChild(time);hd.appendChild(typeBtn);
+
+          // 노트 — 슬라이드 귀속 (뷰어에서 이 슬라이드가 떠 있는 동안 표시)
+          const noteP=document.createElement('div');noteP.className='note-pair';noteP.style.marginLeft='auto';
+          const snInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'세션 노트',value:sd.sessionNote||''});
+          const gnInp=Object.assign(document.createElement('input'),{className:'note-inp-sm',type:'text',placeholder:'싱어 노트',value:sd.singerNote||''});
+          snInp.addEventListener('input',()=>setSlideField(song,sec.sec,sec.occIdx,segIdx,'sessionNote',snInp.value));
+          gnInp.addEventListener('input',()=>setSlideField(song,sec.sec,sec.occIdx,segIdx,'singerNote',gnInp.value));
+          noteP.appendChild(snInp);noteP.appendChild(gnInp);
+          hd.appendChild(noteP);
+
+          if(st.segData.length>1){
             const delBtn=document.createElement('button');delBtn.className='btn btn-sm btn-red';delBtn.textContent='삭제';
             delBtn.addEventListener('click',()=>{
-              const cur=loadState(song,sec.sec,sec.occIdx);let splits=[...cur.splits];let segData=[...cur.segData];
-              const splitIdx=segIdx>0?segIdx-1:0;
-              splits.splice(splitIdx,1);
-              if(segIdx>0){
-                const merged={isInstrumental:segData[segIdx-1].isInstrumental,tokens:[...(segData[segIdx-1].tokens||[]),...(segData[segIdx].tokens||[])]};
-                segData.splice(segIdx-1,2,merged);
-              }else{
-                const merged={isInstrumental:segData[1].isInstrumental,tokens:[...(segData[0].tokens||[]),...(segData[1].tokens||[])]};
-                segData.splice(0,2,merged);
-              }
-              setState(song,sec.sec,sec.occIdx,{...cur,splits,segData});
+              const cur=loadState(song,sec.sec,sec.occIdx);
+              const segData=cur.segData.map(s=>({...s}));
+              segData.splice(segIdx,1);
+              setState(song,sec.sec,sec.occIdx,{segData});
               const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
             });
-            hd.appendChild(dot);hd.appendChild(info);hd.appendChild(typeBtn);hd.appendChild(delBtn);
-          }else{
-            hd.appendChild(dot);hd.appendChild(info);hd.appendChild(typeBtn);
+            hd.appendChild(delBtn);
           }
           card.appendChild(hd);
 
           const edArea=document.createElement('div');edArea.className='seg-ed';
-          if(sg.segData.isInstrumental){
-            renderInstEditor(edArea,song,sec,gidx,segIdx,sg,secStart,total);
+          if(sd.isInstrumental){
+            renderInstEditor(edArea,song,sec,gidx,segIdx);
           }else{
             const modeRow=document.createElement('div');modeRow.className='mode-row';
             const lyricBtn=document.createElement('button');lyricBtn.className='btn btn-sm'+(ces.chordMode?' btn-ghost':'');lyricBtn.textContent='가사';
-            lyricBtn.addEventListener('click',()=>{if(ces.chordMode){ces.chordMode=false;ces.editIdx=null;refreshSegCard(card,song,sec,gidx,segIdx,total);}});
+            lyricBtn.addEventListener('click',()=>{if(ces.chordMode){ces.chordMode=false;ces.editIdx=null;refreshSegCard(card,song,sec,gidx,segIdx);}});
             const chordBtn=document.createElement('button');chordBtn.className='btn btn-sm'+(ces.chordMode?'':' btn-ghost');chordBtn.textContent='코드 편집';
             chordBtn.addEventListener('click',()=>{
               if(!ces.chordMode){
                 const ta=card.querySelector('.lyric-ta');
-                if(ta){const st=loadState(song,sec.sec,sec.occIdx);const segData=[...st.segData];
-                  if(tokensToPlain(segData[segIdx].tokens||[])!==ta.value){segData[segIdx]={...segData[segIdx],tokens:textToTokens(ta.value)};setState(song,sec.sec,sec.occIdx,{...st,segData});}
+                if(ta){const cur=loadState(song,sec.sec,sec.occIdx);
+                  if(tokensToPlain(cur.segData[segIdx].tokens||[])!==ta.value){setSlideField(song,sec.sec,sec.occIdx,segIdx,'tokens',textToTokens(ta.value));}
                 }
-                ces.chordMode=true;ces.editIdx=null;refreshSegCard(card,song,sec,gidx,segIdx,total);
+                ces.chordMode=true;ces.editIdx=null;refreshSegCard(card,song,sec,gidx,segIdx);
               }
             });
             modeRow.appendChild(lyricBtn);modeRow.appendChild(chordBtn);edArea.appendChild(modeRow);
             if(!ces.chordMode){
               const ta=document.createElement('textarea');ta.className='lyric-ta';
               ta.placeholder='가사를 입력하세요\\nEnter = 줄바꿈';
-              ta.value=tokensToPlain(sg.segData.tokens||[]);
+              ta.value=tokensToPlain(sd.tokens||[]);
               ta.addEventListener('input',()=>{
-                const st=loadState(song,sec.sec,sec.occIdx);const segData=[...st.segData];
-                segData[segIdx]={...segData[segIdx],tokens:textToTokens(ta.value)};
-                setState(song,sec.sec,sec.occIdx,{...st,segData});
+                setSlideField(song,sec.sec,sec.occIdx,segIdx,'tokens',textToTokens(ta.value));
               });
               edArea.appendChild(ta);
             }else{
@@ -851,17 +879,14 @@ class WebServer {
           return card;
         }
 
-        function refreshSegCard(card,song,sec,gidx,segIdx,total){
-          const st=loadState(song,sec.sec,sec.occIdx);const segs=getSegs(st,total);
-          const secStart=0;
-          card.replaceWith(createSegCard(song,sec,gidx,segIdx,segs[segIdx],segs.length,secStart,total));
+        function refreshSegCard(card,song,sec,gidx,segIdx){
+          card.replaceWith(createSegCard(song,sec,gidx,segIdx));
         }
 
         function renderChordGrid(grid,song,sec,gidx,segIdx,ceKey){
           const ces=chordEditState[ceKey];
           const st=loadState(song,sec.sec,sec.occIdx);
-          const total=origSecOf(song,sec.sec,sec.occIdx).totalBars||0;
-          const tokens=getSegs(st,total)[segIdx]?.segData.tokens||[];
+          const tokens=st.segData[segIdx]?.tokens||[];
           grid.innerHTML='';
           let line=newTokLine();let lineLastIdx=-1;
           const finishLine=brIdx=>{
@@ -970,8 +995,8 @@ class WebServer {
           const ces=chordEditState[ceKey];
           if(e.key==='Enter'||e.key===' '){
             e.preventDefault();ces.editIdx=null;confirmChord(song,sec,gidx,segIdx,ceKey,ti,inp.value);
-            const st=loadState(song,sec.sec,sec.occIdx);const total=origSecOf(song,sec.sec,sec.occIdx).totalBars||0;
-            const toks=getSegs(st,total)[segIdx]?.segData.tokens||[];
+            const st=loadState(song,sec.sec,sec.occIdx);
+            const toks=st.segData[segIdx]?.tokens||[];
             for(let j=ti+1;j<toks.length;j++){if(toks[j].type!=='br'){setTimeout(()=>openChordInput(song,sec,gidx,segIdx,ceKey,j),0);break;}}
           }else if(e.key==='Escape'){
             ces.editIdx=null;
@@ -988,20 +1013,36 @@ class WebServer {
           }
         }
 
-        function renderInstEditor(ed,song,sec,gidx,segIdx,sg,secStart,total){
-          const st=loadState(song,sec.sec,sec.occIdx);const segs=getSegs(st,total);
-          const existingIC=segs[segIdx]?.segData.instChords||[];
-          const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--sub);margin-bottom:10px';
-          hint.textContent='8비트 그리드 코드 입력 (s=♯, b=♭)';ed.appendChild(hint);
+        function renderInstEditor(ed,song,sec,gidx,segIdx){
+          const st=loadState(song,sec.sec,sec.occIdx);
+          const existingIC=st.segData[segIdx]?.instChords||[];
+          const barCount=Math.max(existingIC.length,4);
+          const hintRow=document.createElement('div');hintRow.style.cssText='display:flex;align-items:center;gap:10px;margin-bottom:10px';
+          const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--sub)';
+          hint.textContent='8비트 그리드 코드 입력 (s=♯, b=♭) · '+barCount+'마디';
+          const setBars=n=>{
+            const cur=loadState(song,sec.sec,sec.occIdx);
+            const curIC=cur.segData[segIdx]?.instChords||[];
+            const newIC=Array(Math.max(1,n)).fill(null).map((_,bi)=>curIC[bi]||[]);
+            setSlideField(song,sec.sec,sec.occIdx,segIdx,'instChords',newIC);
+            const card=getBlock(ukOf(song,sec.sec,gidx))?.querySelector('.seg-card[data-si="'+segIdx+'"]');
+            if(card)refreshSegCard(card,song,sec,gidx,segIdx);
+          };
+          const minus=document.createElement('button');minus.className='btn btn-sm btn-ghost';minus.textContent='－마디';
+          minus.addEventListener('click',()=>setBars(barCount-1));
+          const plus=document.createElement('button');plus.className='btn btn-sm btn-ghost';plus.textContent='＋마디';
+          plus.addEventListener('click',()=>setBars(barCount+1));
+          hintRow.appendChild(hint);hintRow.appendChild(minus);hintRow.appendChild(plus);
+          ed.appendChild(hintRow);
           const table=document.createElement('div');table.className='inst-table';
           const hdr=document.createElement('div');hdr.className='inst-row';
           const hl=document.createElement('div');hl.className='inst-bar-lbl';hdr.appendChild(hl);
           ['1','+','2','+','3','+','4','+'].forEach(lbl=>{const l=document.createElement('div');l.className='inst-beat-hdr';l.textContent=lbl;hdr.appendChild(l);});
           table.appendChild(hdr);
-          for(let b=0;b<sg.barCount;b++){
+          for(let b=0;b<barCount;b++){
             const barSlots=existingIC[b]||[];
             const row=document.createElement('div');row.className='inst-row';
-            const lbl=document.createElement('div');lbl.className='inst-bar-lbl';lbl.textContent='마디 '+(sg.barStart+b+1);row.appendChild(lbl);
+            const lbl=document.createElement('div');lbl.className='inst-bar-lbl';lbl.textContent='마디 '+(b+1);row.appendChild(lbl);
             for(let beat=0;beat<8;beat++){
               const slot=barSlots.find(s=>s.pos===beat);
               const cell=document.createElement('div');cell.className='inst-beat-'+(beat%2===0?'on':'off');
@@ -1013,14 +1054,14 @@ class WebServer {
               const commitInstChord=()=>{
                 inp.value=inp.value.replace(/[^A-Za-z0-9#♭/]/g,'');
                 inp.value=normChord(inp.value);
-                const cur=loadState(song,sec.sec,sec.occIdx);const segData=[...cur.segData];
-                const curIC=getSegs(cur,total)[segIdx]?.segData.instChords||[];
-                const newIC=Array(sg.barCount).fill(null).map((_,bi)=>{
+                const cur=loadState(song,sec.sec,sec.occIdx);
+                const curIC=cur.segData[segIdx]?.instChords||[];
+                const newIC=Array(barCount).fill(null).map((_,bi)=>{
                   const arr=[...(curIC[bi]||[])];
                   if(bi===b){const f=arr.filter(s=>s.pos!==beat);const v=inp.value;if(v)f.push({pos:beat,name:v});return f.sort((a,c)=>a.pos-c.pos);}
                   return arr;
                 });
-                segData[segIdx]={...segData[segIdx],instChords:newIC};setState(song,sec.sec,sec.occIdx,{...cur,segData});
+                setSlideField(song,sec.sec,sec.occIdx,segIdx,'instChords',newIC);
               };
               inp.addEventListener('input',commitInstChord);
               inp.addEventListener('blur',commitInstChord);
@@ -1040,42 +1081,44 @@ class WebServer {
           return{song,sec:rest.slice(0,at),occIdx:parseInt(rest.slice(at+2))};
         }
 
+        // 상태 → 저장용 슬라이드 배열 (startSec 포함, startBar는 순서 보존용 레거시 값)
+        function slidesOf(st){
+          return st.segData.map((sd,i)=>({
+            startSec:sd.startSec==null?null:sd.startSec,
+            startBar:i,
+            barCount:sd.isInstrumental?(sd.instChords||[]).length:0,
+            isInstrumental:!!sd.isInstrumental,
+            tokens:sd.isInstrumental?[]:(sd.tokens||[]),
+            instChords:sd.isInstrumental?(sd.instChords||[]):[],
+            singerNote:sd.singerNote||'',
+            sessionNote:sd.sessionNote||''
+          }));
+        }
+
+        function sectionPayload(song,sec){
+          const st=loadState(song,sec.sec,sec.occIdx);
+          const slides=slidesOf(st);
+          const plain=tokensToPlain(st.segData[0]?.tokens||[]);
+          // 섹션 레벨 노트는 첫 슬라이드 노트를 미러링 (구버전 뷰어/데이터 호환용)
+          return{lyricCue:plain.split('\\n')[0]||'',
+                 sessionNote:st.segData[0]?.sessionNote||'',
+                 singerNote:st.segData[0]?.singerNote||'',
+                 slides,linked:false,totalBars:Math.max(sec.totalBars||0,0)};
+        }
+
         function saveAll(){
           const payload={};
-          // dirty 항목: 편집된 내용 우선
-          for(const[k,st]of Object.entries(dirty)){
-            const{song,sec,occIdx}=parseDk(k);
-            if(!payload[song])payload[song]={};
-            const occKey=sec+'@@'+occIdx;
-            if(st.linked){
-              const ol=origSecOf(song,sec,occIdx);
-              payload[song][occKey]={lyricCue:'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides:[],linked:true,linkedTo:st.linkedTo||'',totalBars:Math.max(ol.totalBars||0,0)};
-              continue;
-            }
-            const o=origSecOf(song,sec,occIdx);
-            const total=o.totalBars||0;
-            const segs=getSegs(st,total);
-            const slides=segs.map(sg=>({startBar:sg.barStart,barCount:sg.barCount,isInstrumental:!!sg.segData.isInstrumental,tokens:sg.segData.isInstrumental?[]:(sg.segData.tokens||[]),instChords:sg.segData.isInstrumental?(sg.segData.instChords||[]):[],singerNote:sg.segData.singerNote||''}));
-            const plain=tokensToPlain(segs[0]?.segData.tokens||[]);
-            payload[song][occKey]={lyricCue:plain.split('\\n')[0]||'',sessionNote:st.sessionNote||'',singerNote:st.singerNote||'',slides,linked:false,totalBars:Math.max(total,0)};
-          }
-          // dirty에 없는 나머지 섹션도 DATA에서 그대로 전송
-          DATA.forEach(song=>{
-            if(!payload[song.song])payload[song.song]={};
-            (song.sections||[]).forEach(sec=>{
-              const occKey=sec.sec+'@@'+sec.occIdx;
-              if(payload[song.song][occKey])return; // dirty 우선
-              const slides=(sec.slides||[]).map(sl=>({startBar:sl.startBar||0,barCount:sl.barCount||0,isInstrumental:!!sl.isInstrumental,tokens:sl.tokens||[],instChords:sl.instChords||[],singerNote:sl.singerNote||''}));
-              const plain=tokensToPlain(sec.slides?.[0]?.tokens||[]);
-              payload[song.song][occKey]={lyricCue:plain.split('\\n')[0]||'',sessionNote:sec.sessionNote||'',singerNote:sec.singerNote||'',slides,linked:!!sec.linked,linkedTo:sec.linkedTo||'',totalBars:Math.max(sec.totalBars||0,0)};
+          // 모든 섹션을 현재 편집 상태(loadState: dirty 우선, 아니면 원본)로 전송
+          DATA.forEach(songData=>{
+            payload[songData.song]={};
+            (songData.sections||[]).forEach(sec=>{
+              payload[songData.song][sec.sec+'@@'+sec.occIdx]=sectionPayload(songData.song,sec);
             });
           });
           fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
             .then(r=>r.json())
             .then(()=>{
-              // 저장 성공: 서버에 반영된 내용을 로컬 DATA에도 병합.
-              // (안 하면 다음 '뷰어 적용' 때 "나머지 섹션은 DATA 그대로 전송" 로직이
-              //  이번에 저장한 내용을 페이지 로드 시점의 옛 값으로 되돌려버림)
+              // 저장 성공: 서버에 반영된 내용을 로컬 DATA에도 병합
               for(const[song,secs]of Object.entries(payload)){
                 const d=DATA.find(s=>s.song===song);if(!d)continue;
                 for(const[occKey,val]of Object.entries(secs)){
@@ -1085,8 +1128,7 @@ class WebServer {
                   ds.slides=val.slides||[];
                   ds.sessionNote=val.sessionNote||'';
                   ds.singerNote=val.singerNote||'';
-                  ds.linked=!!val.linked;
-                  ds.linkedTo=val.linkedTo||'';
+                  ds.linked=false;
                 }
               }
               for(const k in dirty)delete dirty[k];
@@ -1101,10 +1143,8 @@ class WebServer {
           const s=DATA.find(d=>d.song===song);
           if(!s)return null;
           const sections=s.sections.map(sec=>{
-            const k=dkOf(song,sec.sec,sec.occIdx);
-            const st=dirty[k]||loadState(song,sec.sec,sec.occIdx);
-            const slides=rawSlidesFromState(st,sec.totalBars);
-            return{sec:sec.sec,occIdx:sec.occIdx,totalBars:sec.totalBars,slides,sessionNote:st.sessionNote||'',singerNote:st.singerNote||''};
+            const st=loadState(song,sec.sec,sec.occIdx);
+            return{sec:sec.sec,occIdx:sec.occIdx,totalBars:sec.totalBars,durationSec:sec.durationSec||0,slides:slidesOf(st)};
           });
           return[{song,sections}];
         }
@@ -1166,8 +1206,8 @@ class WebServer {
           showMsg('저장됐어요!');
         }
 
-        // 구버전 파일 호환: 필드 누락 시 기본값으로 채움
-        function fixSlides(slides){return(slides||[]).map(sl=>({startBar:sl.startBar||0,barCount:sl.barCount||0,isInstrumental:sl.isInstrumental||false,tokens:(sl.tokens||[]).map(t=>({type:t.type||'char',char:t.char??null,chord:t.chord??null})),instChords:sl.instChords||[],singerNote:sl.singerNote||''}));}
+        // 구버전 파일 호환: 필드 누락 시 기본값으로 채움 (마디 기반 구버전은 startSec null → 임시 위치로 표시)
+        function fixSlides(slides){return(slides||[]).map(sl=>({startBar:sl.startBar||0,barCount:sl.barCount||0,startSec:(sl.startSec===undefined?null:sl.startSec),isInstrumental:sl.isInstrumental||false,tokens:(sl.tokens||[]).map(t=>({type:t.type||'char',char:t.char??null,chord:t.chord??null})),instChords:sl.instChords||[],singerNote:sl.singerNote||'',sessionNote:sl.sessionNote||''}));}
 
         function handleImportFile(file,targetSongName){
           if(!file)return;
@@ -1237,6 +1277,128 @@ class WebServer {
         });
         document.addEventListener('dragover',e=>{e.preventDefault();});
         document.addEventListener('drop',e=>{e.preventDefault();});
+
+        // ── 실시간 연동: 재생 위치 표시 / 재생 따라가기 / 전환 찍기 ──
+        let lastState=null,lastStateAt=0;
+        let tapCtx={song:null,secIdx:-1,cursor:1,prevElapsed:0};
+
+        // SSE 상태 + 수신 후 경과 시간으로 현재 재생 위치(섹션 경과 초)를 보간
+        function liveElapsed(){
+          if(!lastState)return null;
+          const e=lastState.sectionElapsedSec??0;
+          if(!lastState.isPlaying)return e;
+          return e+(Date.now()-lastStateAt)/1000;
+        }
+        function playingSecInfo(){
+          if(!lastState)return null;
+          const song=(lastState.songs||[])[lastState.currentSongIndex];
+          const secIdx=lastState.currentSectionIndexInSong??-1;
+          if(!song||secIdx<0)return null;
+          const songData=DATA.find(s=>s.song===song);
+          const sec=songData?songData.sections[secIdx]:null;
+          if(!sec)return null;
+          return{song,secIdx,sec};
+        }
+        // 다음에 찍을 경계 = 이미 확정된(찍힌) 경계 중 현재 위치보다 앞에 있는 것들 다음.
+        // 섹션 진입·뒤로 점프 때마다 다시 계산 → 곡을 처음부터 다시 들으면 1번 경계부터 다시 찍힘.
+        function computeTapCursor(info,elapsed){
+          const st=loadState(info.song,info.sec.sec,info.sec.occIdx);
+          let cnt=0;
+          for(let i=1;i<st.segData.length;i++){
+            if(st.segData[i].startSec!=null&&st.segData[i].startSec<=elapsed)cnt=i;
+          }
+          return cnt+1;
+        }
+        function onStateMsg(s){
+          lastState=s;lastStateAt=Date.now();
+          const info=playingSecInfo();
+          const elapsed=s.sectionElapsedSec??0;
+          if(info){
+            if(info.song!==tapCtx.song||info.secIdx!==tapCtx.secIdx||elapsed<tapCtx.prevElapsed-1.5){
+              tapCtx={song:info.song,secIdx:info.secIdx,cursor:computeTapCursor(info,elapsed),prevElapsed:elapsed};
+            }else tapCtx.prevElapsed=elapsed;
+          }
+          $('now-playing').textContent=info?('▶ '+info.song+' · '+info.sec.sec+(s.isPlaying?'':' (정지)')):'';
+          // 따라가기: 다른 곡 재생 시 자동 곡 전환
+          if(info&&$('follow-chk').checked&&curSong!==info.song)selectSong(info.song);
+          // 연주 중 섹션 블록 하이라이트 (+따라가기 시 스크롤)
+          document.querySelectorAll('.sec-block.playing').forEach(el=>el.classList.remove('playing'));
+          if(info&&curSong===info.song){
+            const bl=getBlock(ukOf(info.song,info.sec.sec,info.secIdx));
+            if(bl){
+              bl.classList.add('playing');
+              if($('follow-chk').checked&&s.isPlaying&&!bl._scrolled){bl._scrolled=true;bl.scrollIntoView({behavior:'smooth',block:'nearest'});}
+            }
+          }
+        }
+        // 재생헤드 라인 + 현재 표시 중 슬라이드 하이라이트 (매 프레임 보간)
+        function tickPlayhead(){
+          requestAnimationFrame(tickPlayhead);
+          const info=playingSecInfo();
+          document.querySelectorAll('.tl-playhead').forEach(el=>el.style.display='none');
+          document.querySelectorAll('.tl-slide.playing-slide,.seg-card.playing-slide').forEach(el=>el.classList.remove('playing-slide'));
+          if(!info||curSong!==info.song)return;
+          const bl=getBlock(ukOf(info.song,info.sec.sec,info.secIdx));
+          if(!bl)return;
+          const rail=bl.querySelector('.tl-rail');const ph=bl.querySelector('.tl-playhead');
+          const st=loadState(info.song,info.sec.sec,info.sec.occIdx);
+          const dur=info.sec.durationSec||0;
+          const pos=resolvePositions(st.segData,dur);
+          const effDur=dur>0?dur:((pos[pos.length-1]?pos[pos.length-1].sec:0)+8);
+          const t=Math.min(liveElapsed()??0,effDur);
+          if(rail&&ph){
+            ph.style.display='block';
+            ph.style.top=(t/effDur*rail.clientHeight)+'px';
+          }
+          let ci=0;for(let i=0;i<pos.length;i++){if(pos[i].sec<=t)ci=i;}
+          const tlBlock=bl.querySelector('.tl-slide[data-si="'+ci+'"]');
+          if(tlBlock)tlBlock.classList.add('playing-slide');
+          const cardEl=bl.querySelector('.seg-card[data-si="'+ci+'"]');
+          if(cardEl)cardEl.classList.add('playing-slide');
+        }
+        // 전환 찍기: 버튼/스페이스바를 누른 "지금 이 순간"이 다음 경계의 전환 시점이 됨
+        function tap(){
+          const info=playingSecInfo();
+          if(!info||!lastState.isPlaying){showMsg('재생 중이 아니에요');return;}
+          const st=loadState(info.song,info.sec.sec,info.sec.occIdx);
+          const i=tapCtx.cursor;
+          if(i>=st.segData.length){showMsg('이 섹션의 마지막 슬라이드예요');return;}
+          const dur=info.sec.durationSec||0;
+          let t=liveElapsed()??0;
+          // 이웃의 이미 확정된 위치를 넘지 않게 보정
+          let prevStamped=0;
+          for(let k=i-1;k>=1;k--){if(st.segData[k].startSec!=null){prevStamped=st.segData[k].startSec;break;}}
+          t=Math.max(prevStamped+0.1,t);
+          for(let k=i+1;k<st.segData.length;k++){if(st.segData[k].startSec!=null){t=Math.min(t,st.segData[k].startSec-0.1);break;}}
+          if(dur>0)t=Math.min(t,dur-0.05);
+          const segData=st.segData.map(s=>({...s}));
+          segData[i].startSec=Math.round(t*100)/100;
+          setState(info.song,info.sec.sec,info.sec.occIdx,{segData});
+          tapCtx.cursor=i+1;
+          const btn=$('tap-btn');btn.classList.remove('flash');void btn.offsetWidth;btn.classList.add('flash');
+          showMsg('슬라이드 '+(i+1)+'→'+(i+2)+' 전환 '+fmtSec(t)+' 기록');
+          if(curSong===info.song){
+            const bl=getBlock(ukOf(info.song,info.sec.sec,info.secIdx));
+            if(bl)refreshBlock(bl,info.song,info.sec,info.secIdx);
+          }
+        }
+
+        if(!STANDALONE){
+          $('tap-btn').addEventListener('click',tap);
+          document.addEventListener('keydown',e=>{
+            if(e.code!=='Space')return;
+            const tag=(document.activeElement?.tagName||'').toLowerCase();
+            if(tag==='input'||tag==='textarea'||document.activeElement?.isContentEditable)return;
+            e.preventDefault();tap();
+          });
+          const esLive=new EventSource('/events');
+          esLive.onmessage=e=>{try{onStateMsg(JSON.parse(e.data));}catch{}};
+          tickPlayhead();
+        }else{
+          $('tap-btn').style.display='none';
+          $('follow-wrap').style.display='none';
+          $('now-playing').style.display='none';
+        }
 
         if(STANDALONE){
           const bi=$('btn-import');if(bi)bi.style.display='none';

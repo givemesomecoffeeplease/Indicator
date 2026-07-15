@@ -58,9 +58,9 @@ class StateEngine {
     private var currentSectionBeatsPerBar: Int = 4
     private var currentSectionBeatUnit: Int = 4
 
-    // ── 슬라이드 조기 전환 표시 래치 (지터로 화면이 되돌아가는 것 방지) ──
-    private var dispAdvanced = false          // 섹션 경계 조기 전환됨 (applySection에서 리셋)
-    private var lastSentBarFloat: Double = 0  // 마지막으로 내보낸 barFloat (단방향 가드)
+    // ── 표시 위치 단방향 가드 (MTC 지터로 화면이 되돌아가는 것 방지) ──
+    private var lastSentBarFloat: Double = 0     // 마지막으로 내보낸 barFloat
+    private var lastSentElapsedSec: Double = 0   // 마지막으로 내보낸 섹션 경과 초
 
     // ── 코드 beat-snap ────────────────────────────────────
     private var currentChordIdx: Int = -1
@@ -134,8 +134,8 @@ class StateEngine {
             nextChordMTC       = 0
             cdTargets          = []
             cdShown            = 0
-            dispAdvanced       = false
             lastSentBarFloat   = 0
+            lastSentElapsedSec = 0
             onJump?()
         }
         prevMTCTime  = mtcTime
@@ -227,9 +227,9 @@ class StateEngine {
             sectionEntryMTC = mtcTime
         }
 
-        // 새 섹션 진입: 조기 전환 래치·barFloat 가드 리셋
-        dispAdvanced = false
+        // 새 섹션 진입: 표시 위치 가드 리셋
         lastSentBarFloat = 0
+        lastSentElapsedSec = 0
 
         initCountdown()
     }
@@ -361,16 +361,14 @@ class StateEngine {
         nextChordMTC = chordMTCTime(chords[nextIdx])
     }
 
-    // 섹션 내 상대 bar 위치 (슬라이드 표시용, index.html findCurrentEntry 기준)
-    // slideEarlyEighths: 팔분음표 N개만큼 앞당겨 슬라이드 전환 (1 eighth = beatDuration / 2)
+    // 섹션 내 상대 bar 위치 (진행률·레거시 표시용)
     private func realtimeBarFloat() -> Double {
         guard sectionEntryMTC > 0 else { return 0 }
         let elapsed = mtcTime - sectionEntryMTC
         guard elapsed >= 0 else { return 0 }
         let bpb = Double(currentBeatsPerBar())
         let bd  = beatDuration()
-        let earlySeconds = Double(SettingsStore.shared.slideEarlyEighths) * bd / 2.0
-        return (elapsed + earlySeconds) / (bpb * bd)
+        return elapsed / (bpb * bd)
     }
 
     // occurrence 인덱스 계산 (같은 이름 섹션이 몇 번째인지)
@@ -412,24 +410,6 @@ class StateEngine {
         guard currentSectionIdx >= 0, currentSectionIdx < inSong.count else { return state }
         let idx = currentSectionIdx
 
-        // 슬라이드 조기 전환 — 섹션 경계 포함: "가사 슬라이드"만 팔분음표 N개만큼 미리 전환.
-        // 섹션명·노트·코드·카운트다운·진행률은 실제 섹션(정각) 기준 유지 — '다음' 카드가
-        // 이미 예고 역할을 하므로 '지금' 카드는 카운트다운과 함께 정박에 바뀌는 게 일관적.
-        // 래치 방식: MTC 지터로 경계 근처에서 조건이 흔들려도 한 번 넘어간 표시는 되돌리지 않음.
-        let earlySec = Double(SettingsStore.shared.slideEarlyEighths) * beatDuration() / 2.0
-        var dispIdx = idx
-        var dispBounds: (start: Double, end: Double)? = nil
-        if earlySec > 0, mtcIsPlaying, idx + 1 < inSong.count, !inSong[idx + 1].isSong {
-            if !dispAdvanced, let b = sectionBounds(idx: idx), mtcTime + earlySec >= b.end {
-                dispAdvanced = true
-                lastSentBarFloat = 0   // 다음 섹션 기준으로 barFloat 새로 시작
-            }
-            if dispAdvanced {
-                dispIdx = idx + 1
-                dispBounds = sectionBounds(idx: dispIdx)
-            }
-        }
-
         // 섹션명·노트 등 카드 표시는 실제 섹션 기준
         let cm = inSong[idx]
         let nm = idx + 1 < inSong.count ? inSong[idx + 1] : nil
@@ -459,10 +439,9 @@ class StateEngine {
             state.nextNote       = nxtData.sessionNote
             state.nextSingerNote = nxtData.singerNote
         }
-        // 가사 슬라이드 조회용 인덱스는 조기 전환된 표시 섹션 기준 (섹션명과 분리)
-        state.currentSectionIndexInSong = sections.firstIndex(of: inSong[dispIdx]) ?? -1
+        state.currentSectionIndexInSong = sections.firstIndex(of: inSong[idx]) ?? -1
 
-        // 진행률: MTC 기반 — 조기 전환과 무관하게 항상 실제 섹션 기준 (미리 넘어가지 않음)
+        // 진행률: MTC 기반 — 항상 실제 섹션 기준
         if sectionDurationSec > 0 {
             let elapsed = mtcIsPlaying ? (mtcTime - sectionEntryMTC) : 0
             state.sectionProgress   = min(1, max(0, elapsed / sectionDurationSec))
@@ -478,25 +457,21 @@ class StateEngine {
         }
         state.countdownBars = cdShown
 
-        // 코드 (조기 전환 중이면 다음 섹션의 코드 목록을 표시, 하이라이트는 리셋)
-        let sectionChords = chordsInSection(idx: dispIdx)
+        // 코드
+        let sectionChords = chordsInSection(idx: idx)
         state.chords      = sectionChords.map { $0.name }
         state.chordBars   = sectionChords.map { $0.bar }
         state.chordBeats  = sectionChords.map { $0.beat }
-        if dispIdx == idx {
-            let displayChordIdx: Int
-            if chordPending, nextChordMTC > 0, (nextChordMTC - mtcTime) * 1000 < 80 {
-                displayChordIdx = currentChordIdx + 1
-            } else {
-                displayChordIdx = currentChordIdx
-            }
-            state.currentChordIndex = (displayChordIdx >= 0 && displayChordIdx < sectionChords.count) ? displayChordIdx : -1
+        let displayChordIdx: Int
+        if chordPending, nextChordMTC > 0, (nextChordMTC - mtcTime) * 1000 < 80 {
+            displayChordIdx = currentChordIdx + 1
         } else {
-            state.currentChordIndex = -1
+            displayChordIdx = currentChordIdx
         }
+        state.currentChordIndex = (displayChordIdx >= 0 && displayChordIdx < sectionChords.count) ? displayChordIdx : -1
 
         if nm != nil {
-            let nextChords = chordsInSection(idx: dispIdx + 1)
+            let nextChords = chordsInSection(idx: idx + 1)
             state.nextSectionChords    = nextChords.map { $0.name }
             state.nextSectionChordBars = nextChords.map { $0.bar }
         }
@@ -506,22 +481,22 @@ class StateEngine {
         }
 
         state.isPlaying       = mtcIsPlaying
-        var barFloat: Double
-        if let db = dispBounds {
-            // 조기 전환 중: 다음 섹션 시작 기준 위치 (음수 방지)
-            let bpb = Double(currentBeatsPerBar())
-            let bd  = beatDuration()
-            barFloat = max(0, (mtcTime + earlySec - db.start) / (bpb * bd))
-        } else {
-            barFloat = realtimeBarFloat()
-        }
+        var barFloat = realtimeBarFloat()
         // 단방향 가드: MTC 지터로 시간이 살짝 뒤로 튀어도 슬라이드가 되돌아가지 않도록
-        // (섹션 전환/점프 시 lastSentBarFloat 리셋)
+        // (섹션 전환/점프 시 리셋)
         if mtcIsPlaying {
             if barFloat < lastSentBarFloat { barFloat = lastSentBarFloat }
             else { lastSentBarFloat = barFloat }
         }
         state.currentBarFloat = barFloat
+
+        // 섹션 진입 후 경과 초 — MTC 시간 기반 슬라이드 전환의 기준 (동일한 단방향 가드)
+        var elapsedSec = sectionEntryMTC > 0 ? max(0, mtcTime - sectionEntryMTC) : 0
+        if mtcIsPlaying {
+            if elapsedSec < lastSentElapsedSec { elapsedSec = lastSentElapsedSec }
+            else { lastSentElapsedSec = elapsedSec }
+        }
+        state.sectionElapsedSec = elapsedSec
         state.bpm             = snapshot.bpm
         state.beatsPerBar   = currentSectionBeatsPerBar
         state.timeSignature = "\(currentSectionBeatsPerBar)/\(currentSectionBeatUnit)"

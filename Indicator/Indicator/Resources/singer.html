@@ -355,9 +355,32 @@
   const $ = id => document.getElementById(id);
 
   // ── 가사 캐시 (/edit DATA 파싱) ──
-  // flat sorted slide array: { songName: [{ secName, secIdx, relBar, slide }] }
+  // flat sorted slide array: { songName: [{ secName, secIdx, relSec, slide }] }
   let lyricSlides = {};
   let lastKnownState = null;
+
+  // 슬라이드 전환 위치(섹션 시작 기준 초) 해석: startSec 없는(아직 안 찍은) 슬라이드는
+  // 앞뒤로 확정된 위치 사이를 균등 분할한 임시 위치 사용 — 편집 화면과 동일 규칙
+  function resolveSlideSecs(slides, durationSec) {
+    const n = slides.length;
+    const out = new Array(n);
+    if (n === 0) return out;
+    out[0] = 0;
+    let i = 1;
+    while (i < n) {
+      const v = slides[i] ? slides[i].startSec : null;
+      if (v != null) { out[i] = v; i++; continue; }
+      let j = i;
+      while (j < n && (slides[j] ? slides[j].startSec : null) == null) j++;
+      const endSec = j < n ? slides[j].startSec : (durationSec > 0 ? durationSec : out[i-1] + (n - i + 1) * 5);
+      const span = Math.max(0, endSec - out[i-1]);
+      const cnt = j - i + 1;
+      for (let k = i; k < j; k++) out[k] = out[i-1] + span * (k - i + 1) / cnt;
+      i = j;
+    }
+    for (let k = 1; k < n; k++) if (out[k] < out[k-1] + 0.05) out[k] = out[k-1] + 0.05;
+    return out;
+  }
 
   async function fetchLyricCache() {
     try {
@@ -372,99 +395,33 @@
       data.forEach(song => {
         const arr = [];
         (song.sections || []).forEach((sec, secIdx) => {
-          (sec.slides || []).forEach(slide => {
-            arr.push({ secName: sec.sec, secIdx, relBar: slide.startBar || 0, slide });
+          const slides = (sec.slides && sec.slides.length) ? sec.slides : [];
+          const secs = resolveSlideSecs(slides, sec.durationSec || 0);
+          slides.forEach((slide, i) => {
+            arr.push({ secName: sec.sec, secIdx, relSec: secs[i], slide });
           });
         });
-        arr.sort((a, b) => a.secIdx - b.secIdx || a.relBar - b.relBar);
+        arr.sort((a, b) => a.secIdx - b.secIdx || a.relSec - b.relSec);
         lyricSlides[song.song] = arr;
       });
       if (lastKnownState) applyState(lastKnownState);
     } catch(e) {}
   }
 
-  function findCurrentEntry(songName, secIdx, barFloat) {
+  function findCurrentEntry(songName, secIdx, elapsedSec) {
     const arr = lyricSlides[songName];
     if (!arr || !arr.length) return null;
     const inSec = arr.filter(e => e.secIdx === secIdx);
     if (!inSec.length) return null;
     let best = inSec[0];
-    for (const e of inSec) { if (e.relBar <= barFloat) best = e; else break; }
+    for (const e of inSec) { if (e.relSec <= elapsedSec) best = e; else break; }
     return best;
   }
 
-  function findNextEntry(songName, secIdx, barFloat) {
+  function findNextEntry(songName, secIdx, elapsedSec) {
     const arr = lyricSlides[songName];
     if (!arr || !arr.length) return null;
-    return arr.find(e => e.secIdx > secIdx || (e.secIdx === secIdx && e.relBar > barFloat)) || null;
-  }
-
-  function findSlide(songName, secName, barFloat, forNext) {
-    const list = lyricCache[songName]?.[secName];
-    if (!list || !list.length) return null;
-    if (forNext) {
-      const next = list.find(s => (s.startBar || 0) > barFloat) || list[0];
-      return next.slides?.[0] || null;
-    }
-    let sec = list[0];
-    for (const s of list) {
-      if ((s.startBar || 0) <= barFloat) sec = s;
-      else break;
-    }
-    if (!sec.slides || !sec.slides.length) return null;
-    const secStart = sec.startBar || 0;
-    const relBar = barFloat - secStart;
-    let best = sec.slides[0];
-    for (const sl of sec.slides) {
-      const slRel = (secStart > 0 && sl.startBar >= secStart) ? sl.startBar - secStart : sl.startBar;
-      if (slRel <= relBar) best = sl;
-      else break;
-    }
-    return best;
-  }
-  function findTokens(songName, secName, barFloat, useFirst) {
-    const sl = findSlide(songName, secName, barFloat, useFirst);
-    return sl?.tokens?.length ? sl.tokens : null;
-  }
-
-  // 다음 슬라이드: ① 같은 섹션 occurrence 내 다음 슬라이드 → ② 같은 섹션명 다음 occurrence → ③ 다음 섹션
-  function findNextSlide(songName, secName, barFloat, nextSecName) {
-    const list = lyricCache[songName]?.[secName];
-    if (list && list.length) {
-      let secIdx = 0;
-      let sec = list[0];
-      for (let i = 0; i < list.length; i++) {
-        if ((list[i].startBar || 0) <= barFloat) { sec = list[i]; secIdx = i; }
-        else break;
-      }
-      // ① 같은 occurrence 내 다음 슬라이드
-      if (sec.slides && sec.slides.length > 1) {
-        const secStart = sec.startBar || 0;
-        const relBar = barFloat - secStart;
-        let bestIdx = 0;
-        for (let i = 0; i < sec.slides.length; i++) {
-          const sl = sec.slides[i];
-          const slRel = (secStart > 0 && sl.startBar >= secStart) ? sl.startBar - secStart : sl.startBar;
-          if (slRel <= relBar) bestIdx = i;
-          else break;
-        }
-        if (bestIdx + 1 < sec.slides.length) {
-          return { slide: sec.slides[bestIdx + 1], sec: secName };
-        }
-      }
-      // ② 같은 섹션명 다음 occurrence
-      if (secIdx + 1 < list.length) {
-        return { slide: list[secIdx + 1].slides?.[0] || null, sec: secName };
-      }
-    }
-    // ③ 다음 섹션
-    if (nextSecName) {
-      const nxtList = lyricCache[songName]?.[nextSecName];
-      if (nxtList && nxtList.length) {
-        return { slide: nxtList[0].slides?.[0] || null, sec: nextSecName };
-      }
-    }
-    return { slide: null, sec: nextSecName || '' };
+    return arr.find(e => e.secIdx > secIdx || (e.secIdx === secIdx && e.relSec > elapsedSec)) || null;
   }
 
   fetchLyricCache();
@@ -681,20 +638,20 @@
 
     // 현재/다음 슬라이드 (flat 순서 기준 — 라벨도 같은 소스로 통일해 라벨/콘텐츠 불일치 방지)
     const songName = songs[idx] || '';
-    const barFloat = s.currentBarFloat ?? 0;
+    const elapsedSec = s.sectionElapsedSec ?? 0;
     const secIdx = s.currentSectionIndexInSong ?? -1;
-    const curEntry = findCurrentEntry(songName, secIdx, barFloat);
-    // 슬라이드가 미리 넘어갈 땐 라벨도 그 슬라이드의 섹션명을 따라감 (조기 전환 동기화)
+    const curEntry = findCurrentEntry(songName, secIdx, elapsedSec);
     const curLabel = curEntry?.secName || s.currentSection || '';
     $('cur-section-label').textContent = curLabel.startsWith('#') ? '' : (curLabel || '—');
     renderSlide($('cur-lyric-block'), curEntry?.slide || null, s.lyricCue);
     fitLyricLines($('cur-lyric-block'));
-    const curNote = s.singerNote || '';
+    // 싱어 노트 — 슬라이드 귀속, 구버전 데이터는 섹션 노트로 폴백
+    const curNote = curEntry?.slide?.singerNote || s.singerNote || '';
     $('cur-singer-note').textContent = curNote;
     $('cur-singer-note').classList.toggle('hidden', !curNote);
 
     // 다음 슬라이드: flat 배열 기준 바로 다음 슬라이드
-    const nxtEntry = findNextEntry(songName, secIdx, barFloat);
+    const nxtEntry = findNextEntry(songName, secIdx, elapsedSec);
     const nxtSec = s.nextSection || '';
     const nxtIsSong = s.nextSectionIsSong || nxtSec.startsWith('#');
     // flat 배열에 다음 슬라이드가 없으면 → 다음 곡 경계
@@ -711,8 +668,8 @@
       $('nxt-song-display').classList.add('hidden');
       renderSlide($('nxt-lyric-block'), nxtEntry?.slide || null, '', true);  // 첫 줄만
       fitLyricLines($('nxt-lyric-block'));
-      // 다음 슬라이드가 같은 섹션(occurrence)이면 현재 노트 재사용, 다른 섹션이면 다음 섹션 노트 사용
-      const nxtNote = (nxtEntry && curEntry && nxtEntry.secName === curEntry.secName) ? curNote : (s.nextSingerNote || '');
+      // 다음 슬라이드의 노트 — 슬라이드 귀속, 구버전 데이터는 다음 섹션 노트로 폴백
+      const nxtNote = nxtEntry?.slide?.singerNote || (nxtEntry && curEntry && nxtEntry.secName !== curEntry.secName ? (s.nextSingerNote || '') : '');
       $('nxt-singer-note').textContent = nxtNote;
       $('nxt-singer-note').classList.toggle('hidden', !nxtNote);
     }

@@ -40,26 +40,30 @@ struct InstChordSlot: Codable, Equatable {
 }
 
 struct LyricSlide: Codable, Equatable {
-    var startBar: Int
-    var barCount: Int
+    var startBar: Int          // 레거시(마디 기반 시절) — 구버전 파일 환산용으로만 유지
+    var barCount: Int          // 레거시
+    var startSec: Double?      // 자기 섹션 마커 시작 기준 전환 오프셋(초). nil = 아직 안 찍음(임시 위치로 표시)
     var isInstrumental: Bool
     var tokens: [LyricToken]
     var instChords: [[InstChordSlot]]  // 마디별 간주 코드 슬롯
     var singerNote: String
+    var sessionNote: String    // 노트는 섹션이 아니라 슬라이드 귀속 (2026-07 개편)
 
-    enum CodingKeys: String, CodingKey { case startBar, barCount, isInstrumental, tokens, instChords, singerNote }
-    init(startBar: Int = 0, barCount: Int = 0, isInstrumental: Bool = false, tokens: [LyricToken] = [], instChords: [[InstChordSlot]] = [], singerNote: String = "") {
-        self.startBar = startBar; self.barCount = barCount; self.isInstrumental = isInstrumental
-        self.tokens = tokens; self.instChords = instChords; self.singerNote = singerNote
+    enum CodingKeys: String, CodingKey { case startBar, barCount, startSec, isInstrumental, tokens, instChords, singerNote, sessionNote }
+    init(startBar: Int = 0, barCount: Int = 0, startSec: Double? = nil, isInstrumental: Bool = false, tokens: [LyricToken] = [], instChords: [[InstChordSlot]] = [], singerNote: String = "", sessionNote: String = "") {
+        self.startBar = startBar; self.barCount = barCount; self.startSec = startSec; self.isInstrumental = isInstrumental
+        self.tokens = tokens; self.instChords = instChords; self.singerNote = singerNote; self.sessionNote = sessionNote
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         startBar        = (try? c.decode(Int.self,              forKey: .startBar))        ?? 0
         barCount        = (try? c.decode(Int.self,              forKey: .barCount))        ?? 0
+        startSec        = try? c.decode(Double.self,            forKey: .startSec)
         isInstrumental  = (try? c.decode(Bool.self,             forKey: .isInstrumental))  ?? false
         tokens          = (try? c.decode([LyricToken].self,     forKey: .tokens))          ?? []
         instChords      = (try? c.decode([[InstChordSlot]].self, forKey: .instChords))     ?? []
         singerNote      = (try? c.decode(String.self,           forKey: .singerNote))      ?? ""
+        sessionNote     = (try? c.decode(String.self,           forKey: .sessionNote))     ?? ""
     }
 }
 
@@ -164,6 +168,7 @@ struct IndicatorState: Codable, Equatable {
     var nextSingerNote: String = ""
     var nextSectionIsSong: Bool = false
     var currentBarFloat: Double = 0
+    var sectionElapsedSec: Double = 0   // 섹션 마커 진입 후 경과 초 — MTC 시간 기반 슬라이드 전환의 기준
     var nextChordInMs: Double = 0
     var broadcastTimestampMs: Double = 0
     // 싱어 뷰

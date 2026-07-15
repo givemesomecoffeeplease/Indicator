@@ -17,11 +17,8 @@ class SettingsStore: ObservableObject {
     @Published var countdownBars: Int = stored("countdownBars", default: 2, max: 2) {
         didSet { UserDefaults.standard.set(countdownBars, forKey: "countdownBars") }
     }
-
-    // 슬라이드 조기 전환: 팔분음표 N개만큼 먼저 전환, 0 = 사용 안 함 (기본 3)
-    @Published var slideEarlyEighths: Int = stored("slideEarlyEighths", default: 3, max: 16) {
-        didSet { UserDefaults.standard.set(slideEarlyEighths, forKey: "slideEarlyEighths") }
-    }
+    // 슬라이드 조기 전환(slideEarlyEighths)은 MTC 시간 기반 찍기 개편으로 제거됨 —
+    // 전환 시점은 사용자가 찍은 순간 그 자체가 정답이라 보정 개념이 없음
 }
 
 struct SettingsView: View {
@@ -37,19 +34,6 @@ struct SettingsView: View {
                     : "사전 스캔 후 다음 섹션 전환 \(settings.countdownBars)마디 전부터 표시됩니다."
             ) {
                 Stepper("", value: $settings.countdownBars, in: 0...2)
-                    .labelsHidden()
-            }
-
-            Divider()
-
-            settingRow(
-                label: "슬라이드 조기 전환",
-                detail: settings.slideEarlyEighths == 0 ? "사용 안 함" : "팔분음표 \(settings.slideEarlyEighths)개 먼저",
-                caption: settings.slideEarlyEighths == 0
-                    ? "슬라이드가 원래 마디 시작에 맞춰 전환됩니다."
-                    : "같은 섹션 안의 슬라이드가 팔분음표 \(settings.slideEarlyEighths)개만큼 일찍 전환됩니다. (섹션 첫 슬라이드는 정각 전환)"
-            ) {
-                Stepper("", value: $settings.slideEarlyEighths, in: 0...16)
                     .labelsHidden()
             }
         }
