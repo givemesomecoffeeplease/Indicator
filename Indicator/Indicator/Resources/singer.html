@@ -177,8 +177,11 @@
     white-space: nowrap;
     line-height: 1.3;
     letter-spacing: 0;
+    /* 인접 코드끼리 붙어서 하나로 읽히는 문제 방지 (A/C# + D → "A/C#D").
+       코드가 글자보다 넓어 칸 폭을 결정하는 경우에만 실제 간격이 벌어짐 */
+    padding-right: 0.8em;
   }
-  .chord-label-empty { color: transparent; }
+  .chord-label-empty { color: transparent; padding-right: 0; }
   #nxt-lyric-wrap .chord-label {
     color: #3d7a6a;
   }
@@ -681,7 +684,8 @@
     const barFloat = s.currentBarFloat ?? 0;
     const secIdx = s.currentSectionIndexInSong ?? -1;
     const curEntry = findCurrentEntry(songName, secIdx, barFloat);
-    const curLabel = s.currentSection || curEntry?.secName || '';
+    // 슬라이드가 미리 넘어갈 땐 라벨도 그 슬라이드의 섹션명을 따라감 (조기 전환 동기화)
+    const curLabel = curEntry?.secName || s.currentSection || '';
     $('cur-section-label').textContent = curLabel.startsWith('#') ? '' : (curLabel || '—');
     renderSlide($('cur-lyric-block'), curEntry?.slide || null, s.lyricCue);
     fitLyricLines($('cur-lyric-block'));

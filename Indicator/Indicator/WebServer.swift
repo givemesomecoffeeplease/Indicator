@@ -314,7 +314,7 @@ class WebServer {
         .note-inp-sm{border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;outline:none;width:130px}
         .note-inp-sm:focus{border-color:var(--accent)}
         .bar-tl-area{padding:10px 18px 8px;background:#f8f8fc;border-bottom:1px solid var(--border)}
-        .bar-tl{display:flex;align-items:center;overflow-x:auto;padding-bottom:4px;user-select:none}
+        .bar-tl{display:flex;align-items:center;overflow-x:auto;padding:20px 0 4px;user-select:none} /* 위 여백: 구분선 이동 ◀▶ 버튼 자리 */
         .bar-box{width:34px;height:42px;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;position:relative}
         .bar-box .bn{font-size:9px;color:rgba(0,0,0,.3);position:absolute;bottom:2px}
         .bar-box.free{background:#e4e4ee;color:#aaa}
@@ -533,14 +533,18 @@ class WebServer {
           document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
         }
 
-        function setLinked(song,sec,occIdx,targetSec){
-          if(targetSec){
-            dirty[dkOf(song,sec,occIdx)]=buildLinkedPreview(song,targetSec,sec,occIdx);
-          } else {
-            const cur=loadState(song,sec,occIdx);
-            dirty[dkOf(song,sec,occIdx)]={...cur,linked:false,linkedTo:''};
-          }
-          document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
+        // "연결" 드롭다운은 지속되는 실시간 미러링이 아니라 일회성 복사 액션.
+        // 선택하는 그 순간 원본의 현재 내용을 스냅샷으로 떠와서 독립 데이터로 저장하고,
+        // 이후 원본이 바뀌어도 다시 선택하기 전까지는 저절로 따라가지 않음.
+        function copyFromSection(song,destSec,destOccIdx,srcSec,srcOccIdx){
+          const srcTotal=origSecOf(song,srcSec,srcOccIdx).totalBars||0;
+          const srcState=loadState(song,srcSec,srcOccIdx);
+          const rawSlides=rawSlidesFromState(srcState,srcTotal);
+          const destTotal=origSecOf(song,destSec,destOccIdx).totalBars||0;
+          const adapted=adaptRawSlides(rawSlides,destTotal);
+          const{splits,segData}=slidesFromRaw(adapted,0);
+          const cur=loadState(song,destSec,destOccIdx);
+          setState(song,destSec,destOccIdx,{...cur,splits,segData});
         }
 
         function updateLinkUI(song,sec,occIdx,linkedTo){
@@ -643,21 +647,27 @@ class WebServer {
           const linkSel=document.createElement('select');
           linkSel.className='link-select';
           linkSel.dataset.song=song;linkSel.dataset.sec=sec.sec;linkSel.dataset.sb=sec.occIdx;
-          const isCanonical=(sec.occIdx===0);
           const myBase=sec.sec.replace(/[0-9]+$/,'');
           const songSections=(DATA.find(s=>s.song===song)||{sections:[]}).sections;
-          // 같은 이름 반복 섹션 연결 옵션 (occIdx>0만)
-          const sameNameOpt=isCanonical?'':'<option value="'+sec.sec+'">'+sec.sec+' 자동 연결</option>';
-          // 숫자 제외 이름이 같은 다른 섹션 연결 옵션 (occIdx=0인 것들)
-          const crossOpts=songSections.filter(s=>s.occIdx===0&&s.sec!==sec.sec&&s.sec.replace(/[0-9]+$/,'')===myBase).map(s=>'<option value="'+s.sec+'">'+s.sec+' 자동 연결</option>').join('');
-          linkSel.innerHTML='<option value="independent">독립적으로 편집</option>'+sameNameOpt+crossOpts;
-          const currentLinkedTo=st.linkedTo||(st.linked?sec.sec:'');
-          linkSel.value=currentLinkedTo||'independent';
-          linkSel.disabled=(!sameNameOpt&&!crossOpts);
+          // 복사 가능한 대상: 이름이 같은 다른 등장(occIdx 무관) + 숫자 제외 이름이 같은 다른 섹션들의 모든 등장
+          const copyOpts=songSections
+            .filter(s=>!(s.sec===sec.sec&&s.occIdx===sec.occIdx)&&s.sec.replace(/[0-9]+$/,'')===myBase)
+            .map(s=>{
+              const label=(s.sec===sec.sec?'':s.sec+' ')+(s.occIdx+1)+'번째';
+              return '<option value="'+s.sec+'@@'+s.occIdx+'">'+label+' 복사</option>';
+            }).join('');
+          linkSel.innerHTML='<option value="independent">독립적으로 편집</option>'+copyOpts;
+          linkSel.value='independent';  // 드롭다운은 상태가 아니라 "복사" 액션 트리거 — 항상 대기 상태로 표시
+          linkSel.disabled=!copyOpts;
           linkSel.addEventListener('click',e=>e.stopPropagation());
           linkSel.addEventListener('change',()=>{
-            setLinked(song,sec.sec,sec.occIdx,linkSel.value==='independent'?'':linkSel.value);
+            const val=linkSel.value;
+            linkSel.value='independent';
+            if(val==='independent')return;
+            const ii=val.lastIndexOf('@@');
+            copyFromSection(song,sec.sec,sec.occIdx,val.slice(0,ii),parseInt(val.slice(ii+2)));
             refreshBlock(block,song,sec,gidx);
+            showMsg('복사했어요. 다시 선택하면 원본의 최신 내용으로 다시 복사돼요.');
           });
 
 
@@ -738,7 +748,7 @@ class WebServer {
                 const mkArrow=(txt,delta,side)=>{
                   const a=document.createElement('span');
                   a.textContent=txt;a.title='구분선 '+(delta<0?'왼쪽':'오른쪽')+'으로 이동 (가사 유지)';
-                  a.style.cssText='position:absolute;top:-16px;'+side+':-7px;font-size:11px;line-height:1;cursor:pointer;color:#5856d6;background:#fff;border:1px solid #ccd;border-radius:4px;padding:1px 3px;z-index:5;';
+                  a.style.cssText='position:absolute;top:-19px;'+side+':-16px;font-size:11px;line-height:1;cursor:pointer;color:#5856d6;background:#fff;border:1px solid #ccd;border-radius:4px;padding:2px 4px;z-index:5;';
                   a.addEventListener('click',e=>{e.stopPropagation();moveSplit(delta);});
                   return a;
                 };
@@ -998,17 +1008,22 @@ class WebServer {
               const inp=document.createElement('input');inp.className='inst-beat-inp';inp.type='text';
               inp.value=slot?slot.name:'';inp.placeholder='';
               inp.addEventListener('focus',()=>inp.select());
-              inp.addEventListener('input',()=>{inp.value=inp.value.replace(/[^A-Za-z0-9#♭/]/g,'');inp.value=normChord(inp.value);});
-              inp.addEventListener('change',()=>{
+              // change(blur 시점)에만 의존하면 일부 브라우저/모바일 환경에서 커밋이 안 되는
+              // 경우가 있어(간주 코드가 저장 안 되던 버그의 원인) input마다 바로 상태에 반영
+              const commitInstChord=()=>{
+                inp.value=inp.value.replace(/[^A-Za-z0-9#♭/]/g,'');
+                inp.value=normChord(inp.value);
                 const cur=loadState(song,sec.sec,sec.occIdx);const segData=[...cur.segData];
                 const curIC=getSegs(cur,total)[segIdx]?.segData.instChords||[];
                 const newIC=Array(sg.barCount).fill(null).map((_,bi)=>{
                   const arr=[...(curIC[bi]||[])];
-                  if(bi===b){const f=arr.filter(s=>s.pos!==beat);const v=normChord(inp.value);if(v)f.push({pos:beat,name:v});return f.sort((a,c)=>a.pos-c.pos);}
+                  if(bi===b){const f=arr.filter(s=>s.pos!==beat);const v=inp.value;if(v)f.push({pos:beat,name:v});return f.sort((a,c)=>a.pos-c.pos);}
                   return arr;
                 });
                 segData[segIdx]={...segData[segIdx],instChords:newIC};setState(song,sec.sec,sec.occIdx,{...cur,segData});
-              });
+              };
+              inp.addEventListener('input',commitInstChord);
+              inp.addEventListener('blur',commitInstChord);
               cell.appendChild(inp);row.appendChild(cell);
             }
             table.appendChild(row);
@@ -1243,10 +1258,16 @@ class WebServer {
     // MARK: - /save  (POST JSON)
 
     private func handleSave(_ conn: NWConnection, body: Data) {
+        // 임시 진단 로그: 간주 코드가 저장 안 되는 문제 추적용 (원인 확인 후 제거 예정)
+        if let raw = String(data: body, encoding: .utf8), raw.contains("instChords") {
+            debugLog("[SaveDebug] body=\(raw)")
+        }
         if let decoded = try? JSONDecoder().decode([String: [String: SectionData]].self, from: body) {
             saveLyrics?(decoded)
             onLyricsSaved?()
             broadcaster.send("event: lyrics-updated\ndata: {}\n\n")
+        } else {
+            debugLog("[SaveDebug] JSON 디코드 실패")
         }
         send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")
     }
