@@ -460,8 +460,9 @@ class StateEngine {
         // 진행률: MTC 기반 — 항상 실제 섹션 기준
         if sectionDurationSec > 0 {
             let elapsed = mtcIsPlaying ? (mtcTime - sectionEntryMTC) : 0
-            state.sectionProgress   = min(1, max(0, elapsed / sectionDurationSec))
-            state.sectionLengthBars = sectionDurationSec / (Double(currentBeatsPerBar()) * notatedBeatDuration())
+            state.sectionProgress    = min(1, max(0, elapsed / sectionDurationSec))
+            state.sectionLengthBars  = sectionDurationSec / (Double(currentBeatsPerBar()) * notatedBeatDuration())
+            state.sectionDurationSec = sectionDurationSec
         }
 
         // 카운트다운 — 스캔된 박 그리드(MTC) 도달 시점에 표시.

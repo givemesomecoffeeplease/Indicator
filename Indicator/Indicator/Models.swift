@@ -160,6 +160,7 @@ struct IndicatorState: Codable, Equatable {
     var timeSignature: String = "4/4"
     var key: String = ""
     var sectionLengthBars: Double = 0
+    var sectionDurationSec: Double = 0  // 섹션 실제 길이(초) — 뷰어 진행률 애니메이션이 박자표 무관하게 그대로 사용
     var lyricCue: String = ""
     var note: String = ""
     var singerNote: String = ""
