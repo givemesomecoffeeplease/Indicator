@@ -394,12 +394,13 @@
   let lastKnownState = null;
 
   // 슬라이드 전환 위치(섹션 시작 기준 초) 해석: startSec 없는(아직 안 찍은) 슬라이드는
-  // 앞뒤로 확정된 위치 사이를 균등 분할한 임시 위치 사용 — 편집 화면과 동일 규칙
+  // 앞뒤로 확정된 위치 사이를 균등 분할한 임시 위치 사용 — 편집 화면과 동일 규칙.
+  // 첫 슬라이드도 오프셋 가능(0=마커와 동시, 음수=마커보다 먼저) — 편집 화면 resolvePositions와 동일
   function resolveSlideSecs(slides, durationSec) {
     const n = slides.length;
     const out = new Array(n);
     if (n === 0) return out;
-    out[0] = 0;
+    out[0] = slides[0].startSec ?? 0;
     let i = 1;
     while (i < n) {
       const v = slides[i] ? slides[i].startSec : null;
