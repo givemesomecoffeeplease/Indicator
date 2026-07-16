@@ -339,22 +339,24 @@ class WebServer {
         #song-flex{display:flex;gap:18px;align-items:flex-start}
         /* 타임라인은 카드 스크롤과 분리 — sticky로 화면에 고정 + 자체 스크롤.
            곡이 길면 .tl-rail이 sticky 컨테이너보다 커지므로 내부에서만 스크롤됨 */
-        #song-tl{width:210px;flex-shrink:0;user-select:none;padding-left:56px;
+        #song-tl{width:264px;flex-shrink:0;user-select:none;padding-left:56px;
           position:sticky;top:12px;max-height:calc(100vh - 90px);overflow-y:auto;overflow-x:visible}
         #sections-list{flex:1;min-width:0;display:flex;flex-direction:column;gap:20px}
-        .tl-rail{position:relative;width:120px;border-radius:10px;background:#ececf4;overflow:visible}
-        .tl-slide{position:absolute;left:0;width:120px;border-radius:6px;display:flex;align-items:flex-start;justify-content:center;padding:5px 6px 0;font-size:11px;font-weight:700;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
+        .tl-rail{position:relative;width:168px;border-radius:10px;background:#ececf4;overflow:visible}
+        /* 상단 padding을 넉넉히 줘서 경계에 겹치는 시간 배지(.grip)와 텍스트가 겹치지 않게 하고,
+           줄바꿈 허용(word-break)으로 좌우 잘림 없이 여러 줄로 표시 */
+        .tl-slide{position:absolute;left:0;width:168px;border-radius:6px;display:flex;align-items:flex-start;justify-content:center;padding:15px 8px 4px;font-size:12px;font-weight:700;line-height:1.35;color:#fff;overflow:hidden;white-space:normal;word-break:keep-all;text-align:center;cursor:pointer}
         .tl-slide.playing-slide{outline:3px solid var(--orange);outline-offset:-3px}
-        .tl-handle{position:absolute;left:0;width:120px;height:20px;margin-top:-10px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;z-index:5;touch-action:none}
+        .tl-handle{position:absolute;left:0;width:168px;height:20px;margin-top:-10px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;z-index:5;touch-action:none}
         .tl-handle .grip{background:#fff;border:2px solid var(--purple);color:var(--purple);font-size:10px;font-weight:700;border-radius:10px;padding:1px 9px;box-shadow:0 1px 4px rgba(0,0,0,.18);white-space:nowrap;pointer-events:none}
         .tl-handle.guess .grip{opacity:.45;border-style:dashed}
         .tl-handle:hover .grip{background:#f3f1ff}
-        .tl-playhead{position:absolute;left:-8px;width:136px;height:0;border-top:2px solid var(--red);z-index:6;pointer-events:none;display:none}
+        .tl-playhead{position:absolute;left:-8px;width:184px;height:0;border-top:2px solid var(--red);z-index:6;pointer-events:none;display:none}
         .tl-playhead::after{content:'';position:absolute;left:-2px;top:-4px;width:6px;height:6px;border-radius:50%;background:var(--red)}
         /* 마커 트랙: Logic 마커 위치 눈금 + 섹션명 (움직일 수 없음 — Logic이 결정) */
-        .tl-marker{position:absolute;left:-56px;width:176px;height:0;border-top:1.5px dashed #a8a8bc;pointer-events:none}
+        .tl-marker{position:absolute;left:-56px;width:264px;height:0;border-top:1.5px dashed #a8a8bc;pointer-events:none}
         .tl-marker-lbl{position:absolute;left:-56px;width:50px;transform:translateY(2px);font-size:9px;font-weight:700;color:#77778a;text-align:left;line-height:1.2;pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .tl-marker-time{position:absolute;left:126px;transform:translateY(-50%);font-size:9px;color:#aaa;white-space:nowrap;pointer-events:none}
+        .tl-marker-time{position:absolute;left:174px;transform:translateY(-50%);font-size:9px;color:#aaa;white-space:nowrap;pointer-events:none}
         .cards-col{display:flex;flex-direction:column;gap:10px;min-width:0;padding:12px 18px 16px;border-top:1px solid var(--border)}
         .seg-time{font-size:11px;font-weight:700;color:var(--purple);white-space:nowrap}
         .seg-time.guess{color:#aaa;font-weight:600}
