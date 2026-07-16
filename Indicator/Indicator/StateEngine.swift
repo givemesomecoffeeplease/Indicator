@@ -236,10 +236,15 @@ class StateEngine {
 
     // MARK: - 카운트다운
 
-    // 섹션 진입 시 이 섹션 끝 기준 박 그리드 MTC를 미리 계산
+    // 섹션 진입 시 이 섹션 끝 기준 박 그리드 MTC를 미리 계산.
+    // 카운트다운은 "같은 곡 안에서 다음 섹션으로 전환"만 알려주는 기능 — 곡의 마지막
+    // 섹션(다음은 다른 곡)에서는 계산하지 않음. 안 그러면 sectionBounds가 다음 곡 마커까지
+    // 내다보며 잡은 먼 경계를 향해 카운트다운이 섹션 중간에 뜬금없이 나타나게 됨.
     private func initCountdown() {
         cdShown = 0
-        guard let bounds = sectionBounds(idx: currentSectionIdx) else { cdTargets = []; return }
+        let markers = markersInCurrentSong()
+        guard currentSectionIdx + 1 < markers.count,
+              let bounds = sectionBounds(idx: currentSectionIdx) else { cdTargets = []; return }
         cdTargets = ScheduleStore.shared.countdownBeatMTCs(
             sectionEndMTC: bounds.end, barsBack: countdownThresholdBars)
     }
@@ -302,8 +307,19 @@ class StateEngine {
         let markers = markersInCurrentSong()
         guard idx >= 0, idx < markers.count else { return nil }
         let start = markers[idx].mtcSeconds
-        let end   = idx + 1 < markers.count ? markers[idx + 1].mtcSeconds : start + 30.0
-        return (start, end)
+        if idx + 1 < markers.count {
+            return (start, markers[idx + 1].mtcSeconds)
+        }
+        // 곡의 마지막 섹션 — markersInCurrentSong()엔 다음 곡 마커가 안 들어있어서
+        // "다음이 없다"고 오판하면 안 됨. 전체 마커 목록에서 다음 곡의 시작 마커를 찾아
+        // 진짜 경계로 사용 (진행률·섹션 길이 정확도용). 그것도 없으면(진짜 세트리스트
+        // 마지막) 30초를 최후의 추정값으로만 사용.
+        if let lastMarker = markers.last,
+           let allIdx = snapshot.markers.firstIndex(of: lastMarker),
+           allIdx + 1 < snapshot.markers.count {
+            return (start, snapshot.markers[allIdx + 1].mtcSeconds)
+        }
+        return (start, start + 30.0)
     }
 
     // 4분음표 하나의 길이. MIDI Clock은 박자표와 무관하게 항상 4분음표당 24펄스이므로
