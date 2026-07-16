@@ -337,7 +337,10 @@ class WebServer {
            슬라이드 트랙(색 블록)과 마커 트랙(눈금)을 같은 시간축 위에 분리 표시 —
            슬라이드 경계는 마커와 무관하게 어디든 위치 가능 (섹션 첫 슬라이드 포함) */
         #song-flex{display:flex;gap:18px;align-items:flex-start}
-        #song-tl{width:210px;flex-shrink:0;user-select:none;padding-left:56px}
+        /* 타임라인은 카드 스크롤과 분리 — sticky로 화면에 고정 + 자체 스크롤.
+           곡이 길면 .tl-rail이 sticky 컨테이너보다 커지므로 내부에서만 스크롤됨 */
+        #song-tl{width:210px;flex-shrink:0;user-select:none;padding-left:56px;
+          position:sticky;top:12px;max-height:calc(100vh - 90px);overflow-y:auto;overflow-x:visible}
         #sections-list{flex:1;min-width:0;display:flex;flex-direction:column;gap:20px}
         .tl-rail{position:relative;width:120px;border-radius:10px;background:#ececf4;overflow:visible}
         .tl-slide{position:absolute;left:0;width:120px;border-radius:6px;display:flex;align-items:flex-start;justify-content:center;padding:5px 6px 0;font-size:11px;font-weight:700;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
@@ -1406,6 +1409,12 @@ class WebServer {
           const t=Math.min(liveAbsSec(info)??0,effDur);
           ph.style.display='block';
           ph.style.top=(t/effDur*rail.clientHeight)+'px';
+          // 따라가기 켜짐 + 재생 중: 타임라인 자체 스크롤을 재생헤드가 항상 보이게 유지
+          // (카드 쪽 자동 스크롤과 별개 — 타임라인은 sticky라 카드를 내려도 화면에 남아있음)
+          if($('follow-chk').checked&&lastState.isPlaying){
+            const container=$('song-tl');
+            container.scrollTop=Math.max(0,ph.offsetTop-container.clientHeight/2);
+          }
           let gi=0;for(let g=0;g<list.length;g++){if(list[g].abs<=t)gi=g;}
           const it=list[gi];
           const tlBlock=rail.querySelector('.tl-slide[data-g="'+gi+'"]');
