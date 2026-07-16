@@ -890,7 +890,7 @@ class WebServer {
             time.textContent=isGuess?'~'+fmtSec(pos[segIdx].sec)+' (임시)':'전환 '+fmtSec(pos[segIdx].sec);
           }
           const typeBtn=document.createElement('button');typeBtn.className='btn btn-sm btn-ghost';
-          typeBtn.textContent=sd.isInstrumental?'🎵 코드만':'🎤 가사';
+          typeBtn.textContent=sd.isInstrumental?'코드만':'가사';
           typeBtn.addEventListener('click',()=>{
             setSlideField(song,sec.sec,sec.occIdx,segIdx,'isInstrumental',!sd.isInstrumental);
             const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
@@ -1100,7 +1100,7 @@ class WebServer {
           const subdivided=(bUnit===4);  // 분모 4 계열만 박 안에 정박/엇박 구분이 있음
           const hintRow=document.createElement('div');hintRow.style.cssText='display:flex;align-items:center;gap:10px;margin-bottom:10px';
           const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--sub)';
-          hint.textContent='8분음표 해상도 코드 입력 (s=♯, b=♭) · '+barCount+'마디 · '+bpb+'/'+bUnit;
+          hint.textContent='8분음표 그리드 (s=♯, b=♭) · '+barCount+'마디 · '+bpb+'/'+bUnit;
           const setBars=n=>{
             const cur=loadState(song,sec.sec,sec.occIdx);
             const curIC=cur.segData[segIdx]?.instChords||[];
