@@ -121,11 +121,14 @@ class ScheduleStore {
         // 박자표는 섹션 끝 직전 기준 (끝 경계에 다음 섹션 변박이 걸려있을 수 있음)
         guard barsBack > 0, let ts = beatsPerBarAt(mtcSeconds: sectionEndMTC - 0.01) else { return [] }
         let totalBeats = barsBack * ts.beatsPerBar
+        // BPM은 항상 4분음표 기준이므로 분모(beatUnit)가 4가 아니면 표기된 박 길이로 환산
+        // (분모 8이면 한 박은 4분음표의 절반) — 4/4·3/4 등 분모 4인 경우는 계수 1로 기존과 동일
+        let unitScale = 4.0 / Double(max(1, ts.beatUnit))
         var t = sectionEndMTC
         var result: [(beat: Int, mtc: Double)] = []
         for i in 1...totalBeats {
             let bpm = bpmAt(mtcSeconds: t - 0.01) ?? 120
-            t -= 60.0 / bpm
+            t -= 60.0 / bpm * unitScale
             result.append((beat: i, mtc: t))
         }
         return result.reversed()  // MTC 오름차순 (beat 큰 수부터)

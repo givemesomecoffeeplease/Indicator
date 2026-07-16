@@ -97,7 +97,7 @@ class StateEngine {
         } else if anchorBar > 0 {
             // 폴백: 앵커로 추산
             let barDiff = Double(snapshot.transportBar - anchorBar)
-            let estimatedMTC = anchorMTC + barDiff * Double(currentSectionBeatsPerBar) * beatDuration()
+            let estimatedMTC = anchorMTC + barDiff * Double(currentSectionBeatsPerBar) * notatedBeatDuration()
             detectedIdx = detectSectionIdx(at: estimatedMTC)
         } else {
             detectedIdx = -1
@@ -153,7 +153,7 @@ class StateEngine {
             }
         }
 
-        if nextChordMTC > 0 && mtcTime >= nextChordMTC - beatDuration() * 0.5 && !chordPending {
+        if nextChordMTC > 0 && mtcTime >= nextChordMTC - notatedBeatDuration() * 0.5 && !chordPending {
             chordPending = true
         }
 
@@ -306,9 +306,18 @@ class StateEngine {
         return (start, end)
     }
 
+    // 4분음표 하나의 길이. MIDI Clock은 박자표와 무관하게 항상 4분음표당 24펄스이므로
+    // 이 값 자체는 분모(beatUnit)에 영향받지 않음 — 스케일링은 notatedBeatDuration()에서 처리.
     private func beatDuration() -> Double {
         // MIDI Clock 실측값 우선, 없으면 AX BPM 사용
         measuredBeatDuration > 0 ? measuredBeatDuration : 60.0 / max(1, snapshot.bpm)
+    }
+
+    // 박자표에 "표기된" 박 하나의 실제 길이. 분모가 4(3/4, 5/4 등)면 4분음표 길이와 같지만,
+    // 분모가 8(6/8, 9/8, 12/8 등)이면 그 절반 — Logic BPM은 항상 4분음표 기준이므로
+    // 분모가 4가 아닌 겹박자에서는 4/beatUnit 배율로 환산해야 마디·박 길이가 실제와 맞음.
+    private func notatedBeatDuration() -> Double {
+        beatDuration() * 4.0 / Double(max(1, currentBeatUnit()))
     }
 
     private func beatsPerBarAt(bar: Int) -> Int {
@@ -325,6 +334,13 @@ class StateEngine {
         return currentSectionBeatsPerBar
     }
 
+    private func currentBeatUnit() -> Int {
+        if let ts = ScheduleStore.shared.beatsPerBarAt(mtcSeconds: mtcTime) {
+            return ts.beatUnit
+        }
+        return currentSectionBeatUnit
+    }
+
     // MARK: - 코드 beat-snap
 
     private func chordsInCurrentSection() -> [ChordEvent] {
@@ -335,7 +351,7 @@ class StateEngine {
         guard let bounds = sectionBounds(idx: idx) else { return [] }
         // 코드는 bar/beat 기반이라 MTC로 직접 필터링 불가 — 섹션 시작 기준 상대 위치로 추정
         let bpb = Double(currentBeatsPerBar())
-        let bd  = beatDuration()
+        let bd  = notatedBeatDuration()
         return snapshot.chords.filter { ch in
             let chordMTC = bounds.start + (Double(ch.bar - 1) + Double(ch.beat - 1) / bpb) * bpb * bd
             return chordMTC >= bounds.start && chordMTC < bounds.end
@@ -344,7 +360,7 @@ class StateEngine {
 
     private func chordMTCTime(_ ch: ChordEvent) -> Double {
         let bpb = Double(currentBeatsPerBar())
-        let bd  = beatDuration()
+        let bd  = notatedBeatDuration()
         return sectionEntryMTC + (Double(ch.bar - 1) + Double(ch.beat - 1) / bpb) * bpb * bd
     }
 
@@ -367,7 +383,7 @@ class StateEngine {
         let elapsed = mtcTime - sectionEntryMTC
         guard elapsed >= 0 else { return 0 }
         let bpb = Double(currentBeatsPerBar())
-        let bd  = beatDuration()
+        let bd  = notatedBeatDuration()
         return elapsed / (bpb * bd)
     }
 
@@ -445,7 +461,7 @@ class StateEngine {
         if sectionDurationSec > 0 {
             let elapsed = mtcIsPlaying ? (mtcTime - sectionEntryMTC) : 0
             state.sectionProgress   = min(1, max(0, elapsed / sectionDurationSec))
-            state.sectionLengthBars = sectionDurationSec / (Double(currentBeatsPerBar()) * beatDuration())
+            state.sectionLengthBars = sectionDurationSec / (Double(currentBeatsPerBar()) * notatedBeatDuration())
         }
 
         // 카운트다운 — 스캔된 박 그리드(MTC) 도달 시점에 표시.
