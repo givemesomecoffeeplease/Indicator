@@ -232,24 +232,28 @@ class WebServer {
                 }
             }
             if !slides.isEmpty {
-                slides[0].startSec = 0
+                // 첫 슬라이드 오프셋: 미기록이면 0(마커와 동시). 음수 = 마커보다 먼저 전환.
+                if slides[0].startSec == nil { slides[0].startSec = 0 }
                 if slides[0].sessionNote.isEmpty { slides[0].sessionNote = secSessionNote }
                 if slides[0].singerNote.isEmpty  { slides[0].singerNote  = secSingerNote }
             }
             return slides
         }
 
-        // Build songs data (with slides + totalBars + durationSec)
+        // Build songs data (with slides + totalBars + durationSec + startInSong)
         struct SecInfo {
-            var sec: String; var occIdx: Int; var totalBars: Int; var storedBars: Int; var durationSec: Double
+            var sec: String; var occIdx: Int; var totalBars: Int; var storedBars: Int
+            var durationSec: Double; var startInSong: Double
             var slidesJson: String; var sessionNote: String; var singerNote: String; var linked: Bool
         }
         var songs: [(name: String, sections: [SecInfo])] = []
         var curSong = ""
+        var curSongStartMTC: Double = 0
         var occCount: [String: Int] = [:]  // "song|||sec" -> 다음 occurrence 인덱스
         for (i, m) in markers.enumerated() {
             if m.isSong {
                 curSong = m.displayName
+                curSongStartMTC = m.mtcSeconds
                 songs.append((name: curSong, sections: []))
                 occCount = [:]
             } else if !curSong.isEmpty {
@@ -259,6 +263,7 @@ class WebServer {
                 let nextMTC = (i + 1 < markers.count) ? markers[i + 1].mtcSeconds : m.mtcSeconds
                 let totalBars = ScheduleStore.shared.barsBetween(startMTC: m.mtcSeconds, endMTC: nextMTC) ?? -1
                 let durationSec = max(0, nextMTC - m.mtcSeconds)
+                let startInSong = max(0, m.mtcSeconds - curSongStartMTC)
                 let (d, linked) = getLyricOcc?(curSong, m.displayName, occIdx) ?? (SectionData(), false)
                 let migrated = migrateSlides(d.slides, totalBars: d.totalBars > 0 ? d.totalBars : totalBars,
                                              durationSec: durationSec,
@@ -266,7 +271,7 @@ class WebServer {
                 let slidesJson = encodeJSON(migrated)
                 songs[songs.count - 1].sections.append(
                     SecInfo(sec: m.displayName, occIdx: occIdx, totalBars: totalBars, storedBars: d.totalBars,
-                            durationSec: durationSec,
+                            durationSec: durationSec, startInSong: startInSong,
                             slidesJson: slidesJson, sessionNote: d.sessionNote, singerNote: d.singerNote, linked: linked)
                 )
             }
@@ -275,7 +280,7 @@ class WebServer {
         // Embed as JSON
         let songsJson = "[" + songs.map { song in
             let secs = "[" + song.sections.map { sec in
-                "{\"sec\":\"\(j(sec.sec))\",\"occIdx\":\(sec.occIdx),\"totalBars\":\(sec.totalBars),\"storedBars\":\(sec.storedBars),\"durationSec\":\(String(format: "%.3f", sec.durationSec)),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
+                "{\"sec\":\"\(j(sec.sec))\",\"occIdx\":\(sec.occIdx),\"totalBars\":\(sec.totalBars),\"storedBars\":\(sec.storedBars),\"durationSec\":\(String(format: "%.3f", sec.durationSec)),\"startInSong\":\(String(format: "%.3f", sec.startInSong)),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
             }.joined(separator: ",") + "]"
             return "{\"song\":\"\(j(song.name))\",\"sections\":\(secs)}"
         }.joined(separator: ",") + "]"
@@ -328,9 +333,12 @@ class WebServer {
         .note-pair{display:flex;gap:6px}
         .note-inp-sm{border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;outline:none;width:130px}
         .note-inp-sm:focus{border-color:var(--accent)}
-        /* ── 세로 타임라인 (MTC 시간 기반 전환 찍기/조절) ── */
-        .sec-body{display:flex;gap:16px;padding:12px 18px 16px;border-top:1px solid var(--border)}
-        .tl-col{width:170px;flex-shrink:0;user-select:none}
+        /* ── 곡 단위 연속 타임라인 (MTC 시간 기반 전환 찍기/조절) ──
+           슬라이드 트랙(색 블록)과 마커 트랙(눈금)을 같은 시간축 위에 분리 표시 —
+           슬라이드 경계는 마커와 무관하게 어디든 위치 가능 (섹션 첫 슬라이드 포함) */
+        #song-flex{display:flex;gap:18px;align-items:flex-start}
+        #song-tl{width:210px;flex-shrink:0;user-select:none;padding-left:56px}
+        #sections-list{flex:1;min-width:0;display:flex;flex-direction:column;gap:20px}
         .tl-rail{position:relative;width:120px;border-radius:10px;background:#ececf4;overflow:visible}
         .tl-slide{position:absolute;left:0;width:120px;border-radius:6px;display:flex;align-items:flex-start;justify-content:center;padding:5px 6px 0;font-size:11px;font-weight:700;color:#fff;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
         .tl-slide.playing-slide{outline:3px solid var(--orange);outline-offset:-3px}
@@ -338,10 +346,13 @@ class WebServer {
         .tl-handle .grip{background:#fff;border:2px solid var(--purple);color:var(--purple);font-size:10px;font-weight:700;border-radius:10px;padding:1px 9px;box-shadow:0 1px 4px rgba(0,0,0,.18);white-space:nowrap;pointer-events:none}
         .tl-handle.guess .grip{opacity:.45;border-style:dashed}
         .tl-handle:hover .grip{background:#f3f1ff}
-        .tl-playhead{position:absolute;left:-6px;width:132px;height:0;border-top:2px solid var(--red);z-index:6;pointer-events:none;display:none}
+        .tl-playhead{position:absolute;left:-8px;width:136px;height:0;border-top:2px solid var(--red);z-index:6;pointer-events:none;display:none}
         .tl-playhead::after{content:'';position:absolute;left:-2px;top:-4px;width:6px;height:6px;border-radius:50%;background:var(--red)}
-        .tl-endtime{position:absolute;left:126px;transform:translateY(-50%);font-size:9px;color:#999;white-space:nowrap}
-        .cards-col{flex:1;display:flex;flex-direction:column;gap:10px;min-width:0}
+        /* 마커 트랙: Logic 마커 위치 눈금 + 섹션명 (움직일 수 없음 — Logic이 결정) */
+        .tl-marker{position:absolute;left:-56px;width:176px;height:0;border-top:1.5px dashed #a8a8bc;pointer-events:none}
+        .tl-marker-lbl{position:absolute;left:-56px;width:50px;transform:translateY(2px);font-size:9px;font-weight:700;color:#77778a;text-align:left;line-height:1.2;pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .tl-marker-time{position:absolute;left:126px;transform:translateY(-50%);font-size:9px;color:#aaa;white-space:nowrap;pointer-events:none}
+        .cards-col{display:flex;flex-direction:column;gap:10px;min-width:0;padding:12px 18px 16px;border-top:1px solid var(--border)}
         .seg-time{font-size:11px;font-weight:700;color:var(--purple);white-space:nowrap}
         .seg-time.guess{color:#aaa;font-weight:600}
         .seg-card.playing-slide{border-color:var(--orange);box-shadow:0 0 0 2px rgba(255,149,0,.25)}
@@ -389,7 +400,7 @@ class WebServer {
         <body>
         <div id="hdr">
           <h1>가사 편집</h1>
-          <button id="tap-btn" class="btn" title="재생 중 이 순간을 슬라이드 전환 시점으로 기록 (스페이스바)">전환 찍기 ␣</button>
+          <button id="tap-btn" class="btn" title="재생 중 이 순간을 슬라이드가 넘어가는 시점으로 기록 (Enter)">여기서 넘김 ⏎</button>
           <label id="follow-wrap"><input type="checkbox" id="follow-chk">재생 따라가기</label>
           <span id="now-playing"></span>
           <span id="save-msg"></span>
@@ -405,7 +416,10 @@ class WebServer {
             <div id="empty">← 곡을 선택하세요</div>
             <div id="song-view">
               <div id="song-title"></div>
-              <div id="sections-list"></div>
+              <div id="song-flex">
+                <div id="song-tl"></div>
+                <div id="sections-list"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -481,11 +495,12 @@ class WebServer {
         }
 
         // 슬라이드 전환 위치 해석: segData[i].startSec = 섹션 마커 시작 기준 오프셋(초).
+        // 첫 슬라이드도 오프셋 가능 (0=마커와 동시, 음수=마커보다 먼저).
         // null(아직 안 찍음)은 앞뒤 확정 위치 사이를 균등 분할한 임시값(guess) — 뷰어와 동일 규칙
         function resolvePositions(segData,dur){
           const n=segData.length;const out=new Array(n);
           if(n===0)return out;
-          out[0]={sec:0,guess:false};
+          out[0]={sec:segData[0].startSec??0,guess:false};
           let i=1;
           while(i<n){
             const v=segData[i].startSec;
@@ -516,12 +531,12 @@ class WebServer {
             sessionNote:sl.sessionNote||'',
             singerNote:sl.singerNote||''
           })):[{...emptySlide(),startSec:0}];
-          segData[0].startSec=0;
+          if(segData[0].startSec==null)segData[0].startSec=0;
           return{segData};
         }
 
         function setState(song,sec,occIdx,st){
-          if(st.segData&&st.segData.length)st.segData[0].startSec=0;
+          if(st.segData&&st.segData.length&&st.segData[0].startSec==null)st.segData[0].startSec=0;
           dirty[dkOf(song,sec,occIdx)]=st;
           document.querySelectorAll('.sb-song').forEach(el=>{if(el.dataset.song===song)el.classList.add('dirty');});
         }
@@ -616,6 +631,7 @@ class WebServer {
             if(!secUI[ukey])secUI[ukey]={open:STANDALONE};
             list.appendChild(createSecBlock(song,sec,secIdx));
           });
+          renderSongTimeline(song);
         }
 
         function createSecBlock(song,sec,gidx){
@@ -671,18 +687,14 @@ class WebServer {
           block.appendChild(hdr);
 
           if(ui.open){
-            const body=document.createElement('div');body.className='sec-body';
-            const tlCol=document.createElement('div');tlCol.className='tl-col';
-            renderTimeline(tlCol,song,sec,gidx);
             const cards=document.createElement('div');cards.className='cards-col';
             renderCards(cards,song,sec,gidx);
-            body.appendChild(tlCol);body.appendChild(cards);
-            block.appendChild(body);
+            block.appendChild(cards);
           }
           return block;
         }
 
-        function refreshBlock(block,song,sec,gidx){block.replaceWith(createSecBlock(song,sec,gidx));}
+        function refreshBlock(block,song,sec,gidx){block.replaceWith(createSecBlock(song,sec,gidx));renderSongTimeline(song);}
         function getBlock(ukey){return document.querySelector('.sec-block[data-ukey="'+ukey+'"]');}
 
         function firstLineOf(tokens){
@@ -691,73 +703,116 @@ class WebServer {
           return s||'(빈 슬라이드)';
         }
 
-        function tlHeight(dur){return Math.max(180,Math.min(620,Math.round(dur*4)));}
+        // ── 곡 전체 슬라이드 목록 (곡 내 절대 위치로 펼침) ──
+        // 각 항목: {secIdx, sec(섹션 데이터), si(섹션 내 슬라이드 인덱스), abs(곡 내 초), guess, sd}
+        function songSlideList(song){
+          const songData=DATA.find(s=>s.song===song);
+          if(!songData)return[];
+          const list=[];
+          songData.sections.forEach((sec,secIdx)=>{
+            const st=loadState(song,sec.sec,sec.occIdx);
+            const pos=resolvePositions(st.segData,sec.durationSec||0);
+            st.segData.forEach((sd,si)=>{
+              list.push({secIdx,sec,si,abs:(sec.startInSong||0)+pos[si].sec,guess:pos[si].guess,sd});
+            });
+          });
+          list.sort((a,b)=>a.abs-b.abs||a.secIdx-b.secIdx||a.si-b.si);
+          return list;
+        }
+        function songDuration(song){
+          const s=DATA.find(d=>d.song===song);
+          if(!s||!s.sections.length)return 0;
+          const last=s.sections[s.sections.length-1];
+          return(last.startInSong||0)+(last.durationSec||0);
+        }
+        function tlHeight(dur){return Math.max(240,Math.round(dur*4));}
 
-        // 세로 타임라인: 슬라이드 = 시간 비례 높이 블록, 경계 = 드래그 가능한 전환 아이콘,
-        // 재생 중엔 재생헤드 라인 표시 (tickPlayhead가 갱신)
-        function renderTimeline(container,song,sec,gidx){
+        function fmtOffset(o){
+          const r=Math.round(o*10)/10;
+          if(Math.abs(r)<0.05)return'마커와 동시';
+          return(r>0?'+':'−')+Math.abs(r).toFixed(1)+'초';
+        }
+
+        // 곡 단위 연속 타임라인: 마커 트랙(눈금·움직일 수 없음)과 슬라이드 트랙(색 블록)을
+        // 같은 시간축 위에 분리 표시. 모든 경계(섹션 첫 슬라이드 포함)가 드래그·찍기 대상.
+        function renderSongTimeline(song){
+          const container=$('song-tl');
+          if(!container||curSong!==song)return;
           container.innerHTML='';
-          const ukey=ukOf(song,sec.sec,gidx);
-          const st=loadState(song,sec.sec,sec.occIdx);
-          const dur=sec.durationSec||0;
-          const n=st.segData.length;
-          const pos=resolvePositions(st.segData,dur);
-          const effDur=dur>0?dur:((pos[n-1]?pos[n-1].sec:0)+8);
+          const list=songSlideList(song);
+          const songDur=songDuration(song);
+          if(!list.length)return;
+          const effDur=songDur>0?songDur:(list[list.length-1].abs+8);
           const H=tlHeight(effDur);
           const rail=document.createElement('div');rail.className='tl-rail';rail.style.height=H+'px';
           const yOf=s=>Math.max(0,Math.min(H,s/effDur*H));
-          for(let i=0;i<n;i++){
-            const top=yOf(pos[i].sec);
-            const bottom=i+1<n?yOf(pos[i+1].sec):H;
-            const el=document.createElement('div');el.className='tl-slide';el.dataset.si=String(i);
+          // 마커 트랙 (Logic 마커 = 섹션 경계 눈금)
+          const songData=DATA.find(s=>s.song===song);
+          songData.sections.forEach(sec=>{
+            const y=yOf(sec.startInSong||0);
+            const mk=document.createElement('div');mk.className='tl-marker';mk.style.top=y+'px';rail.appendChild(mk);
+            const lbl=document.createElement('div');lbl.className='tl-marker-lbl';lbl.style.top=y+'px';
+            lbl.textContent=sec.sec;lbl.title=sec.sec+' 마커 · '+fmtSec(sec.startInSong||0);
+            rail.appendChild(lbl);
+            const tm=document.createElement('div');tm.className='tl-marker-time';tm.style.top=y+'px';
+            tm.textContent=fmtSec(sec.startInSong||0);rail.appendChild(tm);
+          });
+          // 슬라이드 트랙
+          for(let g=0;g<list.length;g++){
+            const it=list[g];
+            const top=yOf(it.abs);
+            const bottom=g+1<list.length?yOf(list[g+1].abs):H;
+            const el=document.createElement('div');el.className='tl-slide';el.dataset.g=String(g);
+            el.dataset.secIdx=String(it.secIdx);el.dataset.si=String(it.si);
             el.style.top=top+'px';el.style.height=Math.max(14,bottom-top)+'px';
-            el.style.background=COLORS[i%COLORS.length];
-            el.textContent=(i+1)+'. '+(st.segData[i].isInstrumental?'간주':firstLineOf(st.segData[i].tokens));
-            el.title='클릭하면 오른쪽 카드로 이동';
+            el.style.background=COLORS[it.si%COLORS.length];
+            el.textContent=(it.si+1)+'. '+(it.sd.isInstrumental?'간주':firstLineOf(it.sd.tokens));
+            el.title=it.sec.sec+' · 슬라이드 '+(it.si+1)+' — 클릭하면 오른쪽 카드로 이동';
             el.addEventListener('click',()=>{
-              const card=getBlock(ukey)?.querySelector('.seg-card[data-si="'+i+'"]');
+              const card=getBlock(ukOf(song,it.sec.sec,it.secIdx))?.querySelector('.seg-card[data-si="'+it.si+'"]');
               if(card)card.scrollIntoView({behavior:'smooth',block:'center'});
             });
             rail.appendChild(el);
           }
-          for(let i=1;i<n;i++){
+          // 경계 핸들 (곡의 맨 첫 슬라이드 제외 전부 — 섹션 첫 슬라이드도 마커 대비 ± 조절 가능)
+          for(let g=1;g<list.length;g++){
+            const it=list[g];
             const h=document.createElement('div');
-            h.className='tl-handle'+(pos[i].guess?' guess':'');
-            h.style.top=yOf(pos[i].sec)+'px';
-            h.title=pos[i].guess?'임시 위치 — 드래그하거나 재생 중 찍어서 확정':'드래그로 전환 시점 조절 (위=일찍, 아래=늦게)';
+            h.className='tl-handle'+(it.guess?' guess':'');
+            h.style.top=yOf(it.abs)+'px';
+            h.title=(it.si===0?it.sec.sec+' 첫 슬라이드 (마커 대비 '+fmtOffset(it.abs-(it.sec.startInSong||0))+') — ':'')+(it.guess?'임시 위치 — 드래그하거나 재생 중 찍어서 확정':'드래그로 전환 시점 조절 (위=일찍, 아래=늦게)');
             const grip=document.createElement('span');grip.className='grip';
-            grip.textContent=(pos[i].guess?'~':'')+fmtSec(pos[i].sec);
+            grip.textContent=(it.guess?'~':'')+fmtSec(it.abs);
             h.appendChild(grip);
-            attachHandleDrag(h,rail,song,sec,gidx,i,effDur,H);
+            attachHandleDrag(h,rail,song,g,effDur,H);
             rail.appendChild(h);
           }
           const ph=document.createElement('div');ph.className='tl-playhead';rail.appendChild(ph);
-          const end=document.createElement('div');end.className='tl-endtime';end.style.top=H+'px';end.textContent=fmtSec(effDur);
-          rail.appendChild(end);
           container.appendChild(rail);
         }
 
-        // 전환 아이콘 드래그: 위=일찍, 아래=늦게. 이웃 경계를 넘지 못함.
+        // 전환 아이콘 드래그: 위=일찍, 아래=늦게. 이웃 경계를 넘지 못함 (슬라이드 순서 고정).
+        // 섹션 첫 슬라이드 핸들은 마커를 넘어 이전 섹션 구간까지 끌 수 있음 (음수 오프셋).
         // 드래그 중엔 스타일만 직접 갱신(재렌더 시 포인터 캡처가 끊기므로), 놓을 때 상태 확정.
-        function attachHandleDrag(h,rail,song,sec,gidx,i,effDur,H){
+        function attachHandleDrag(h,rail,song,g,effDur,H){
           h.addEventListener('pointerdown',e=>{
             e.preventDefault();e.stopPropagation();
             h.setPointerCapture(e.pointerId);
             const railTop=rail.getBoundingClientRect().top;
-            const st0=loadState(song,sec.sec,sec.occIdx);
-            const pos0=resolvePositions(st0.segData,effDur);
-            const lo=pos0[i-1].sec+0.15;
-            const hi=(i+1<st0.segData.length?pos0[i+1].sec:effDur)-0.15;
+            const list0=songSlideList(song);
+            const it=list0[g];
+            const lo=list0[g-1].abs+0.15;
+            const hi=(g+1<list0.length?list0[g+1].abs:effDur)-0.15;
             const blocks=rail.querySelectorAll('.tl-slide');
             const grip=h.querySelector('.grip');
-            let cur=pos0[i].sec;
+            let cur=it.abs;
             const apply=t=>{
               cur=t;
               const y=t/effDur*H;
               h.style.top=y+'px';
               h.classList.remove('guess');
               if(grip)grip.textContent=fmtSec(t);
-              const prev=blocks[i-1],me=blocks[i];
+              const prev=blocks[g-1],me=blocks[g];
               if(prev)prev.style.height=Math.max(14,y-parseFloat(prev.style.top))+'px';
               if(me){const meBottom=parseFloat(me.style.top)+parseFloat(me.style.height);me.style.top=y+'px';me.style.height=Math.max(14,meBottom-y)+'px';}
             };
@@ -769,12 +824,13 @@ class WebServer {
             const up=()=>{
               h.removeEventListener('pointermove',move);
               h.removeEventListener('pointerup',up);
-              const st=loadState(song,sec.sec,sec.occIdx);
+              const st=loadState(song,it.sec.sec,it.sec.occIdx);
               const segData=st.segData.map(s=>({...s}));
-              segData[i].startSec=cur;
-              setState(song,sec.sec,sec.occIdx,{segData});
-              const bl=getBlock(ukOf(song,sec.sec,gidx));
-              if(bl)refreshBlock(bl,song,sec,gidx);
+              segData[it.si].startSec=Math.round((cur-(it.sec.startInSong||0))*100)/100;
+              setState(song,it.sec.sec,it.sec.occIdx,{segData});
+              const bl=getBlock(ukOf(song,it.sec.sec,it.secIdx));
+              if(bl)refreshBlock(bl,song,it.sec,it.secIdx);
+              else renderSongTimeline(song);
             };
             h.addEventListener('pointermove',move);
             h.addEventListener('pointerup',up);
@@ -1278,16 +1334,17 @@ class WebServer {
         document.addEventListener('dragover',e=>{e.preventDefault();});
         document.addEventListener('drop',e=>{e.preventDefault();});
 
-        // ── 실시간 연동: 재생 위치 표시 / 재생 따라가기 / 전환 찍기 ──
+        // ── 실시간 연동: 재생 위치 표시 / 재생 따라가기 / 넘김 지점 기록 ──
+        // 곡 내 절대 위치(초) 기준으로 통일 — 섹션 경계(마커)와 무관하게 연속 진행
         let lastState=null,lastStateAt=0;
-        let tapCtx={song:null,secIdx:-1,cursor:1,prevElapsed:0};
+        let tapCtx={song:null,cursor:1,prevAbs:0};
 
-        // SSE 상태 + 수신 후 경과 시간으로 현재 재생 위치(섹션 경과 초)를 보간
-        function liveElapsed(){
-          if(!lastState)return null;
+        // SSE 상태 + 수신 후 경과 시간으로 현재 재생 위치를 보간, 곡 내 절대 초로 환산
+        function liveAbsSec(info){
+          if(!lastState||!info)return null;
           const e=lastState.sectionElapsedSec??0;
-          if(!lastState.isPlaying)return e;
-          return e+(Date.now()-lastStateAt)/1000;
+          const elapsed=lastState.isPlaying?e+(Date.now()-lastStateAt)/1000:e;
+          return(info.sec.startInSong||0)+elapsed;
         }
         function playingSecInfo(){
           if(!lastState)return null;
@@ -1299,24 +1356,26 @@ class WebServer {
           if(!sec)return null;
           return{song,secIdx,sec};
         }
-        // 다음에 찍을 경계 = 이미 확정된(찍힌) 경계 중 현재 위치보다 앞에 있는 것들 다음.
-        // 섹션 진입·뒤로 점프 때마다 다시 계산 → 곡을 처음부터 다시 들으면 1번 경계부터 다시 찍힘.
-        function computeTapCursor(info,elapsed){
-          const st=loadState(info.song,info.sec.sec,info.sec.occIdx);
+        // 다음에 찍을 경계(곡 전체 슬라이드 목록 인덱스 g) = 이미 확정된 경계 중 현재 위치보다
+        // 앞에 있는 것들 다음. 곡 전환·뒤로 점프 때마다 재계산 → 처음부터 다시 들으면 1번부터 재기록.
+        function computeTapCursor(song,absSec){
+          const list=songSlideList(song);
           let cnt=0;
-          for(let i=1;i<st.segData.length;i++){
-            if(st.segData[i].startSec!=null&&st.segData[i].startSec<=elapsed)cnt=i;
+          for(let g=1;g<list.length;g++){
+            const it=list[g];
+            const st=loadState(song,it.sec.sec,it.sec.occIdx);
+            if(st.segData[it.si].startSec!=null&&it.abs<=absSec)cnt=g;
           }
           return cnt+1;
         }
         function onStateMsg(s){
           lastState=s;lastStateAt=Date.now();
           const info=playingSecInfo();
-          const elapsed=s.sectionElapsedSec??0;
+          const absSec=info?liveAbsSec(info):null;
           if(info){
-            if(info.song!==tapCtx.song||info.secIdx!==tapCtx.secIdx||elapsed<tapCtx.prevElapsed-1.5){
-              tapCtx={song:info.song,secIdx:info.secIdx,cursor:computeTapCursor(info,elapsed),prevElapsed:elapsed};
-            }else tapCtx.prevElapsed=elapsed;
+            if(info.song!==tapCtx.song||absSec<tapCtx.prevAbs-1.5){
+              tapCtx={song:info.song,cursor:computeTapCursor(info.song,absSec),prevAbs:absSec};
+            }else tapCtx.prevAbs=absSec;
           }
           $('now-playing').textContent=info?('▶ '+info.song+' · '+info.sec.sec+(s.isPlaying?'':' (정지)')):'';
           // 따라가기: 다른 곡 재생 시 자동 곡 전환
@@ -1331,62 +1390,64 @@ class WebServer {
             }
           }
         }
-        // 재생헤드 라인 + 현재 표시 중 슬라이드 하이라이트 (매 프레임 보간)
+        // 재생헤드 라인 + 현재 표시 중 슬라이드 하이라이트 (매 프레임 보간, 곡 타임라인 기준)
         function tickPlayhead(){
           requestAnimationFrame(tickPlayhead);
           const info=playingSecInfo();
-          document.querySelectorAll('.tl-playhead').forEach(el=>el.style.display='none');
+          const rail=document.querySelector('#song-tl .tl-rail');
+          const ph=rail?rail.querySelector('.tl-playhead'):null;
           document.querySelectorAll('.tl-slide.playing-slide,.seg-card.playing-slide').forEach(el=>el.classList.remove('playing-slide'));
-          if(!info||curSong!==info.song)return;
-          const bl=getBlock(ukOf(info.song,info.sec.sec,info.secIdx));
-          if(!bl)return;
-          const rail=bl.querySelector('.tl-rail');const ph=bl.querySelector('.tl-playhead');
-          const st=loadState(info.song,info.sec.sec,info.sec.occIdx);
-          const dur=info.sec.durationSec||0;
-          const pos=resolvePositions(st.segData,dur);
-          const effDur=dur>0?dur:((pos[pos.length-1]?pos[pos.length-1].sec:0)+8);
-          const t=Math.min(liveElapsed()??0,effDur);
-          if(rail&&ph){
-            ph.style.display='block';
-            ph.style.top=(t/effDur*rail.clientHeight)+'px';
-          }
-          let ci=0;for(let i=0;i<pos.length;i++){if(pos[i].sec<=t)ci=i;}
-          const tlBlock=bl.querySelector('.tl-slide[data-si="'+ci+'"]');
+          if(ph)ph.style.display='none';
+          if(!info||curSong!==info.song||!rail)return;
+          const list=songSlideList(info.song);
+          if(!list.length)return;
+          const songDur=songDuration(info.song);
+          const effDur=songDur>0?songDur:(list[list.length-1].abs+8);
+          const t=Math.min(liveAbsSec(info)??0,effDur);
+          ph.style.display='block';
+          ph.style.top=(t/effDur*rail.clientHeight)+'px';
+          let gi=0;for(let g=0;g<list.length;g++){if(list[g].abs<=t)gi=g;}
+          const it=list[gi];
+          const tlBlock=rail.querySelector('.tl-slide[data-g="'+gi+'"]');
           if(tlBlock)tlBlock.classList.add('playing-slide');
-          const cardEl=bl.querySelector('.seg-card[data-si="'+ci+'"]');
+          const cardEl=getBlock(ukOf(info.song,it.sec.sec,it.secIdx))?.querySelector('.seg-card[data-si="'+it.si+'"]');
           if(cardEl)cardEl.classList.add('playing-slide');
         }
-        // 전환 찍기: 버튼/스페이스바를 누른 "지금 이 순간"이 다음 경계의 전환 시점이 됨
+        // 넘김 지점 기록: 버튼/Enter를 누른 "지금 이 순간"이 다음 슬라이드로 넘어가는 시점이 됨.
+        // 섹션 첫 슬라이드 경계도 포함 — 마커를 막 지났을 때 누르면 그 섹션 첫 슬라이드가 정확히 지금 뜨도록 기록됨.
         function tap(){
           const info=playingSecInfo();
           if(!info||!lastState.isPlaying){showMsg('재생 중이 아니에요');return;}
-          const st=loadState(info.song,info.sec.sec,info.sec.occIdx);
-          const i=tapCtx.cursor;
-          if(i>=st.segData.length){showMsg('이 섹션의 마지막 슬라이드예요');return;}
-          const dur=info.sec.durationSec||0;
-          let t=liveElapsed()??0;
+          const list=songSlideList(info.song);
+          const g=tapCtx.cursor;
+          if(g>=list.length){showMsg('곡의 마지막 슬라이드예요');return;}
+          const it=list[g];
+          const songDur=songDuration(info.song);
+          let t=liveAbsSec(info)??0;
           // 이웃의 이미 확정된 위치를 넘지 않게 보정
-          let prevStamped=0;
-          for(let k=i-1;k>=1;k--){if(st.segData[k].startSec!=null){prevStamped=st.segData[k].startSec;break;}}
+          let prevStamped=list[0].abs;
+          for(let k=g-1;k>=1;k--){const kk=list[k];const st=loadState(info.song,kk.sec.sec,kk.sec.occIdx);if(st.segData[kk.si].startSec!=null){prevStamped=kk.abs;break;}}
           t=Math.max(prevStamped+0.1,t);
-          for(let k=i+1;k<st.segData.length;k++){if(st.segData[k].startSec!=null){t=Math.min(t,st.segData[k].startSec-0.1);break;}}
-          if(dur>0)t=Math.min(t,dur-0.05);
+          for(let k=g+1;k<list.length;k++){const kk=list[k];const st=loadState(info.song,kk.sec.sec,kk.sec.occIdx);if(st.segData[kk.si].startSec!=null){t=Math.min(t,kk.abs-0.1);break;}}
+          if(songDur>0)t=Math.min(t,songDur-0.05);
+          const st=loadState(info.song,it.sec.sec,it.sec.occIdx);
           const segData=st.segData.map(s=>({...s}));
-          segData[i].startSec=Math.round(t*100)/100;
-          setState(info.song,info.sec.sec,info.sec.occIdx,{segData});
-          tapCtx.cursor=i+1;
+          segData[it.si].startSec=Math.round((t-(it.sec.startInSong||0))*100)/100;
+          setState(info.song,it.sec.sec,it.sec.occIdx,{segData});
+          tapCtx.cursor=g+1;
           const btn=$('tap-btn');btn.classList.remove('flash');void btn.offsetWidth;btn.classList.add('flash');
-          showMsg('슬라이드 '+(i+1)+'→'+(i+2)+' 전환 '+fmtSec(t)+' 기록');
+          showMsg('슬라이드 '+(g)+'→'+(g+1)+' 넘김 '+fmtSec(t)+' 기록');
           if(curSong===info.song){
-            const bl=getBlock(ukOf(info.song,info.sec.sec,info.secIdx));
-            if(bl)refreshBlock(bl,info.song,info.sec,info.secIdx);
+            const bl=getBlock(ukOf(info.song,it.sec.sec,it.secIdx));
+            if(bl)refreshBlock(bl,info.song,it.sec,it.secIdx);
+            else renderSongTimeline(info.song);
           }
         }
 
         if(!STANDALONE){
           $('tap-btn').addEventListener('click',tap);
           document.addEventListener('keydown',e=>{
-            if(e.code!=='Space')return;
+            if(e.key!=='Enter')return;
             const tag=(document.activeElement?.tagName||'').toLowerCase();
             if(tag==='input'||tag==='textarea'||document.activeElement?.isContentEditable)return;
             e.preventDefault();tap();
