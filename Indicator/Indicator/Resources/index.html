@@ -437,7 +437,8 @@
           const slides = (sec.slides && sec.slides.length) ? sec.slides : [];
           const secs = resolveSlideSecs(slides, sec.durationSec || 0);
           slides.forEach((slide, i) => {
-            arr.push({ secName: sec.sec, secIdx, abs: (sec.startInSong || 0) + secs[i], slide });
+            arr.push({ secName: sec.sec, secIdx, abs: (sec.startInSong || 0) + secs[i], slide,
+                       beatsPerBar: sec.beatsPerBar || 4, beatUnit: sec.beatUnit || 4 });
           });
         });
         arr.sort((a, b) => a.abs - b.abs);
@@ -677,9 +678,13 @@
     });
   }
 
-  // ── 간주 표시 ──
-  function renderInstDisplay(blockEl, instChords, barCount) {
+  // ── 코드만(간주) 표시 ──
+  // pos는 항상 8분음표 해상도로 저장됨: 분모 4 계열은 박당 2칸(pos/2=박), 분모 8 계열은
+  // 박당 1칸(pos=박 그대로). divisor로 통일 계산 — 편집 화면 renderInstEditor와 동일 규칙.
+  function renderInstDisplay(blockEl, instChords, barCount, beatsPerBar, beatUnit) {
     const bc = barCount || (instChords || []).length;
+    const bpb = beatsPerBar || 4;
+    const divisor = (beatUnit === 8) ? 1 : 2;
     const grid = document.createElement('div');
     grid.className = 'inst-disp-grid';
     for (let b = 0; b < bc; b++) {
@@ -687,10 +692,9 @@
       const bar = document.createElement('div');
       bar.className = 'inst-disp-bar';
       const slots = ((instChords || [])[b] || []).slice().sort((a, c) => a.pos - c.pos);
-      // 4비트 슬롯으로 표시 (pos 0~7 → beat 0~3)
-      const beatMap = {}; // beat(0~3) → chord name
-      slots.forEach(s => { const beat = Math.floor((s.pos || 0) / 2); if (!beatMap[beat]) beatMap[beat] = s.name; });
-      for (let beat = 0; beat < 4; beat++) {
+      const beatMap = {}; // beat(0~bpb-1) → chord name
+      slots.forEach(s => { const beat = Math.floor((s.pos || 0) / divisor); if (!beatMap[beat]) beatMap[beat] = s.name; });
+      for (let beat = 0; beat < bpb; beat++) {
         const cell = document.createElement('span');
         if (beatMap[beat]) {
           cell.className = 'inst-disp-chord'; cell.textContent = beatMap[beat];
@@ -732,12 +736,12 @@
     }
   }
 
-  function renderSlide(blockEl, slide, fallback) {
+  function renderSlide(blockEl, slide, fallback, beatsPerBar, beatUnit) {
     blockEl.innerHTML = '';
     if (slide && slide.isInstrumental) {
       const ic = slide.instChords;
       if (ic && ic.some(b => b && b.length > 0)) {
-        renderInstDisplay(blockEl, ic, slide.barCount);
+        renderInstDisplay(blockEl, ic, slide.barCount, beatsPerBar, beatUnit);
       } else {
         // fallback: old ghost-token format
         renderLyricBlock(blockEl, slide.tokens, fallback);
@@ -801,8 +805,8 @@
     const absSec = secStart + (s.sectionElapsedSec ?? 0);
     const curEntry = findCurrentEntry(songName, absSec);
     const nxtEntry = findNextEntry(songName, absSec);
-    renderSlide($('lyric-block'), curEntry?.slide || null, s.lyricCue);
-    renderSlide($('next-lyric-block'), nxtEntry?.slide || null, '');
+    renderSlide($('lyric-block'), curEntry?.slide || null, s.lyricCue, curEntry?.beatsPerBar, curEntry?.beatUnit);
+    renderSlide($('next-lyric-block'), nxtEntry?.slide || null, '', nxtEntry?.beatsPerBar, nxtEntry?.beatUnit);
     fitLyricLines($('lyric-block'));
 
     // 노트 (세션 노트) — 슬라이드 귀속, 구버전 데이터는 섹션 노트로 폴백

@@ -244,6 +244,7 @@ class WebServer {
         struct SecInfo {
             var sec: String; var occIdx: Int; var totalBars: Int; var storedBars: Int
             var durationSec: Double; var startInSong: Double
+            var beatsPerBar: Int; var beatUnit: Int
             var slidesJson: String; var sessionNote: String; var singerNote: String; var linked: Bool
         }
         var songs: [(name: String, sections: [SecInfo])] = []
@@ -267,6 +268,8 @@ class WebServer {
                 let totalBars = ScheduleStore.shared.barsBetween(startMTC: m.mtcSeconds, endMTC: nextMTC) ?? -1
                 let durationSec = max(0, nextMTC - m.mtcSeconds)
                 let startInSong = max(0, m.mtcSeconds - curSongStartMTC)
+                // 간주 코드 그리드가 박자표(분모 포함)에 맞게 그려지도록 섹션 시작 시점의 박자표 전달
+                let ts = ScheduleStore.shared.beatsPerBarAt(mtcSeconds: m.mtcSeconds)
                 let (d, linked) = getLyricOcc?(curSong, m.displayName, occIdx) ?? (SectionData(), false)
                 let migrated = migrateSlides(d.slides, totalBars: d.totalBars > 0 ? d.totalBars : totalBars,
                                              durationSec: durationSec,
@@ -275,6 +278,7 @@ class WebServer {
                 songs[songs.count - 1].sections.append(
                     SecInfo(sec: m.displayName, occIdx: occIdx, totalBars: totalBars, storedBars: d.totalBars,
                             durationSec: durationSec, startInSong: startInSong,
+                            beatsPerBar: ts?.beatsPerBar ?? 4, beatUnit: ts?.beatUnit ?? 4,
                             slidesJson: slidesJson, sessionNote: d.sessionNote, singerNote: d.singerNote, linked: linked)
                 )
             }
@@ -283,7 +287,7 @@ class WebServer {
         // Embed as JSON
         let songsJson = "[" + songs.map { song in
             let secs = "[" + song.sections.map { sec in
-                "{\"sec\":\"\(j(sec.sec))\",\"occIdx\":\(sec.occIdx),\"totalBars\":\(sec.totalBars),\"storedBars\":\(sec.storedBars),\"durationSec\":\(String(format: "%.3f", sec.durationSec)),\"startInSong\":\(String(format: "%.3f", sec.startInSong)),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
+                "{\"sec\":\"\(j(sec.sec))\",\"occIdx\":\(sec.occIdx),\"totalBars\":\(sec.totalBars),\"storedBars\":\(sec.storedBars),\"durationSec\":\(String(format: "%.3f", sec.durationSec)),\"startInSong\":\(String(format: "%.3f", sec.startInSong)),\"beatsPerBar\":\(sec.beatsPerBar),\"beatUnit\":\(sec.beatUnit),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
             }.joined(separator: ",") + "]"
             return "{\"song\":\"\(j(song.name))\",\"sections\":\(secs)}"
         }.joined(separator: ",") + "]"
@@ -774,7 +778,7 @@ class WebServer {
             el.dataset.secIdx=String(it.secIdx);el.dataset.si=String(it.si);
             el.style.top=top+'px';el.style.height=Math.max(14,bottom-top)+'px';
             el.style.background=COLORS[it.si%COLORS.length];
-            el.textContent=(it.si+1)+'. '+(it.sd.isInstrumental?'간주':firstLineOf(it.sd.tokens));
+            el.textContent=(it.si+1)+'. '+(it.sd.isInstrumental?'코드만':firstLineOf(it.sd.tokens));
             el.title=it.sec.sec+' · 슬라이드 '+(it.si+1)+' — 클릭하면 오른쪽 카드로 이동';
             el.addEventListener('click',()=>{
               const card=getBlock(ukOf(song,it.sec.sec,it.secIdx))?.querySelector('.seg-card[data-si="'+it.si+'"]');
@@ -886,7 +890,7 @@ class WebServer {
             time.textContent=isGuess?'~'+fmtSec(pos[segIdx].sec)+' (임시)':'전환 '+fmtSec(pos[segIdx].sec);
           }
           const typeBtn=document.createElement('button');typeBtn.className='btn btn-sm btn-ghost';
-          typeBtn.textContent=sd.isInstrumental?'🎵 간주':'🎤 가사';
+          typeBtn.textContent=sd.isInstrumental?'🎵 코드만':'🎤 가사';
           typeBtn.addEventListener('click',()=>{
             setSlideField(song,sec.sec,sec.occIdx,segIdx,'isInstrumental',!sd.isInstrumental);
             const bl=getBlock(ukey);if(bl)refreshBlock(bl,song,sec,gidx);
@@ -1088,9 +1092,15 @@ class WebServer {
           const st=loadState(song,sec.sec,sec.occIdx);
           const existingIC=st.segData[segIdx]?.instChords||[];
           const barCount=Math.max(existingIC.length,4);
+          // 항상 "8분음표 해상도"로 통일: 분모가 4(4/4,3/4 등)면 박마다 정박+엇박 2칸,
+          // 분모가 8(6/8,9/8,12/8 등)이면 각 박 자체가 이미 8분음표라 1칸씩 — 그래서
+          // 마디당 실제 칸 수 = 분자 × (8÷분모). 예전엔 무조건 8칸(4/4 전용)이었음.
+          const bpb=sec.beatsPerBar||4, bUnit=sec.beatUnit||4;
+          const slotsPerBar=Math.max(1,Math.round(bpb*8/bUnit));
+          const subdivided=(bUnit===4);  // 분모 4 계열만 박 안에 정박/엇박 구분이 있음
           const hintRow=document.createElement('div');hintRow.style.cssText='display:flex;align-items:center;gap:10px;margin-bottom:10px';
           const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--sub)';
-          hint.textContent='8비트 그리드 코드 입력 (s=♯, b=♭) · '+barCount+'마디';
+          hint.textContent='8분음표 해상도 코드 입력 (s=♯, b=♭) · '+barCount+'마디 · '+bpb+'/'+bUnit;
           const setBars=n=>{
             const cur=loadState(song,sec.sec,sec.occIdx);
             const curIC=cur.segData[segIdx]?.instChords||[];
@@ -1108,20 +1118,22 @@ class WebServer {
           const table=document.createElement('div');table.className='inst-table';
           const hdr=document.createElement('div');hdr.className='inst-row';
           const hl=document.createElement('div');hl.className='inst-bar-lbl';hdr.appendChild(hl);
-          ['1','+','2','+','3','+','4','+'].forEach(lbl=>{const l=document.createElement('div');l.className='inst-beat-hdr';l.textContent=lbl;hdr.appendChild(l);});
+          const hdrLabels=[];
+          for(let i=1;i<=bpb;i++){hdrLabels.push(String(i));if(subdivided)hdrLabels.push('+');}
+          hdrLabels.forEach(lbl=>{const l=document.createElement('div');l.className='inst-beat-hdr';l.textContent=lbl;hdr.appendChild(l);});
           table.appendChild(hdr);
           for(let b=0;b<barCount;b++){
             const barSlots=existingIC[b]||[];
             const row=document.createElement('div');row.className='inst-row';
             const lbl=document.createElement('div');lbl.className='inst-bar-lbl';lbl.textContent='마디 '+(b+1);row.appendChild(lbl);
-            for(let beat=0;beat<8;beat++){
+            for(let beat=0;beat<slotsPerBar;beat++){
               const slot=barSlots.find(s=>s.pos===beat);
-              const cell=document.createElement('div');cell.className='inst-beat-'+(beat%2===0?'on':'off');
+              const cell=document.createElement('div');cell.className='inst-beat-'+(!subdivided||beat%2===0?'on':'off');
               const inp=document.createElement('input');inp.className='inst-beat-inp';inp.type='text';
               inp.value=slot?slot.name:'';inp.placeholder='';
               inp.addEventListener('focus',()=>inp.select());
               // change(blur 시점)에만 의존하면 일부 브라우저/모바일 환경에서 커밋이 안 되는
-              // 경우가 있어(간주 코드가 저장 안 되던 버그의 원인) input마다 바로 상태에 반영
+              // 경우가 있어(코드만 슬라이드가 저장 안 되던 버그의 원인) input마다 바로 상태에 반영
               const commitInstChord=()=>{
                 inp.value=inp.value.replace(/[^A-Za-z0-9#♭/]/g,'');
                 inp.value=normChord(inp.value);
