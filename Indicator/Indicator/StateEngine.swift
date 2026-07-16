@@ -31,7 +31,6 @@ class StateEngine {
 
     var onStateChange: ((IndicatorState) -> Void)?
     var onJump: (() -> Void)?
-    var countdownThresholdBars: Int { SettingsStore.shared.countdownBars }
 
     // ── 입력 ──────────────────────────────────────────────
     private var snapshot   = LogicSnapshot()
@@ -245,8 +244,10 @@ class StateEngine {
         let markers = markersInCurrentSong()
         guard currentSectionIdx + 1 < markers.count,
               let bounds = sectionBounds(idx: currentSectionIdx) else { cdTargets = []; return }
+        let songName = currentSongMarker()?.displayName ?? ""
+        let barsBack = LyricsStore.shared.countdownBars(song: songName)
         cdTargets = ScheduleStore.shared.countdownBeatMTCs(
-            sectionEndMTC: bounds.end, barsBack: countdownThresholdBars)
+            sectionEndMTC: bounds.end, barsBack: barsBack)
     }
 
     // 섹션 끝 지났는지 확인 (onBeat에서 호출)
@@ -263,10 +264,11 @@ class StateEngine {
 
     // MARK: - 마커 헬퍼
 
-    private func markersInCurrentSong() -> [Marker] {
+    // 지금 재생 중인 곡의 마커 (song 마커) — markersInCurrentSong()과 곡별 설정 조회에서 공용
+    private func currentSongMarker() -> Marker? {
         let all   = snapshot.markers
         let songs = all.filter { $0.isSong }
-        guard !songs.isEmpty else { return [] }
+        guard !songs.isEmpty else { return nil }
         let refMTC: Double
         if mtcIsPlaying {
             refMTC = mtcTime
@@ -274,12 +276,16 @@ class StateEngine {
             refMTC = snapshot.transportMTC
         } else if anchorBar > 0 {
             let barDiff = Double(snapshot.transportBar - anchorBar)
-            refMTC = anchorMTC + barDiff * Double(currentSectionBeatsPerBar) * beatDuration()
+            refMTC = anchorMTC + barDiff * Double(currentSectionBeatsPerBar) * notatedBeatDuration()
         } else {
             refMTC = mtcTime
         }
-        let song = songs.last(where: { $0.mtcSeconds <= refMTC + 0.5 }) ?? songs[0]
-        guard let si = all.firstIndex(of: song) else { return [] }
+        return songs.last(where: { $0.mtcSeconds <= refMTC + 0.5 }) ?? songs[0]
+    }
+
+    private func markersInCurrentSong() -> [Marker] {
+        let all = snapshot.markers
+        guard let song = currentSongMarker(), let si = all.firstIndex(of: song) else { return [] }
         let ei = all.indices.first { i in i > si && all[i].isSong } ?? all.endIndex
         return Array(all[si..<ei])
     }

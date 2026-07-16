@@ -4,8 +4,18 @@ class LyricsStore {
     static let shared = LyricsStore()
 
     private var data: [String: [String: SectionData]] = [:]
+    // 곡별 카운트다운 표시 시작(0=사용 안 함, 1, 2마디 전). 미설정 곡은 기본 1마디 전.
+    private var songCountdownBars: [String: Int] = [:]
 
     init() {}
+
+    func countdownBars(song: String) -> Int {
+        songCountdownBars[song] ?? 1
+    }
+
+    func setCountdownBars(song: String, bars: Int) {
+        songCountdownBars[song] = min(2, max(0, bars))
+    }
 
     // MARK: - Query
 

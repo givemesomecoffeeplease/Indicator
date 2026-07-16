@@ -112,6 +112,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webServer.onLyricsSaved = { [weak self] in
             self?.logicPoller.forceUpdate()
         }
+        webServer.getSongCountdownBars = { song in
+            LyricsStore.shared.countdownBars(song: song)
+        }
+        webServer.saveSongCountdownBars = { song, bars in
+            LyricsStore.shared.setCountdownBars(song: song, bars: bars)
+        }
 
         logicPoller.start()
         mtcReceiver.start()

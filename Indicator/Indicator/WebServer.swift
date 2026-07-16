@@ -21,6 +21,8 @@ class WebServer {
     var exportSong: ((_ name: String) -> Data?)? = nil
     var getSongNames: (() -> [String])? = nil
     var onLyricsSaved: (() -> Void)? = nil
+    var getSongCountdownBars: ((_ song: String) -> Int)? = nil
+    var saveSongCountdownBars: ((_ song: String, _ bars: Int) -> Void)? = nil
 
     func start(port: UInt16) {
         loadHTML()
@@ -118,6 +120,7 @@ class WebServer {
         case ("GET", "/api/sections"):                handleSections(conn)
         case ("GET", "/edit"):                        handleEdit(conn)
         case ("POST", "/save"):                       handleSave(conn, body: body)
+        case ("POST", "/save-song-meta"):             handleSaveSongMeta(conn, body: body)
         case ("GET", "/export/setlist"):              handleExportSetlist(conn)
         case _ where path.hasPrefix("/export/song/"): handleExportSong(conn, path: path)
         case ("GET", "/export.csv"):                  handleExportCSV(conn)
@@ -296,7 +299,8 @@ class WebServer {
             let secs = "[" + song.sections.map { sec in
                 "{\"sec\":\"\(j(sec.sec))\",\"occIdx\":\(sec.occIdx),\"totalBars\":\(sec.totalBars),\"storedBars\":\(sec.storedBars),\"durationSec\":\(String(format: "%.3f", sec.durationSec)),\"startInSong\":\(String(format: "%.3f", sec.startInSong)),\"beatsPerBar\":\(sec.beatsPerBar),\"beatUnit\":\(sec.beatUnit),\"slides\":\(sec.slidesJson),\"sessionNote\":\"\(j(sec.sessionNote))\",\"singerNote\":\"\(j(sec.singerNote))\",\"linked\":\(sec.linked)}"
             }.joined(separator: ",") + "]"
-            return "{\"song\":\"\(j(song.name))\",\"sections\":\(secs)}"
+            let countdownBars = getSongCountdownBars?(song.name) ?? 1
+            return "{\"song\":\"\(j(song.name))\",\"countdownBars\":\(countdownBars),\"sections\":\(secs)}"
         }.joined(separator: ",") + "]"
 
         return """
@@ -626,6 +630,22 @@ class WebServer {
           };
           tW.appendChild(tLabel);tW.appendChild(minusBtn);tW.appendChild(valSpan);tW.appendChild(plusBtn);tW.appendChild(applyBtn);
           titleEl.appendChild(tW);
+
+          // 카운트다운 표시 시작 (곡별, 즉시 저장) — 0=사용 안 함, 기본 1마디 전
+          const songDataForCd=DATA.find(s=>s.song===song);
+          const cdWrap=document.createElement('div');cdWrap.style.cssText='display:flex;align-items:center;gap:6px;font-size:13px;color:var(--sub);margin-left:12px';
+          const cdLabel=document.createElement('span');cdLabel.textContent='카운트다운';
+          const cdSel=document.createElement('select');cdSel.style.cssText='border:1px solid var(--border);border-radius:7px;padding:4px 8px;font-size:13px';
+          cdSel.innerHTML='<option value="0">사용 안 함</option><option value="1">1마디 전</option><option value="2">2마디 전</option>';
+          cdSel.value=String(songDataForCd?.countdownBars??1);
+          cdSel.addEventListener('change',()=>{
+            const bars=parseInt(cdSel.value)||0;
+            if(songDataForCd)songDataForCd.countdownBars=bars;
+            fetch('/save-song-meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({song,countdownBars:bars})});
+            showMsg('카운트다운 설정 저장됐어요');
+          });
+          cdWrap.appendChild(cdLabel);cdWrap.appendChild(cdSel);
+          titleEl.appendChild(cdWrap);
 
           if(!STANDALONE){
             const actDiv=document.createElement('div');actDiv.style.cssText='display:flex;gap:6px;margin-left:12px';
@@ -1236,7 +1256,7 @@ class WebServer {
             const st=loadState(song,sec.sec,sec.occIdx);
             return{sec:sec.sec,occIdx:sec.occIdx,totalBars:sec.totalBars,durationSec:sec.durationSec||0,slides:slidesOf(st)};
           });
-          return[{song,sections}];
+          return[{song,countdownBars:s.countdownBars??1,sections}];
         }
 
         async function buildStandaloneHtml(exportData,filename){
@@ -1318,6 +1338,12 @@ class WebServer {
               destSec.singerNote=srcSec.singerNote||destSec.singerNote||'';
               destSec.linked=false;
             };
+            // 카운트다운 설정은 즉시 저장 필드라 가져오기에서도 바로 서버에 반영
+            const mergeCountdown=(dest,srcSong)=>{
+              if(srcSong.countdownBars==null)return;
+              dest.countdownBars=srcSong.countdownBars;
+              fetch('/save-song-meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({song:dest.song,countdownBars:srcSong.countdownBars})});
+            };
             if(targetSongName){
               const srcSong=importedData.find(s=>s.song===targetSongName)||importedData[0];
               if(!srcSong){showMsg('데이터 없음');return;}
@@ -1327,6 +1353,7 @@ class WebServer {
                 const destSec=dest.sections.find(s=>s.sec===srcSec.sec&&(s.occIdx??0)===(srcSec.occIdx??0));
                 if(destSec)mergeSec(destSec,srcSec);
               });
+              mergeCountdown(dest,srcSong);
               importedSongs.add(targetSongName);
             } else {
               importedData.forEach(importSong=>{
@@ -1336,6 +1363,7 @@ class WebServer {
                   const destSec=dest.sections.find(s=>s.sec===srcSec.sec&&(s.occIdx??0)===(srcSec.occIdx??0));
                   if(destSec)mergeSec(destSec,srcSec);
                 });
+                mergeCountdown(dest,importSong);
                 importedSongs.add(importSong.song);
               });
             }
@@ -1531,6 +1559,17 @@ class WebServer {
             broadcaster.send("event: lyrics-updated\ndata: {}\n\n")
         } else {
             debugLog("[SaveDebug] JSON 디코드 실패")
+        }
+        send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")
+    }
+
+    // MARK: - /save-song-meta  (곡별 카운트다운 표시 시작 등, 즉시 저장)
+
+    private struct SongMetaPayload: Decodable { let song: String; let countdownBars: Int }
+
+    private func handleSaveSongMeta(_ conn: NWConnection, body: Data) {
+        if let decoded = try? JSONDecoder().decode(SongMetaPayload.self, from: body) {
+            saveSongCountdownBars?(decoded.song, decoded.countdownBars)
         }
         send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")
     }
