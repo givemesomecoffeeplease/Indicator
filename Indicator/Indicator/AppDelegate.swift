@@ -70,6 +70,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.updateScanResultMenuItem(schedule: schedule)
                 // 스캔 데이터로 실시간 스냅샷(마커 폴백) 즉시 갱신 — 목록 창이 닫혀 있어도 뷰어 동작
                 self?.logicPoller.forceUpdate()
+                // 마디 수·박자표 등이 스캔으로 바뀌었을 수 있으니 이미 열린 편집/뷰어 페이지도
+                // 최신 DATA를 다시 받아오도록 알림 (안 하면 새로고침 전까지 옛 박자표로 표시됨)
+                self?.webServer.notifyDataChanged()
             }
         }
 

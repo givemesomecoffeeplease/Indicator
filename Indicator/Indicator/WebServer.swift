@@ -35,6 +35,13 @@ class WebServer {
 
     func stop() { listener?.cancel() }
 
+    // 마커/박자표 등이 바뀌는 이벤트(사전 스캔 완료 등)에서도 호출 — 이미 열려 있는
+    // 뷰어가 /edit DATA(섹션 길이·박자표 등)를 다시 받아오도록 함. 편집 화면 저장 시와
+    // 동일한 이벤트를 재사용(뷰어는 'lyrics-updated'만 구독하고 있음).
+    func notifyDataChanged() {
+        broadcaster.send("event: lyrics-updated\ndata: {}\n\n")
+    }
+
     func broadcast(state: IndicatorState) {
         guard let data = try? JSONEncoder().encode(state),
               let json = String(data: data, encoding: .utf8) else { return }
