@@ -728,7 +728,7 @@ class WebServer {
           const last=s.sections[s.sections.length-1];
           return(last.startInSong||0)+(last.durationSec||0);
         }
-        function tlHeight(dur){return Math.max(240,Math.round(dur*4));}
+        function tlHeight(dur){return Math.max(240,Math.round(dur*7));}  // 초당 픽셀 확대(4→7, 약 1.75배) — 슬라이드 블록이 더 크게 보이도록
 
         function fmtOffset(o){
           const r=Math.round(o*10)/10;
