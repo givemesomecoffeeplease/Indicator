@@ -431,7 +431,7 @@ class WebServer {
           <input type="file" id="import-song-inp" accept=".html" style="display:none" onchange="handleImportFile(this.files[0],pendingImportSong)">
           <button id="btn-import" class="btn btn-sm btn-sec" onclick="document.getElementById('import-file-inp').click()">전체 가져오기</button>
           <button id="btn-export" class="btn btn-sm btn-sec" onclick="exportForTeam()">전체 내보내기</button>
-          <button class="btn" onclick="STANDALONE?standaloneDownload():saveAll()">뷰어 적용</button>
+          <button id="btn-apply" class="btn" onclick="STANDALONE?standaloneDownload():saveAll()">뷰어 적용</button>
         </div>
         <div id="layout">
           <div id="sidebar"><div class="sb-hd">곡 목록</div></div>
@@ -819,7 +819,8 @@ class WebServer {
             const h=document.createElement('div');
             h.className='tl-handle'+(it.guess?' guess':'');
             h.style.top=yOf(it.abs)+'px';
-            h.title=(it.si===0?it.sec.sec+' 첫 슬라이드 (마커 대비 '+fmtOffset(it.abs-(it.sec.startInSong||0))+') — ':'')+(it.guess?'임시 위치 — 드래그하거나 재생 중 찍어서 확정':'드래그로 전환 시점 조절 (위=일찍, 아래=늦게)');
+            const secLabel=it.si===0?it.sec.sec+' 첫 슬라이드 (마커 대비 '+fmtOffset(it.abs-(it.sec.startInSong||0))+') — ':'';
+            h.title=STANDALONE?secLabel+'조회 전용 (원본 편집 화면에서만 조절 가능)':secLabel+(it.guess?'임시 위치 — 드래그하거나 재생 중 찍어서 확정':'드래그로 전환 시점 조절 (위=일찍, 아래=늦게)');
             const grip=document.createElement('span');grip.className='grip';
             grip.textContent=(it.guess?'~':'')+fmtSec(it.abs);
             h.appendChild(grip);
@@ -834,6 +835,9 @@ class WebServer {
         // 섹션 첫 슬라이드 핸들은 마커를 넘어 이전 섹션 구간까지 끌 수 있음 (음수 오프셋).
         // 드래그 중엔 스타일만 직접 갱신(재렌더 시 포인터 캡처가 끊기므로), 놓을 때 상태 확정.
         function attachHandleDrag(h,rail,song,g,effDur,H){
+          // 내보낸 파일(STANDALONE)에서는 조회 전용 — 팀원이 실수로 타이밍을 바꾸지 못하게 함.
+          // 실제 조절은 Logic과 연결된 원본 편집 화면에서만.
+          if(STANDALONE){h.style.cursor='default';return;}
           h.addEventListener('pointerdown',e=>{
             e.preventDefault();e.stopPropagation();
             h.setPointerCapture(e.pointerId);
@@ -1532,10 +1536,11 @@ class WebServer {
         if(STANDALONE){
           const bi=$('btn-import');if(bi)bi.style.display='none';
           const be=$('btn-export');if(be)be.style.display='none';
+          const ba=$('btn-apply');if(ba)ba.textContent='저장';
           // 안내 배너
           const banner=document.createElement('div');
           banner.style.cssText='background:#fff8e1;border-bottom:1px solid #ffe082;padding:10px 20px;font-size:13px;color:#7a5c00;flex-shrink:0;display:flex;align-items:center;gap:8px';
-          banner.innerHTML='<span>✏️</span><span>가사를 편집하고 <b>저장</b> 버튼을 누르면 편집 완료 파일이 다운로드됩니다. 그 파일을 리더에게 보내주세요.</span>';
+          banner.innerHTML='<span>✏️</span><span>가사를 편집하고 <b>저장</b> 버튼을 누르면 편집 완료 파일이 다운로드됩니다. 그 파일을 송천동 최강 스윗남 한희에게 보내주세요.</span>';
           document.body.insertBefore(banner,document.getElementById('layout'));
         }
 
