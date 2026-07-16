@@ -511,6 +511,12 @@ class StateEngine {
 
         if let nextSong = markers.first(where: { $0.isSong && $0.mtcSeconds > mtcTime + 0.5 }) {
             state.nextSongName = nextSong.displayName
+            // 사전 스캔 데이터 기준 다음 곡 시작 시점의 조표/박자표/BPM 미리보기
+            state.nextSongKey = ScheduleStore.shared.keyAt(mtcSeconds: nextSong.mtcSeconds) ?? ""
+            state.nextSongBpm = ScheduleStore.shared.bpmAt(mtcSeconds: nextSong.mtcSeconds) ?? 0
+            if let ts = ScheduleStore.shared.beatsPerBarAt(mtcSeconds: nextSong.mtcSeconds) {
+                state.nextSongTimeSignature = "\(ts.beatsPerBar)/\(ts.beatUnit)"
+            }
         }
 
         state.isPlaying       = mtcIsPlaying

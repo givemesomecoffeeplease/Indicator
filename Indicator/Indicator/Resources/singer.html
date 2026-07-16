@@ -271,25 +271,28 @@
     overflow: hidden;
   }
 
-  /* 다음 섹션이 곡 전환일 때 — 키컬러로 크게 */
+  /* 다음 섹션이 곡 전환일 때 — 키컬러로 크게 + 조표/박자표/BPM 미리보기 */
   #nxt-song-display {
     flex: 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 6px;
+  }
+  #nxt-song-name {
     font-size: clamp(18px, 3vw, 44px);
     font-weight: 800;
     color: #5DCAA5;
     letter-spacing: -0.02em;
   }
-
-
-  /* 다음 곡 표시 */
-  #nxt-song-row {
-    font-size: 11px;
-    color: #555;
-    font-weight: 600;
-    margin-top: 4px;
+  #nxt-song-meta {
+    display: flex;
+    gap: 8px;
+    font-size: clamp(11px, 1.6vw, 18px);
+    font-weight: 700;
+    color: #3d7a6a;
+    letter-spacing: 0.04em;
   }
 
   /* ── 오프라인 ── */
@@ -345,7 +348,10 @@
       <div id="nxt-lyric-wrap">
         <div class="lyric-block" id="nxt-lyric-block"></div>
       </div>
-      <div id="nxt-song-display" class="hidden"></div>
+      <div id="nxt-song-display" class="hidden">
+        <div id="nxt-song-name"></div>
+        <div id="nxt-song-meta"></div>
+      </div>
     </div>
   </div>
 
@@ -668,7 +674,10 @@
       $('nxt-section-label').textContent = '';
       $('nxt-lyric-wrap').classList.add('hidden');
       $('nxt-song-display').classList.remove('hidden');
-      $('nxt-song-display').textContent = songName2;
+      $('nxt-song-name').textContent = songName2;
+      // 조표·박자표·BPM 미리보기 — 사전 스캔 안 됐으면 값이 비어있어 자동으로 생략됨
+      const metaParts = [s.nextSongKey, s.nextSongTimeSignature, s.nextSongBpm ? Math.round(s.nextSongBpm) + ' BPM' : ''].filter(Boolean);
+      $('nxt-song-meta').textContent = metaParts.join('  ·  ');
       $('nxt-singer-note').classList.add('hidden');
     } else {
       $('nxt-section-label').textContent = nxtEntry ? nxtEntry.secName : '';
@@ -713,6 +722,7 @@
       currentSongIndex: 1,
       key: 'G',
       nextSongName: '은혜의 비',
+      nextSongKey: 'D', nextSongTimeSignature: '4/4', nextSongBpm: 92,
     });
   }
 </script>

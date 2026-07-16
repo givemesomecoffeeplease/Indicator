@@ -114,6 +114,13 @@ class ScheduleStore {
         return (ts.beatsPerBar, ts.beatUnit)
     }
 
+    // 다음 곡 미리보기(조표/박자표/BPM 표시)용 — 사전 스캔 데이터가 있을 때만 값 반환
+    func keyAt(mtcSeconds: Double) -> String? {
+        guard let keySigs = current?.keySigs, !keySigs.isEmpty else { return nil }
+        let k = keySigs.last(where: { $0.mtcSeconds <= mtcSeconds }) ?? keySigs[0]
+        return k.name
+    }
+
     /// 카운트다운 박 단위 MTC 배열 (스캔된 템포맵 기준 진짜 박 그리드)
     /// 섹션 끝에서부터 한 박씩 거슬러 올라가며 그 시점의 실제 bpm으로 박 길이 계산 (변박 대응)
     /// 반환값: MTC 오름차순. beat = 남은 박 수 (예: 8→1).

@@ -115,6 +115,8 @@
   }
   /* 카운트다운 중 다음 섹션 강조 — 카운트 숫자와 같은 박에 '지금' 섹션명처럼 흰색으로 펄스 */
   #nxt-name.pre-roll { color: #7a7a9a; }
+  /* 다음이 곡 전환일 때 — 일반 다음 섹션(회색)과 구분해 키컬러로 표시 */
+  #nxt-name.next-is-song { color: #5DCAA5; }
   #nxt-name.beat-glow { animation: nxtGlow 0.45s ease-out; }
   @keyframes nxtGlow {
     0%   { color: #f0f0f0; }
@@ -777,11 +779,18 @@
     const curIsSong = songs.includes(s.currentSection || '');
     const nxtIsSong = s.nextSectionIsSong || songs.includes(s.nextSection || '');
     setMetaSm('cur', curIsSong);
-    setMetaSm('nxt', nxtIsSong);
+    // 다음이 곡 전환이면 현재 곡이 아니라 '다음 곡'의 조표/박자표/BPM을 보여줘야 함
+    // (사전 스캔 안 됐으면 값이 비어 있어 자동으로 숨겨짐)
+    if (nxtIsSong) {
+      setMetaSm('nxt', true, s.nextSongKey || '', s.nextSongTimeSignature || '', s.nextSongBpm || 0);
+    } else {
+      setMetaSm('nxt', false);
+    }
 
-    // 섹션 이름
+    // 섹션 이름 — 다음이 곡 전환이면 일반 다음 섹션(회색)과 구분해 키컬러로 표시
     animText('cur-name', s.currentSection || '--');
     animText('nxt-name', s.nextSection    || '--');
+    $('nxt-name').classList.toggle('next-is-song', nxtIsSong);
     fitSectionName($('cur-name'));
     fitSectionName($('nxt-name'));
 

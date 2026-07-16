@@ -179,6 +179,8 @@ struct IndicatorState: Codable, Equatable {
     var nextSlideInfo: SlideInfo? = nil
     var nextSongName: String = ""
     var nextSongKey: String = ""
+    var nextSongBpm: Double = 0
+    var nextSongTimeSignature: String = ""
     var chords: [String] = []
     var chordBars: [Int] = []
     var chordBeats: [Int] = []
