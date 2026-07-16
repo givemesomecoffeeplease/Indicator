@@ -260,7 +260,10 @@ class WebServer {
                 let occKey = "\(curSong)|||\(m.displayName)"
                 let occIdx = occCount[occKey] ?? 0
                 occCount[occKey] = occIdx + 1
-                let nextMTC = (i + 1 < markers.count) ? markers[i + 1].mtcSeconds : m.mtcSeconds
+                // 세트리스트의 진짜 마지막 마커는 다음이 없어 nextMTC를 알 수 없음 — 0으로 두면
+                // 그 섹션 타임라인이 완전히 비어(길이 0) 편집이 불가능해지므로 30초를 최후의
+                // 추정값으로 사용 (StateEngine.sectionBounds의 마지막 폴백과 동일한 값)
+                let nextMTC = (i + 1 < markers.count) ? markers[i + 1].mtcSeconds : m.mtcSeconds + 30.0
                 let totalBars = ScheduleStore.shared.barsBetween(startMTC: m.mtcSeconds, endMTC: nextMTC) ?? -1
                 let durationSec = max(0, nextMTC - m.mtcSeconds)
                 let startInSong = max(0, m.mtcSeconds - curSongStartMTC)
@@ -874,7 +877,14 @@ class WebServer {
           const time=document.createElement('span');
           const isGuess=pos[segIdx]&&pos[segIdx].guess;
           time.className='seg-time'+(isGuess?' guess':'');
-          time.textContent=segIdx===0?'섹션 시작':(isGuess?'~'+fmtSec(pos[segIdx].sec)+' (임시)':'전환 '+fmtSec(pos[segIdx].sec));
+          // 첫 슬라이드도 마커 대비 오프셋을 가질 수 있음(타임라인에서 조절) — 0이면 "섹션 시작",
+          // 아니면 실제 오프셋을 표시해 타임라인 핸들과 카드 라벨이 항상 일치하게 함
+          if(segIdx===0){
+            const off=pos[0]?pos[0].sec:0;
+            time.textContent=Math.abs(off)<0.05?'섹션 시작':'섹션 시작 ('+fmtOffset(off)+')';
+          }else{
+            time.textContent=isGuess?'~'+fmtSec(pos[segIdx].sec)+' (임시)':'전환 '+fmtSec(pos[segIdx].sec);
+          }
           const typeBtn=document.createElement('button');typeBtn.className='btn btn-sm btn-ghost';
           typeBtn.textContent=sd.isInstrumental?'🎵 간주':'🎤 가사';
           typeBtn.addEventListener('click',()=>{
