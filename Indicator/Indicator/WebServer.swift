@@ -10,6 +10,7 @@ class WebServer {
     var viewerCount: Int { broadcaster.count }
     private var bandContent: String = ""
     private var singerContent: String = ""
+    private var chartContent: String = ""
 
     // Wired up by AppDelegate after init
     var getMarkers: (() -> [Marker])? = nil
@@ -117,6 +118,7 @@ class WebServer {
         case ("GET", "/events"):                      handleSSE(conn)
         case ("GET", "/band"):                        handleBand(conn)
         case ("GET", "/singer"):                      handleSinger(conn)
+        case ("GET", "/chart"):                        handleChart(conn)
         case ("GET", "/api/sections"):                handleSections(conn)
         case ("GET", "/edit"):                        handleEdit(conn)
         case ("POST", "/save"):                       handleSave(conn, body: body)
@@ -168,6 +170,10 @@ class WebServer {
 
     private func handleSinger(_ conn: NWConnection) {
         send(conn, body: singerContent.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
+    }
+
+    private func handleChart(_ conn: NWConnection) {
+        send(conn, body: chartContent.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
     }
 
     private func handleSections(_ conn: NWConnection) {
@@ -1702,6 +1708,12 @@ class WebServer {
             singerContent = content
         } else {
             singerContent = "<html><body><h1>singer.html not found</h1></body></html>"
+        }
+        if let url = Bundle.main.url(forResource: "chart", withExtension: "html"),
+           let content = try? String(contentsOf: url, encoding: .utf8) {
+            chartContent = content
+        } else {
+            chartContent = "<html><body><h1>chart.html not found</h1></body></html>"
         }
     }
 }

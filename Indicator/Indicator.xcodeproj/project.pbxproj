@@ -19,6 +19,7 @@
 		BB00020A00000000000000AA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BB00010A00000000000000AA /* Assets.xcassets */; };
 		BB00020B00000000000000AA /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010B00000000000000AA /* index.html */; };
 		BB00020C00000000000000AA /* singer.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010C00000000000000AA /* singer.html */; };
+		BB00020D00000000000000AA /* chart.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010D00000000000000AA /* chart.html */; };
 		F808FA292FEDAB0700C36F76 /* LyricsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA282FEDAB0700C36F76 /* LyricsStore.swift */; };
 		F808FA2B2FEDAB0700C36F76 /* ScheduleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */; };
 /* End PBXBuildFile section */
@@ -37,6 +38,7 @@
 		BB00010A00000000000000AA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BB00010B00000000000000AA /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
 		BB00010C00000000000000AA /* singer.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = singer.html; sourceTree = "<group>"; };
+		BB00010D00000000000000AA /* chart.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = chart.html; sourceTree = "<group>"; };
 		F808FA282FEDAB0700C36F76 /* LyricsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsStore.swift; sourceTree = "<group>"; };
 		F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -93,6 +95,7 @@
 			children = (
 				BB00010B00000000000000AA /* index.html */,
 				BB00010C00000000000000AA /* singer.html */,
+				BB00010D00000000000000AA /* chart.html */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -161,6 +164,7 @@
 				BB00020A00000000000000AA /* Assets.xcassets in Resources */,
 				BB00020B00000000000000AA /* index.html in Resources */,
 				BB00020C00000000000000AA /* singer.html in Resources */,
+				BB00020D00000000000000AA /* chart.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

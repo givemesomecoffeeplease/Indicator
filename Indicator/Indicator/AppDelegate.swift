@@ -214,6 +214,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let editItem = NSMenuItem(title: "가사·노트 편집 열기", action: #selector(openEditPage), keyEquivalent: "")
         editItem.representedObject = "http://\(ip):8888/edit"
         menu.addItem(editItem)
+        let chartItem = NSMenuItem(title: "채보 편집 열기", action: #selector(openEditPage), keyEquivalent: "")
+        chartItem.representedObject = "http://\(ip):8888/chart"
+        menu.addItem(chartItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "설정...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(.separator())
