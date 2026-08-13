@@ -3316,46 +3316,8 @@ function envNote(){
 
    localStorage는 사파리 사생활 보호 모드에서 던진다. 통째로 감싸되
    실패하면 그냥 매번 띄운다 — 안 뜨는 것보다 매번 뜨는 쪽이 안전하다. */
-(function initIntro(){
-  const pop = document.getElementById('introPop');
-  const KEY = 'maidrum.intro';
-  let seen = null;
-  try{ seen = localStorage.getItem(KEY); }catch(e){}
-  if(seen === APP_VER) return;
-
-  document.getElementById('introVer').textContent = APP_VER;
-
-  /* 저장소를 못 쓰는 환경에서 "자동 저장됩니다"라고 하면 거짓말이 된다.
-     사파리 사생활 보호 창이 그렇다 — 그때는 원래 문구로 되돌린다 */
-  if(!STORAGE_OK){
-    const w = document.getElementById('introSave');
-    if(w) w.innerHTML = '<b>이 창에서는 악보가 자동 저장되지 않습니다.</b><br>'
-      + '사생활 보호 모드처럼 저장이 막힌 환경이에요. 새로 고치면 사라지니 '
-      + '<b>저장</b>으로 파일을 내려받아 두세요.';
-  }
-
-  // 피드백 주소는 한 곳(FEEDBACK)에서만 읽는다. 비어 있으면 그 버튼은 안 나온다
-  const bFb = document.getElementById('introFb');
-  const aChat = document.getElementById('introChat');
-  if(FEEDBACK.form){
-    bFb.hidden = false;
-    bFb.onclick = ()=> window.open(FEEDBACK.form, '_blank', 'noopener');
-  }
-  if(FEEDBACK.kakao){ aChat.href = FEEDBACK.kakao; aChat.hidden = false; }
-
-  function close(){
-    pop.classList.remove('is-open');
-    try{ localStorage.setItem(KEY, APP_VER); }catch(e){}
-  }
-  document.getElementById('introStart').onclick = close;
-  // 바깥을 눌러도 닫힌다. 안내는 관문이 아니라 알림이다
-  pop.addEventListener('click', e=>{ if(e.target === pop) close(); });
-  document.addEventListener('keydown', e=>{
-    if(e.key === 'Escape' && pop.classList.contains('is-open')) close();
-  });
-
-  pop.classList.add('is-open');
-})();
+// initIntro: 베타 첫 방문 안내 팝업 제거 — 팀 내부용 포크에는 불필요.
+// introPop 마크업은 그대로 두되(별도로 열 일 없음) is-open을 절대 추가하지 않음.
 
 /* ---- 패턴 브러시 ----
    드러머 요청 6번. 원문: **"하이햇 패턴은 늘 일정하니 경우의 수 16개를 골라 미리 깔면 좋겠다."**
