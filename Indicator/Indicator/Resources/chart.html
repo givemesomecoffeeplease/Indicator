@@ -24,7 +24,7 @@
     --white:#F4F3F7;
     --dim:#9A98A6;
     --faint:#63616F;
-    --lime:#C9F24D;
+    --lime:#5DCAA5;       /* 인디케이터 앱 키컬러(민트그린)로 통일 */
     --lilac:#C7A8FF;
     --paper:#F3F0F8;      /* 악보 종이 */
     --paper-ink:#14121A;
@@ -56,7 +56,9 @@
     font-size:15px;line-height:1.5;letter-spacing:-0.015em;
     -webkit-font-smoothing:antialiased;
     padding-bottom:calc(96px + env(safe-area-inset-bottom));
+    -webkit-user-select:none;user-select:none;   /* 마디/그리드 등 드래그 선택 방지를 악보뿐 아니라 앱 전체로 */
   }
+  input,textarea{-webkit-user-select:text;user-select:text;}   /* 제목 입력 등 실제 텍스트 입력창은 예외 */
   /* 상단 컬러 블룸 (레퍼런스의 헤더 글로우)
      body::before가 아니라 실제 엘리먼트로 뺀다.
      Safari는 position:relative인 body의 의사요소를 리페인트하다 문서 전체를
@@ -181,6 +183,7 @@
     max-height:44vh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
     -webkit-overflow-scrolling:touch;
     box-shadow:0 18px 40px -22px #000000CC;
+    -webkit-user-select:none;user-select:none;   /* 마디 드래그 선택 중 악보 글자가 같이 파랗게 선택되는 것 방지 */
   }
   /* 단위를 고르는 게 전부다.
        vh  = 툴바가 접힌 **큰** 뷰포트 → 툴바가 보일 땐 카드가 화면보다 커진다
@@ -220,10 +223,43 @@
     padding:0 12px;line-height:1;font-size:12.5px;font-weight:600;
     color:var(--white);background:transparent;border:0;cursor:pointer;
     transition:background .14s,color .14s;
+    white-space:nowrap;flex-shrink:0;   /* 좁아지면 글자가 잘리지 않고 알약 전체가 다음 줄로 넘어가도록 */
   }
-  .mgrp button + button{box-shadow:inset 1px 0 0 #00000059;}
+  /* .mgrp 안에 <select>(박자표 분자/분모)가 섞여 들어가면서, 버튼만 스타일하던
+     규칙이 select는 그대로 브라우저 기본 모양으로 남겨둬 튀어 보였다(2026-08-14 제보).
+     select도 같은 톤으로 맞추고, 구분선도 button+button만이 아니라 모든 자식 사이에 건다. */
+  .mgrp select{
+    padding:0 6px;line-height:1;font-size:12.5px;font-weight:600;font-family:inherit;
+    color:var(--white);background:transparent;border:0;cursor:pointer;
+    -webkit-appearance:none;appearance:none;text-align:center;
+  }
+  .mgrp select:focus{outline:none;}
+  .mgrp span[aria-hidden]{display:inline-flex;align-items:center;padding:0 1px;color:var(--faint);}
+  .mgrp > *:not(:first-child){box-shadow:inset 1px 0 0 #00000059;}
   .mgrp button:active{background:#33333F;}
   .mgrp button:disabled{color:#3B3945;cursor:default;background:transparent;}
+  /* "값"(박자표 셀렉트)은 칠해진 알약이 아니라 테두리만 있는 입력창처럼 —
+     그 값으로 뭘 할지 정하는 "동작" 알약(적용/앞에 추가/뒤에 추가)과 위계가 다르다는 걸
+     한눈에 구분하기 위함. 화살표(.tsArrow)로 "이 값 → 이 동작" 흐름을 표시한다. */
+  .mgrp.tsval{background:transparent;border:1px solid var(--line);}
+  .tsArrow{display:inline-flex;align-items:center;color:var(--faint);font-size:13px;padding:0 1px;}
+  /* 복제·복사·붙여넣기와 똑같은 색·같은 필 — 색은 하나도 안 바뀐다.
+     복제·복사·붙여넣기의 구분선도 사실 불투명한 선이 아니라 **반투명 검정**(#00000059)이
+     surface-2 위에 살짝 비치는 틈이다 — 앞서 var(--bg)(완전 불투명)를 써서 진짜 선처럼
+     보였던 것. 같은 반투명 값을 그대로 써야 같은 "틈" 느낌이 난다.
+     "적용"의 둥근 알약 윤곽(필과 같은 곡률)을 따라 그 틈이 곡선으로 휘어 보이게 한다. */
+  .mgrp.tsact{overflow:hidden;}
+  .mgrp.tsact #tsApply{
+    height:34px;border-radius:999px;
+    background:transparent;
+    padding:0 14px;margin:0 -17px;position:relative;z-index:1;
+    box-shadow:0 0 0 1.5px #00000059;
+  }
+  .mgrp.tsact #addAfter{box-shadow:none;}   /* 적용의 곡선 틈이 이미 구분 역할을 하므로 기존 직선 구분선은 뺀다 */
+  /* 적용이 양옆으로 17px씩 겹치며 그 위에 그려지다 보니, 앞에추가/뒤에추가 글자가
+     안쪽 가장자리에서 가려 잘려 보였다 — 겹치는 만큼 안쪽 여백을 늘려 보정한다. */
+  .mgrp.tsact #addBefore{padding-right:28px;}
+  .mgrp.tsact #addAfter{padding-left:28px;}
   /* 요청 18 "스크롤 내려도 마디 행은 고정".
      칩 줄이 지금 어느 마디를 고치는지 알려 주는 유일한 표시라, 스크롤에 딸려 나가면
      길을 잃는다. 패널 위쪽에 붙여 둔다 (아이패드 2단은 패널 자체가 안 스크롤돼서 제외) */
@@ -255,7 +291,7 @@
     -webkit-overflow-scrolling:touch;scrollbar-width:none;scroll-padding-left:0;
     overscroll-behavior-x:none;}
   .gridWrap::-webkit-scrollbar{display:none;}
-  .gblock{display:grid;gap:4px;width:max-content;}
+  .gblock{display:grid;gap:3px;width:max-content;}
   /* 박 머리 = 나누기 버튼. 박마다 하나뿐이라 탭 대상이 분명하고,
      그 박 바로 위에 있어서 뭘 바꾸는지 설명할 필요가 없다 */
   /* 박 머리 = 세는 말 + 나누기 버튼.
@@ -280,7 +316,7 @@
   /* 요청 1 "기준박자(1박씩) 끊어지는 곳 좀 더 선명하게".
      색 대비만 올려서는 잘 안 읽힌다 — **박과 박 사이를 벌리는 게** 훨씬 효과가 크다.
      칸 사이는 4px, 박 사이는 12px. 박 첫 칸에 왼쪽 라임 선을 하나 더 세운다. */
-  .gbeat{display:grid;gap:4px;min-width:0;padding-right:8px;}
+  .gbeat{display:grid;gap:3px;min-width:0;padding-right:5px;}
   .cell.beat0{position:relative;}
   .cell.beat0::before{
     content:'';position:absolute;left:-5px;top:4px;bottom:4px;width:2px;
@@ -315,7 +351,7 @@
   .gcorner{position:sticky;left:0;z-index:2;background:var(--surface);}
   .rowlabel .key{display:none;}
   .cell{
-    height:36px;min-width:0;border-radius:10px;background:var(--surface-2);
+    height:28px;min-width:0;border-radius:10px;background:var(--surface-2);   /* 악보에 자리를 더 주려고 칸 높이를 줄임(36→28) */
     border:1px solid transparent;cursor:pointer;position:relative;
     transition:background .1s,transform .06s;
   }
@@ -555,10 +591,18 @@
   .btn:disabled:active{transform:none;}
 
   /* ── 리얼드럼 ───────────────────────────── */
-  .kitScroll{overflow-x:auto;margin:0 -14px;padding:0 14px;scrollbar-width:none;}
-  .kit{position:relative;height:300px;min-width:600px;border-radius:var(--r-m);
+  /* 패드를 한쪽(왼쪽)으로 몰고, 옆에 남는 공간에 입력 관련 버튼을 용도별로 세로로 쌓는다 —
+     "입력 단위"(무엇으로 찍을지) → "자동 이동"(찍고 나서 어떻게 움직일지) → "녹음"(어떻게 기록할지)
+     순서로 위에서 아래로 배치해 손이 가는 순서와 위계를 맞춘다. */
+  .drumLayout{display:flex;flex-wrap:wrap;align-items:flex-start;gap:16px;margin-bottom:12px;}
+  .kitScroll{overflow-x:auto;scrollbar-width:none;flex:0 1 auto;}
+  .kit{position:relative;height:190px;width:400px;max-width:100%;border-radius:var(--r-m);   /* 패드 실제 크기에 맞춰 박스를 더 줄여 옆(표기) 공간을 넓힘 */
     overflow:hidden;background:radial-gradient(ellipse at 50% 78%,#22222C,#141419 76%);
     border:1px solid var(--line);}
+  .drumSide{display:flex;flex-direction:column;gap:14px;flex:1 1 150px;padding-top:2px;min-width:140px;}
+  .sideGroup{display:flex;flex-direction:column;gap:6px;}
+  .sideGroup .mgrp{align-self:flex-start;}
+  .sideLabel{font-size:11px;color:var(--faint);font-weight:600;letter-spacing:.01em;}
   /* 반드시 .kit 하위로 한정할 것.
      전역 `.pad`로 두면 에디션 분기 클래스(body)와 충돌해 body가
      position:absolute + transform 이 되어 화면이 통째로 깨진다. */
@@ -574,6 +618,13 @@
   .kit .pad.kickpad{background:radial-gradient(circle at 40% 32%,#E3D2FF,#C7A8FF 70%);
     border:7px solid #3E3E4A;color:#1C1230;}
   .kit .pad.hit{transform:translate(-50%,-50%) scale(.92);filter:brightness(1.15);}
+  /* 컴퓨터 키보드로 리얼드럼 입력할 때 어느 키인지 바로 보이게 하는 배지 */
+  .kit .pad .keybadge{
+    position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 4px;
+    border-radius:10px;background:#14141A;border:1.5px solid #3E3E4A;color:#C9F24D;
+    font-size:10px;font-weight:800;letter-spacing:0;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;
+  }
   .stepBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px;}
   #stepDots{display:flex;gap:4px;align-items:center;overflow-x:auto;padding:1px;flex:1;min-width:170px;
     scrollbar-width:none;}
@@ -903,7 +954,7 @@
   .vsplit:hover i,body.is-vsplitting .vsplit i{background:var(--lime);width:96px;}
   body.edition-pad:not(.edition-ipad) #scoreWrap{
     height:var(--scoreH, auto);
-    max-height:var(--scoreH, 46svh);
+    max-height:var(--scoreH, 64svh);   /* 상하 1단 고정 후: 악보가 입력 패널보다 더 큰 비율을 차지하도록 */
   }
 
   /* ── 분할선 ────────────────────────────── */
@@ -1070,7 +1121,7 @@
   <div class="seg">
     <button id="tabGrid" class="sel">그리드</button>
     <button id="tabDrum">리얼드럼</button>
-    <button id="tabPractice">연습<span class="pro">PRO</span></button>
+    <button id="tabPractice" style="display:none">연습<span class="pro">PRO</span></button>
   </div>
 
   <div class="panel">
@@ -1080,7 +1131,7 @@
         <!-- 되돌리기·다시하기가 제목 줄로 올라가 비운 자리에 프리셋이 들어왔다.
              프리셋은 "무엇을 넣을까"라 마디를 만지기 **전에** 고르는 것이라
              줄 맨 끝보다 맨 앞이 순서상으로도 맞다 -->
-        <select id="presetSel">
+        <select id="presetSel" style="display:none">
           <option value="">프리셋…</option>
           <option value="rock8">8비트 락</option>
           <option value="groove16">16비트 그루브</option>
@@ -1093,11 +1144,11 @@
           <button type="button" id="totalPlus" aria-label="4마디 늘리기">＋</button>
           <span>마디</span>
         </div>
-        <button class="btn sm quickm" data-n="24">24</button>
-        <button class="btn sm quickm" data-n="32">32</button>
-        <button id="addM" class="btn sm">＋ 마디</button>
-        <!-- 선택한 마디(들)의 박자표. 분모 8은 겹박자(6/8, 9/8, 12/8 등) — 한 박이 8분음표 -->
-        <div class="mgrp" role="group" aria-label="박자표">
+        <!-- 박자표 "값"(셀렉트)과 그 값으로 무엇을 할지 "동작"(적용/앞에 추가/뒤에 추가)은
+             같은 위계가 아니다 — 값을 먼저 고르고, 그 값을 어떻게 쓸지 정하는 순서라
+             두 그룹으로 나누고 화살표로 흐름을 표시한다. 값 쪽은 입력창처럼 테두리를 줘서
+             동작(칠해진 알약 버튼)과 다르게 보이도록 한다. -->
+        <div class="mgrp tsval" role="group" aria-label="박자표 값">
           <select id="tsNumSel" title="박자표 분자(박 수)">
             <option value="2">2</option><option value="3">3</option><option value="4">4</option>
             <option value="5">5</option><option value="6">6</option><option value="7">7</option>
@@ -1108,6 +1159,12 @@
             <option value="4">4</option>
             <option value="8">8</option>
           </select>
+        </div>
+        <span class="tsArrow" aria-hidden="true">→</span>
+        <div class="mgrp tsact" role="group" aria-label="박자표 동작">
+          <button id="addBefore" class="btn sm" title="선택한 마디 앞에 이 박자표로 새 마디 추가">앞에 추가</button>
+          <button id="tsApply" class="btn sm" title="지금 선택한 마디(들) 자체의 박자표를 이 값으로 바꾼다">적용</button>
+          <button id="addAfter" class="btn sm" title="선택한 마디 뒤에 이 박자표로 새 마디 추가">뒤에 추가</button>
         </div>
         <!-- 낱개 알약 여덟 개가 나란히 있으면 폰에서 세 줄로 접히고, 무엇이 무엇과
              한 묶음인지도 안 보였다("마디 부분이 너무 복잡해", 2026-08-13).
@@ -1127,30 +1184,8 @@
              태그라인까지 밀린다. 비우기·삭제 옆이 의미로도 맞고 자리도 있다 -->
         <!-- 2026-08-13: `새 악보` → `곡 목록`. 새로 만들기는 시트 안으로 들어갔다.
              자리를 안 늘리려고 있던 슬롯을 그대로 쓴다 (도구 줄이 폰에서 이미 세 줄) -->
-        <button id="libBtn" class="btn sm">곡 목록</button>
+        <button id="libBtn" class="btn sm" style="display:none">곡 목록</button>
       </div>
-      <div class="artrow" id="artRow">
-        <span class="lbl">표기</span>
-        <button data-art="1" class="">기본</button>
-        <button data-art="2" class="sel">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
-            <path d="M8 5c-2.4 3-2.4 11 0 14"></path><path d="M16 5c2.4 3 2.4 11 0 14"></path>
-            <ellipse cx="12" cy="12" rx="2.6" ry="2" fill="currentColor" stroke="none"></ellipse>
-          </svg>고스트
-        </button>
-        <button data-art="3">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M5 7.5 19 12 5 16.5"></path>
-          </svg>액센트
-        </button>
-        <button data-art="4">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
-            <circle cx="12" cy="6.5" r="3.2"></circle>
-            <path d="M8 13.5 16 20"></path><path d="M16 13.5 8 20"></path>
-          </svg>오픈<span class="wide">&nbsp;하이햇</span>
-        </button>
-      </div>
-
     </div>
 
     <div id="gridMode">
@@ -1158,21 +1193,57 @@
     </div>
 
     <div id="drumMode" style="display:none">
-      <div class="kitScroll"><div class="kit" id="kit"></div></div>
+      <div class="drumLayout">
+        <div class="kitScroll"><div class="kit" id="kit"></div></div>
+        <div class="drumSide">
+          <div class="sideGroup" role="group" aria-label="표기">
+            <span class="sideLabel">표기</span>
+            <div class="artrow" id="artRow">
+              <button data-art="1" class="">기본</button>
+              <button data-art="2" class="sel">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+                  <path d="M8 5c-2.4 3-2.4 11 0 14"></path><path d="M16 5c2.4 3 2.4 11 0 14"></path>
+                  <ellipse cx="12" cy="12" rx="2.6" ry="2" fill="currentColor" stroke="none"></ellipse>
+                </svg>고스트
+              </button>
+              <button data-art="3">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 7.5 19 12 5 16.5"></path>
+                </svg>액센트
+              </button>
+              <button data-art="4">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+                  <circle cx="12" cy="6.5" r="3.2"></circle>
+                  <path d="M8 13.5 16 20"></path><path d="M16 13.5 8 20"></path>
+                </svg>오픈<span class="wide">&nbsp;하이햇</span>
+              </button>
+            </div>
+          </div>
+          <div class="sideGroup" role="group" aria-label="입력 단위">
+            <span class="sideLabel">입력 단위</span>
+            <div class="mgrp">
+              <button id="entryDiv8" class="btn sm on" title="박마다 8분음표(칸 2개) 간격으로 입력·이동">8비트</button>
+              <button id="entryDiv16" class="btn sm" title="박마다 16분음표(칸 4개) 간격으로 입력·이동">16비트</button>
+            </div>
+          </div>
+          <div class="sideGroup">
+            <span class="sideLabel">찍은 뒤</span>
+            <button id="autoAdvBtn" class="btn sm on">자동 이동</button>
+          </div>
+          <div class="sideGroup" role="group" aria-label="로직 동기화">
+            <span class="sideLabel">로직 동기화</span>
+            <button id="logicAnchorBtn" class="btn sm" title="지금 로직 재생 위치를 이 채보의 1마디로 지정 — 처음부터가 아니라 곡 중간 마커부터 재생할 때 씀">여기를 1마디로</button>
+            <span id="logicSyncInfo" class="sideLabel" style="margin-top:2px;"></span>
+          </div>
+        </div>
+      </div>
       <div class="stepBar">
         <button id="stepPrev" class="btn sm">◀</button>
         <div id="stepDots"><div class="sdot b0 cur has"></div><div class="sdot"></div><div class="sdot has"></div><div class="sdot has"></div><div class="sdot b0 has"></div><div class="sdot"></div><div class="sdot has"></div><div class="sdot has"></div><div class="sdot b0 has"></div><div class="sdot"></div><div class="sdot has"></div><div class="sdot"></div><div class="sdot b0 has"></div><div class="sdot"></div><div class="sdot has"></div><div class="sdot"></div></div>
         <button id="stepNext" class="btn sm">▶</button>
         <button id="stepRest" class="btn sm">쉼표</button>
-        <button id="autoAdvBtn" class="btn sm on">자동 이동</button>
-        <button id="recBtn" class="btn sm">● 녹음</button>
         <span id="stepInfo">1마디 · 1박 1/4</span>
       </div>
-      <p class="hint">
-        드럼을 누르면 악보의 점선 커서 자리에 음표가 찍힙니다. 킥과 하이햇처럼 겹쳐 누른 뒤 잠깐 멈추면 다음 칸으로 넘어가요.
-        마지막 마디를 넘어가면 새 마디가 자동으로 생깁니다.
-        <b>● 녹음</b>은 메트로놈에 맞춰 실제로 두드려 넣는 방식이고, 16분음표로 자동 정렬됩니다.
-      </p>
     </div>
 
     <div id="practiceMode" style="display:none">
@@ -1465,6 +1536,7 @@ const DIV_OK = [2,3,4,6,8];          // 8분 / 8분셋잇단 / 16분 / 16분셋�
 const DIV_UI = [2,3,4,6];            // 화면에 내놓는 값. 32분은 쉼표 글리프가 없어 보류
 const DIV_CYCLE = [4,3,6];           // 박 머리를 탭했을 때 도는 순서
 const BEATS = 4;                     // ts가 [4,4] 고정인 동안의 상수
+let entryDiv = 2;                    // 리얼드럼 탭에서 새 마디/박에 기본으로 쓸 분할(8비트=2, 16비트=4). defaultDiv()보다 먼저 선언되어야 한다(최초 emptyMeasure()가 즉시 이 값을 읽는다).
 
 function beatCount(m){ return (m && m.ts) ? (m.ts[0]|0) || BEATS : BEATS; }
 function divOf(m, b, voice){
@@ -1497,7 +1569,7 @@ function beatPosOf(m, voice, idx){
   return l.b + l.k / l.d;
 }
 function defaultDiv(beats){
-  return Array.from({length:beats||BEATS}, ()=>({h:4, f:4}));
+  return Array.from({length:beats||BEATS}, ()=>({h:entryDiv, f:entryDiv}));
 }
 
 // 박자표 유효성 검사 — 분자 1~32, 분모는 4(단순박) 또는 8(겹박자)만 허용.
@@ -1516,17 +1588,35 @@ function emptyMeasure(div, ts){
   return m;
 }
 
-/* 한 박의 분할을 바꾼다. 4칸에 찍힌 걸 3칸으로 옮길 방법이 없으므로 **그 박은 지워진다.**
+/* 한 박의 분할을 바꾼다.
+   배수 관계(예: 8분→16분, 16분→8분)면 자리를 그대로 옮겨 심을 수 있다 —
+   세분화(2→4처럼 칸이 늘어남)는 항상 무손실. 합치기(4→2처럼 칸이 줄어듦)는
+   버려지는 칸에 실제로 음이 있었을 때만 손실이 난다.
+   배수 관계가 아니면(예: 4↔3) 대응시킬 방법이 없어 **그 박이 지워진다.**
    지워진 음이 있었는지 알려 준다 — 되돌리기 안내를 띄울지 판단하는 데 쓴다. */
 function setDiv(m, b, voice, d){
   if(!DIV_OK.includes(d)) return false;
-  if(divOf(m, b, voice) === d) return false;
-  const from = beatOffset(m, voice, b), old = divOf(m, b, voice);
+  const old = divOf(m, b, voice);
+  if(old === d) return false;
+  const from = beatOffset(m, voice, b);
   let lost = false;
   INSTR.filter(i=>i.voice===voice).forEach(i=>{
     const arr = m[i.id];
-    const cut = arr.splice(from, old, ...new Array(d).fill(0));
-    if(cut.some(v=>v)) lost = true;
+    const oldVals = arr.splice(from, old);
+    const newVals = new Array(d).fill(0);
+    if(d % old === 0){                              // 세분화 — 무손실
+      const factor = d / old;
+      oldVals.forEach((v,k)=>{ newVals[k*factor] = v; });
+    } else if(old % d === 0){                        // 합치기 — 대표 칸만 살고 나머지는 손실 판정
+      const factor = old / d;
+      for(let k=0; k<d; k++){
+        newVals[k] = oldVals[k*factor];
+        for(let j=1; j<factor; j++){ if(oldVals[k*factor+j]) lost = true; }
+      }
+    } else {                                          // 배수 관계 아님 — 대응 불가, 전부 지움
+      if(oldVals.some(v=>v)) lost = true;
+    }
+    arr.splice(from, 0, ...newVals);
   });
   m.div[b][VK[voice]] = d;
   return lost ? 'lost' : true;
@@ -1728,9 +1818,9 @@ function cellW(){
          박 사이를 벌리면(요청 1) 이 값도 같이 올려야 한다 — 안 올렸더니
          아이패드 1024에서 문서가 통째로 가로 스크롤됐다 */
       const avail = gw.clientWidth - 28 - labelW() - 96;   // 28 = gridWrap 좌우 패딩
-      return Math.max(26, Math.min(42, Math.floor(avail / 16)));
+      return Math.max(20, Math.min(32, Math.floor(avail / 16)));   // 악보에 자리를 더 주려고 칸 폭 상한을 낮춤(42→32)
     }
-    return 30;
+    return 26;
   }
   return window.innerWidth >= 700 ? 42 : 38;
 }
@@ -1742,7 +1832,7 @@ function cellW(){
 
    행마다 칸 수가 다를 수 있어서(손 3분할 · 발 4분할) 한 장짜리 CSS 그리드로는
    못 짠다. 바깥은 `박 개수`만큼의 그리드, 각 박 안은 `div`개의 서브 그리드로 둔다. */
-function beatPx(){ return cellW()*4 + 20; }   // 칸 사이 4px×3 + 박 사이 여백 8px
+function beatPx(){ return cellW()*4 + 14; }   // 칸 사이 3px×3 + 박 사이 여백 5px — 악보에 자리를 더 주려고 좁힘
 
 /* 박을 세는 말. 첫 칸은 박 번호로 바뀐다.
    **여기 한 곳만 고치면 세는 방식을 통째로 바꿀 수 있다** —
@@ -2804,6 +2894,7 @@ if(Object.keys(SAMPLE_URLS).length) loadSamples(SAMPLE_URLS);
 /* ================= 시퀀서 ================= */
 let curM = 0, curS = 0, nextT = 0, timer = null, playStart = 0, recording = false;
 let rangeStart = 0, rangeEnd = 0, preSteps = 0, practiceRun = false;
+let recordArmAt = null;  // 녹음 리드인 중 실제 기록을 시작할 마디 인덱스 (null=리드인 없음/이미 시작함)
 let expected = [], loopCount = 0, cycleStart = 0;
 const playBtn = document.getElementById('playBtn');
 const ICON_PLAY = '<svg class="icn" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.6v12.8L19 12z" fill="currentColor"/></svg>';
@@ -2820,6 +2911,10 @@ function beatDurFor(m){ return beatDur() * 4 / normTs(m && m.ts)[1]; }
    손과 발이 서로 다른 분할을 가지면 칸이 하나의 줄로 안 세어지므로,
    각 성부의 칸을 박 위치(실수)로 바꿔 합친 뒤 정렬한다.
    같은 시각에 손·발이 겹치면 둘 다 그 자리에 남는다 — 스케줄만 두 번 될 뿐 소리는 정상. */
+/* 소리 나는 칸만이 아니라 **모든 칸**을 예약한다 — 소리는 tick()의 v 체크에서 어차피
+   빈 칸이면 안 울리지만, scheduleVisual은 매 칸마다 불러줘야 재생 커서가 쉼표 칸도
+   실제 박자대로 지나가며 멈춘다(예전엔 음표만 예약해서 쉼표를 건너뛰고 바로 다음
+   음표로 커서가 점프해 보였다). */
 function measureEvents(m){
   const ev = [];
   ['hand','foot'].forEach(voice=>{
@@ -2828,7 +2923,6 @@ function measureEvents(m){
       const d = divOf(m, b, voice), off = beatOffset(m, voice, b);
       for(let k=0; k<d; k++){
         const idx = off + k;
-        if(!ids.some(i=>m[i.id][idx])) continue;   // 소리 나는 칸만 예약한다
         ev.push({pos: b + k/d, voice, b, k, idx, ids});
       }
     }
@@ -2895,10 +2989,15 @@ function tick(){
     nextT = tEnd; mStartT = tEnd;
     resetEvents(tEnd);
     curM++;
+    // 녹음 리드인 중이었다면, 목표 마디에 도달한 순간 실제 기록 시작
+    if(recordArmAt != null && curM === recordArmAt){
+      recording = true;
+      recordArmAt = null;
+    }
     const last = practiceRun ? rangeEnd : measures.length-1;
     if(curM > last){
       if(practiceRun) onCycleEnd(tEnd);
-      if(looping){ curM = (practiceRun || loopRange) ? rangeStart : 0; }
+      if(looping){ curM = rangeStart; }  // 일반 재생도 이제 rangeStart(선택 마디)를 씀 — 루프도 거기로
       else { stopPlay(true); return; }
     }
   }
@@ -2990,7 +3089,17 @@ function startPlay(opts){
     curM = rangeStart;
     preSteps = cinOn() ? beatCount(measures[curM]) : 0;
   } else {
-    rangeStart = 0; rangeEnd = measures.length-1; curM = 0;
+    // 그냥 재생(구간 반복 안 걸림)은 지금 선택한 마디부터 시작 — 곡 맨 처음이 아니라
+    rangeStart = selA(); rangeEnd = measures.length-1;
+    // 녹음 리드인: 목표 마디 한 마디 전부터 미리 재생 시작 — 녹음 버튼 누르자마자
+    // 바로 쳐야 하는 상황을 피하고, 실제 기록은 목표 마디에 도달했을 때 tick()에서 켠다
+    if(opts && opts.recordLeadIn && rangeStart > 0){
+      curM = rangeStart - 1;
+      recordArmAt = rangeStart;
+    } else {
+      curM = rangeStart;
+      recordArmAt = null;
+    }
     preSteps = cinOn() ? beatCount(measures[curM]) : 0;
   }
   playing = true; curS = 0; nextT = c.currentTime + 0.06;
@@ -3011,6 +3120,7 @@ function stopPlay(natural){
   clearPlayCells();
   const cur = document.getElementById('cursor'); if(cur) cur.setAttribute('opacity',0);
   recording = false;
+  recordArmAt = null;   // 리드인 중 정지해도 다음 재생에 잘못 남지 않게
   if(recDirty){ recDirty = false; commit(); }   // 녹음 한 판을 한 번의 실행 취소로
   const rb = document.getElementById('recBtn');
   if(rb){ rb.classList.remove('recording'); rb.textContent = '● 녹음'; }
@@ -3022,7 +3132,8 @@ document.getElementById('loopBtn').onclick = e=>{
   e.currentTarget.setAttribute('aria-pressed', looping);
 };
 document.addEventListener('keydown', e=>{
-  if(e.code==='Space' && e.target.tagName!=='INPUT'){ e.preventDefault(); playBtn.click(); }
+  // 스페이스바는 킥 입력에 배정돼 있어(KEY_TO_PAD) 재생은 Shift+Space로 분리
+  if(e.code==='Space' && e.shiftKey && !e.repeat && e.target.tagName!=='INPUT'){ e.preventDefault(); playBtn.click(); }
 });
 
 /* ================= 컨트롤 ================= */
@@ -3086,16 +3197,21 @@ function applyTsToSelection(){
   for(let mi=a; mi<=b; mi++) measures[mi] = emptyMeasure(null, newTs);
   refreshAll(); commit();
 }
-tsNumSel.addEventListener('change', applyTsToSelection);
-tsDenSel.addEventListener('change', applyTsToSelection);
-/* 요청 7 "원하는 마디 뒤에 마디 추가".
-   예전엔 무조건 맨 끝에 붙었다. 이제 **선택한 마디 바로 뒤**에 꽂는다 —
-   마지막 마디를 고른 상태면 결과가 예전과 같으므로 익숙한 동작을 안 깬다. */
-document.getElementById('addM').onclick = ()=>{
-  measures.splice(selMeasure+1, 0, emptyMeasure(null, measures[selMeasure].ts));
-  selMeasure++; selEnd = selMeasure; cursorB = 0; cursorK = 0;
+// 셀렉트는 이제 "다음에 추가할 마디"의 박자표만 고르는 용도라 바꿔도 지금 마디는 안 건드린다.
+// 지금 마디 자체를 바꾸고 싶을 때만 "적용" 버튼으로 명시적으로 실행한다.
+document.getElementById('tsApply').onclick = applyTsToSelection;
+/* 요청 7 "원하는 마디 앞/뒤에 마디 추가" — 위 셀렉트에서 고른 박자표로 꽂는다.
+   지금 마디의 박자표를 그대로 잇는 게 아니라, 변박 마디를 새로 추가하는 흐름
+   (예: 4/4 곡 중간에 6/8 브릿지 한 마디 끼워넣기)을 직접 지원하기 위함. */
+function insertMeasureAt(offset){   // offset 0=선택 마디 앞, 1=선택 마디 뒤
+  const newTs = normTs([+tsNumSel.value, +tsDenSel.value]);
+  const at = selMeasure + offset;
+  measures.splice(at, 0, emptyMeasure(null, newTs));
+  selMeasure = at; selEnd = selMeasure; cursorB = 0; cursorK = 0;
   refreshAll(); commit();
-};
+}
+document.getElementById('addBefore').onclick = ()=> insertMeasureAt(0);
+document.getElementById('addAfter').onclick  = ()=> insertMeasureAt(1);
 
 /* 총 마디 수를 한 번에 정한다.
    보통 24마디·32마디 곡이라 하나씩 늘리는 건 느리다. 스테퍼(▲▼)는 4마디씩 움직이고
@@ -3168,9 +3284,6 @@ document.getElementById('pasteM').onclick = ()=>{
   cursorB = 0; cursorK = 0;
   refreshAll(); refreshEditBtns(); commit();
 };
-document.querySelectorAll('.quickm').forEach(b=>{
-  b.onclick = ()=> setTotalMeasures(+b.dataset.n);
-});
 document.getElementById('dupM').onclick = ()=>{
   const copy = JSON.parse(JSON.stringify(measures[selMeasure]));
   measures.splice(selMeasure+1, 0, copy); selMeasure++; cursorB = 0; cursorK = 0;
@@ -3192,9 +3305,13 @@ document.getElementById('undoBtn').onclick = undo;
 document.getElementById('redoBtn').onclick = redo;
 document.addEventListener('keydown', e=>{
   if(!(e.metaKey || e.ctrlKey)) return;
+  // 제목 입력창 등에서는 브라우저 기본 복사/붙여넣기·실행취소를 그대로 둔다.
+  if(e.target.tagName==='INPUT' || e.target.tagName==='SELECT') return;
   const k = e.key.toLowerCase();
   if(k === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if(k === 'y'){ e.preventDefault(); redo(); }
+  else if(k === 'c'){ e.preventDefault(); document.getElementById('copyM').click(); }
+  else if(k === 'v'){ e.preventDefault(); document.getElementById('pasteM').click(); }
 });
 
 /* 상태 표시줄 가림막은 스크롤했을 때만 켠다. 맨 위에서는 블룸을 가리면 안 된다.
@@ -4031,11 +4148,26 @@ document.getElementById('fileInput').onchange = e=>{
 /* ================= 입력 모드: 그리드 / 리얼드럼 ================= */
 let inputMode = 'grid', cursorB = 0, cursorK = 0, autoAdv = true, advTimer = null, recDirty = false;
 const padEls = {};
-const KIT_POS = {  // [left%, top%, size(px)]
-  crash:[21,18,96], hihat:[9,54,80], ride:[83,20,106],
-  tom1:[41,25,78], tom2:[57,25,86],
-  snare:[31,62,92], ftom:[72,62,98], kick:[50,80,132],
+const KIT_POS = {  // [left%, top%, size(px)] — 크기 축소에 이어 위치도 중앙으로 모아 간격을 좁힘
+  crash:[29,27,67], hihat:[20,53,56], ride:[74,28,74],
+  tom1:[44,32,55], tom2:[55,32,60],
+  snare:[36,59,64], ftom:[66,59,69], kick:[50,72,92],
 };
+// 컴퓨터로 리얼드럼 입력할 때 쓰는 키 배치 — 손 위치에 맞춰 지정 (사용자 확정).
+// 크래쉬는 e/i 두 키 모두에 배정 (좌우 어느 손으로도 칠 수 있게).
+const KEY_TO_PAD = {
+  ' ': 'kick', 'j': 'hihat', 'f': 'snare', 'r': 'tom1',
+  'u': 'tom2', 'l': 'ftom', 'e': 'crash', 'i': 'crash', 'k': 'ride',
+};
+// 악기 id → 눌러야 할 키 라벨(들). 크래쉬처럼 키가 두 개면 "E/I"로 합쳐 보여준다.
+const PAD_KEY_LABEL = (()=>{
+  const byPad = {};
+  Object.entries(KEY_TO_PAD).forEach(([key, id])=>{
+    const label = key === ' ' ? 'SPACE' : key.toUpperCase();
+    byPad[id] = byPad[id] ? byPad[id] + '/' + label : label;
+  });
+  return byPad;
+})();
 function buildKit(){
   const kit = document.getElementById('kit');
   if(kit.childElementCount) return;
@@ -4046,6 +4178,13 @@ function buildKit(){
     d.style.left = p[0]+'%'; d.style.top = p[1]+'%';
     d.style.width = p[2]+'px'; d.style.height = p[2]+'px';
     d.textContent = ins.name;
+    const label = PAD_KEY_LABEL[ins.id];
+    if(label){
+      const badge = document.createElement('span');
+      badge.className = 'keybadge';
+      badge.textContent = label;
+      d.appendChild(badge);
+    }
     d.addEventListener('pointerdown', e=>{ e.preventDefault(); padHit(ins.id); });
     kit.appendChild(d);
     padEls[ins.id] = d;
@@ -4100,6 +4239,7 @@ function padHit(id){
     return;
   }
   if(inputMode!=='drum') return;
+  if(playing) return;  // 녹음 없이 그냥 재생 중일 땐 커서 스텝 입력을 막는다(위의 recording&&playing 분기가 실제 녹음은 이미 처리함)
   // 스텝 입력: 같은 표기면 지우고, 다른 표기면 바꾼다.
   // 커서는 손 격자로 움직인다 — 발 악기는 같은 시각의 발 칸으로 옮겨 찍는다
   const idx = cursorIdx(byId[id].voice);
@@ -4108,8 +4248,10 @@ function padHit(id){
   measures[selMeasure][id][idx] = val;
   refreshGrid(); renderScore(); refreshStepDots(); commit();
   if(autoAdv && val){
+    // 킥+하이햇처럼 동시에 누르는 두 키는 보통 수십ms 안에 들어오므로,
+    // 그보다 조금 긴 여유만 두고 바로 다음 칸으로 넘어간다(예전 400ms는 체감상 너무 느렸음).
     clearTimeout(advTimer);
-    advTimer = setTimeout(advanceStep, 400);
+    advTimer = setTimeout(()=>advanceStep(true), 60);  // 패드 입력 중엔 마디 끝에서도 계속 넘어간다(자동 마디 추가 포함)
   }
 }
 /* 리얼드럼 스텝 커서는 **손 격자**를 따라 움직인다.
@@ -4128,31 +4270,79 @@ function cursorIdx(voice){
   const k = Math.min(df-1, Math.round(cursorK / dh * df));
   return idxAt(m, 'foot', cursorB, k);
 }
+// 화살표로 이동한 지금 커서 자리(손+발 모두)의 노트를 전부 지운다 — Backspace용
+function clearAtCursor(){
+  const m = measures[selMeasure];
+  if(!m) return;
+  let changed = false;
+  ['hand','foot'].forEach(voice=>{
+    const idx = cursorIdx(voice);
+    INSTR.filter(i=>i.voice===voice).forEach(ins=>{
+      if(m[ins.id][idx]){ m[ins.id][idx] = 0; changed = true; }
+    });
+  });
+  if(changed){ refreshGrid(); renderScore(); refreshStepDots(); commit(); }
+}
+// ⌘Backspace — 선택한 마디의 모든 노트(손+발 전체 칸)를 한 번에 지운다. 분할(div)은 안 건드린다.
+function clearMeasure(){
+  const m = measures[selMeasure];
+  if(!m) return;
+  let changed = false;
+  INSTR.forEach(ins=>{
+    m[ins.id].forEach((v,i)=>{ if(v){ m[ins.id][i] = 0; changed = true; } });
+  });
+  if(changed){
+    refreshGrid(); renderScore(); refreshStepDots(); commit();
+    toast(`${selMeasure+1}마디의 노트를 모두 지웠습니다.`, '되돌리기', undo);
+  }
+}
 function cursorPos(){ return cursorB + cursorK / cursorDiv(); }
 
-function advanceStep(){
-  cursorK++;
-  if(cursorK >= cursorDiv()){
-    cursorK = 0; cursorB++;
-    if(cursorB >= beatCount(measures[selMeasure])){
-      cursorB = 0;
-      if(selMeasure === measures.length-1) measures.push(emptyMeasure(null, measures[selMeasure].ts)); // 자동 마디 추가
-      selMeasure++;
-      refreshChips(); buildGrid(); renderScore();
-    }
-  }
-  refreshStepDots(); updateEditCursor();
-}
-function prevStep(){
-  cursorK--;
-  if(cursorK < 0){
-    cursorB--;
-    if(cursorB < 0){
-      if(selMeasure > 0){ selMeasure--; refreshChips(); buildGrid(); }
-      cursorB = beatCount(measures[selMeasure]) - 1;
-    }
+/* Shift+화살표(또는 Shift+1·2) 전용 — 커서가 마디 어디에 있든 곧장 옆 마디로 넘어간다.
+   다음 마디는 첫 비트, 이전 마디는 마지막 비트에 커서가 놓인다. */
+function jumpMeasure(dir){
+  if(dir > 0){
+    if(selMeasure === measures.length-1) measures.push(emptyMeasure(null, measures[selMeasure].ts)); // 자동 마디 추가
+    selMeasure++; selEnd = selMeasure;
+    cursorB = 0; cursorK = 0;
+  } else {
+    if(selMeasure === 0) return;  // 첫 마디보다 앞은 없다
+    selMeasure--; selEnd = selMeasure;
+    cursorB = beatCount(measures[selMeasure]) - 1;
     cursorK = divOf(measures[selMeasure], cursorB, 'hand') - 1;
   }
+  refreshChips(); buildGrid(); renderScore();
+  refreshStepDots(); updateEditCursor();
+}
+
+/* crossMeasure가 없으면(=일반 화살표/1·2) 마디 경계에서 멈춘다.
+   Shift를 눌러야만(=crossMeasure) 옆 마디로 넘어간다 — 그 외 호출부(패드 자동 이동, ◀▶ 버튼)는
+   기존처럼 항상 넘어가도 된다. selEnd도 같이 옮겨야 선택 하이라이트가 옛 마디에 남지 않는다. */
+function advanceStep(crossMeasure){
+  const d = cursorDiv();
+  if(cursorK + 1 < d){
+    cursorK++;
+  } else if(cursorB + 1 < beatCount(measures[selMeasure])){
+    cursorK = 0; cursorB++;
+  } else if(crossMeasure){
+    cursorK = 0; cursorB = 0;
+    if(selMeasure === measures.length-1) measures.push(emptyMeasure(null, measures[selMeasure].ts)); // 자동 마디 추가
+    selMeasure++; selEnd = selMeasure;
+    refreshChips(); buildGrid(); renderScore();
+  } // else: 마지막 마디 끝 — 그대로 멈춘다
+  refreshStepDots(); updateEditCursor();
+}
+function prevStep(crossMeasure){
+  if(cursorK > 0){
+    cursorK--;
+  } else if(cursorB > 0){
+    cursorB--;
+    cursorK = divOf(measures[selMeasure], cursorB, 'hand') - 1;
+  } else if(crossMeasure && selMeasure > 0){
+    selMeasure--; selEnd = selMeasure; refreshChips(); buildGrid();
+    cursorB = beatCount(measures[selMeasure]) - 1;
+    cursorK = divOf(measures[selMeasure], cursorB, 'hand') - 1;
+  } // else: 마디(또는 곡) 맨 처음 — 그대로 멈춘다
   refreshStepDots(); updateEditCursor();
 }
 function refreshStepDots(){
@@ -4178,6 +4368,28 @@ function refreshStepDots(){
   }
   const info = document.getElementById('stepInfo');
   if(info) info.textContent = `${selMeasure+1}마디 · ${cursorB+1}박 ${cursorK+1}/${cursorDiv()}`;
+  syncEntryDivButtons();
+}
+/* 8비트/16비트 버튼은 "지금 보고 있는 마디"의 실제 분할을 그대로 보여준다.
+   마디마다 따로 정해질 수 있으므로(박별로도 다를 수 있음) 마디를 옮길 때마다 다시 계산한다.
+   한 마디 안에 8비트/16비트가 섞여 있으면(박별로 따로 나눈 경우) 둘 다 꺼진 상태로 보여준다. */
+function syncEntryDivButtons(){
+  const b8 = document.getElementById('entryDiv8'), b16 = document.getElementById('entryDiv16');
+  if(!b8 || !b16) return;
+  const m = measures[selMeasure];
+  let allD = null, mixed = !m;
+  if(m){
+    for(let b=0; b<beatCount(m) && !mixed; b++){
+      ['hand','foot'].forEach(voice=>{
+        const d = divOf(m, b, voice);
+        if(d !== 2 && d !== 4) return;           // 셋잇단 등은 8/16 토글과 무관, 판단에서 제외
+        if(allD === null) allD = d;
+        else if(allD !== d) mixed = true;
+      });
+    }
+  }
+  b8.classList.toggle('on', !mixed && allD===2);
+  b16.classList.toggle('on', !mixed && allD===4);
 }
 function updateEditCursor(){
   const cur = document.getElementById('cursor');
@@ -4195,31 +4407,81 @@ function updateEditCursor(){
     cur.setAttribute('opacity',0);
   }
 }
-document.getElementById('stepPrev').onclick = prevStep;
-document.getElementById('stepNext').onclick = advanceStep;
+// 꾹 누르고 있으면 계속 이동 — 처음 한 번은 즉시, 350ms 뒤부터 90ms 간격으로 반복
+function attachHoldRepeat(el, fn){
+  let t1=null, t2=null;
+  const stop=()=>{ if(t1){clearTimeout(t1);t1=null;} if(t2){clearInterval(t2);t2=null;} };
+  el.addEventListener('pointerdown', e=>{
+    e.preventDefault(); stop(); fn();
+    t1 = setTimeout(()=>{ t2 = setInterval(fn, 90); }, 350);
+  });
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>el.addEventListener(ev, stop));
+}
+attachHoldRepeat(document.getElementById('stepPrev'), ()=>prevStep(true));
+attachHoldRepeat(document.getElementById('stepNext'), ()=>advanceStep(true));
 document.getElementById('stepRest').onclick = advanceStep;
+/* 8비트/16비트 토글 — 이후 새로 생기는 마디·박의 기본 분할을 정하고,
+   지금 보고 있는 마디에도 즉시 적용한다(손+발, 마디 전체).
+   특정 박만 다르게 하고 싶으면 그 박머리를 눌러 개별 조정하면 된다(그 조정은 유지됨). */
+function setEntryDiv(d){
+  entryDiv = d;
+  const m = measures[selMeasure];
+  if(!m) return;
+  let changed = false, lost = false;
+  Array.from({length:beatCount(m)}, (_,i)=>i).forEach(b=>{
+    ['hand','foot'].forEach(voice=>{
+      const r = setDiv(m, b, voice, d);
+      if(r){ changed = true; if(r === 'lost') lost = true; }
+    });
+  });
+  if(changed){
+    buildGrid(); renderScore(); refreshStepDots(); commit();
+    if(lost) toast('입력 단위를 바꾸면서 <b>이 마디의 음표</b>가 지워졌습니다.', '되돌리기', undo);
+  } else {
+    refreshStepDots();
+  }
+}
+document.getElementById('entryDiv8').onclick = ()=> setEntryDiv(2);
+document.getElementById('entryDiv16').onclick = ()=> setEntryDiv(4);
 document.getElementById('autoAdvBtn').onclick = e=>{
   autoAdv = !autoAdv;
   e.currentTarget.classList.toggle('on', autoAdv);
 };
-const recBtn = document.getElementById('recBtn');
-recBtn.onclick = ()=>{
-  if(recording){ stopPlay(); }
-  else {
-    recording = true;
-    recBtn.classList.add('recording'); recBtn.textContent = '■ 녹음중';
-    if(!playing) startPlay();
-  }
-};
 document.addEventListener('keydown', e=>{
   if(e.target.tagName==='INPUT' || e.target.tagName==='SELECT') return;
-  if(e.metaKey || e.ctrlKey || e.altKey) return;      // ⌘Z 등과 겹치지 않게
-  const n = +e.key;
-  if(n>=1 && n<=8) padHit(INSTR[n-1].id);
+  // ⌘Backspace — 선택한 마디 전체를 한 번에 지운다(그리드/리얼드럼 어느 탭에서든).
+  if(e.metaKey && e.key==='Backspace'){ e.preventDefault(); clearMeasure(); return; }
+  if(e.metaKey || e.ctrlKey || e.altKey) return;  // ⌘Z 등과 안 겹치게
+  // 커서 이동/삭제는 키를 길게 눌러 반복되는 게 자연스러움(텍스트 커서처럼) — repeat 허용.
+  // 1·2도 좌우 화살표와 같은 기능(숫자 키보드만 쓰는 손이 있을 수 있어서).
+  // 그냥 이동은 마디 경계에서 멈추고, Shift를 같이 눌러야만 옆 마디로 넘어간다.
   if(inputMode==='drum'){
-    if(e.key==='ArrowRight') advanceStep();
-    if(e.key==='ArrowLeft') prevStep();
+    if(e.key==='ArrowRight' || e.key==='2'){ e.preventDefault(); e.shiftKey ? jumpMeasure(1) : advanceStep(false); return; }
+    if(e.key==='ArrowLeft'  || e.key==='1'){ e.preventDefault(); e.shiftKey ? jumpMeasure(-1) : prevStep(false); return; }
+    // 위/아래는 좌우 이동과 별개로, 지금 마디의 첫 칸/마지막 칸으로 바로 점프한다.
+    if(e.key==='ArrowUp'){
+      e.preventDefault(); cursorB = 0; cursorK = 0;
+      refreshStepDots(); updateEditCursor(); return;
+    }
+    if(e.key==='ArrowDown'){
+      e.preventDefault();
+      cursorB = beatCount(measures[selMeasure]) - 1;
+      cursorK = divOf(measures[selMeasure], cursorB, 'hand') - 1;
+      refreshStepDots(); updateEditCursor(); return;
+    }
+    if(e.key==='Backspace'){ e.preventDefault(); clearAtCursor(); prevStep(true); return; }  // 지우고 한 칸 앞으로 — 계속 누르면 앞쪽이 순서대로 지워진다
+    // Enter — 악보의 맨 처음(1마디 1박 1칸)으로 커서를 되돌린다.
+    if(e.key==='Enter'){
+      e.preventDefault();
+      selMeasure = 0; selEnd = 0; cursorB = 0; cursorK = 0;
+      refreshChips(); buildGrid(); renderScore(); refreshStepDots(); updateEditCursor();
+      return;
+    }
   }
+  if(e.shiftKey) return;  // Shift+Space(재생) 등 다른 조합과 안 겹치게 — 패드는 Shift 없이만
+  if(e.repeat) return;   // 패드 입력(악기 소리)은 길게 눌러도 한 번만
+  const padId = KEY_TO_PAD[e.key.toLowerCase()];
+  if(padId){ e.preventDefault(); padHit(padId); }     // 스페이스바 페이지 스크롤 방지
 });
 
 /* ================= 연습 모드 ================= */
@@ -4619,7 +4881,9 @@ function applyEdition(){
   // 없는 기능을 광고하면 기대만 생기고, 베타 피드백이 폰 하나로 안 모인다
   const pad  = w >= 700 && STUDIO_OK;
   const land = w > h;
-  const ipad = pad && land && w >= 860;      // 아이패드 가로 = 2단
+  // 좌우 2단(iPad 가로) 레이아웃은 끄고, 항상 위(악보)/아래(입력단) 1단으로 쓴다 —
+  // 인디케이터 앱 데스크톱 창은 iPad가 아니라서 2단을 켤 이유가 없고, 요청대로 상하 배치로 통일한다.
+  const ipad = false;
   document.body.classList.toggle('edition-pad', pad);
   document.body.classList.toggle('edition-ipad', ipad);
   document.documentElement.classList.toggle('is-fixed-viewport', ipad);
@@ -4695,6 +4959,96 @@ if(_restored){
   // 라이브러리가 생긴 뒤로 여기서 줄 길은 "새로 시작"(덮어쓰기)이 아니라 "곡 목록"이다
   setTimeout(()=> toast('지난 작업을 <b>이어서</b> 열었습니다.', '곡 목록', openLib), 400);
 }
+
+/* ================= 로직 재생 따라가기 =================
+   인디케이터가 이미 index.html/singer.html에 뿌려주는 것과 같은 /events SSE를 구독해서,
+   로직 트랜스포트의 원시 위치(mtcSeconds)를 이 채보의 마디/박으로 환산해 커서를 옮긴다.
+   레퍼런스 음원을 로직 클릭트랙에 올려두고 들으면서 채보할 때, 지금 로직이 어느 마디를
+   지나고 있는지 악보에서 바로 보여주기 위함 — 사운드 재생은 전혀 안 하고 커서만 따라간다.
+   이 채보의 1마디 = 로직 세션 00:00(맨 처음)이 기본 가정이지만, 곡 중간 마커부터 재생하는
+   경우가 많아 "여기를 1마디로" 버튼으로 기준점(logicOffsetSec)을 직접 지정할 수 있다 —
+   지정한 순간의 로직 위치를 빼서 상대 위치로 환산한다.
+   채보 자체의 ▶ 재생(playing)이 켜져 있으면 그쪽이 우선이고, 이 기능은 잠시 멈춘다. */
+let logicMtc = 0, logicPlaying = false, logicBroadcastAt = 0, logicOffsetSec = 0;
+(function connectLogicSSE(){
+  let es;
+  try{ es = new EventSource('/events'); }catch(e){ return; }
+  es.onmessage = e=>{
+    let st; try{ st = JSON.parse(e.data); }catch(err){ return; }
+    const wasPlaying = logicPlaying;
+    logicMtc = +st.mtcSeconds || 0;
+    logicPlaying = !!st.isPlaying;
+    logicBroadcastAt = +st.broadcastTimestampMs || Date.now();
+    if(wasPlaying && !logicPlaying) hideLogicHighlight();   // 로직이 멈추면 하이라이트 끔
+  };
+  es.onerror = ()=>{ logicPlaying = false; };   // EventSource가 알아서 재연결을 시도한다
+})();
+function liveLogicMtc(){
+  return logicMtc + Math.max(0, (Date.now()-logicBroadcastAt)/1000);
+}
+document.getElementById('logicAnchorBtn').onclick = ()=>{
+  logicOffsetSec = liveLogicMtc();
+  const info = document.getElementById('logicSyncInfo');
+  if(info) info.textContent = `기준 ${logicOffsetSec.toFixed(1)}s로 지정됨`;
+};
+// mtc(초) → {mi: 마디 인덱스, pos: 마디 안 박 위치(실수)}. 마디 길이 누적으로 훑는다(재생 tick()과 동일 방식).
+// pos는 그 박의 실제 입력 격자(div, 손 기준)에 맞춰 스냅한다 — 채보 자체 재생이 음표 칸 단위로
+// 딱딱 끊겨 움직이는 것과 같은 느낌을 주기 위해, 매끄러운 실수 위치 대신 계단식으로 이동시킨다.
+function mtcToChartPos(mtc){
+  let t = 0;
+  for(let mi=0; mi<measures.length; mi++){
+    const m = measures[mi], bd = beatDurFor(m), nb = beatCount(m), dur = bd*nb;
+    if(mtc < t+dur || mi===measures.length-1){
+      const bp = Math.min(nb-1e-4, Math.max(0,(mtc-t))/bd);
+      const b = Math.floor(bp), frac = bp - b;
+      const d = divOf(m, b, 'hand') || 4;
+      const k = Math.min(d-1, Math.round(frac*d));
+      return {mi, pos: b + k/d};
+    }
+    t += dur;
+  }
+  return null;
+}
+// 커서(가는 세로선)가 계속 옮겨다니면 산만하다는 피드백 — 대신 지금 마디 전체를
+// 옅게 깔아주는 사각형 하나만 움직인다(선택 마디 하이라이트와 같은 스타일, 다른 색).
+// renderScore()가 SVG를 통째로 새로 그릴 때마다 이 rect도 같이 사라지므로, 매 틱 없으면
+// 다시 만든다(자기 복구) — renderScore() 쪽을 따로 손 안 대도 되게.
+function getLogicHighlightEl(){
+  let r = document.getElementById('logicHighlight');
+  if(!r || !r.isConnected){
+    r = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    r.id = 'logicHighlight';
+    r.setAttribute('fill', 'var(--lime)');
+    r.setAttribute('opacity', '0');
+    r.setAttribute('rx', '7');
+    r.setAttribute('pointer-events', 'none');
+    (svg || document.getElementById('scoreSvg')).appendChild(r);
+  }
+  return r;
+}
+function hideLogicHighlight(){
+  const r = document.getElementById('logicHighlight');
+  if(r) r.setAttribute('opacity', '0');
+}
+// requestAnimationFrame은 이 창이 포커스를 잃으면(로직 창 쪽을 보고 있을 때 등) 브라우저가
+// 아예 멈춰버린다 — 정작 이 기능이 필요한 상황(로직을 조작하며 채보 창은 그냥 띄워만 둠)에서
+// 안 움직이는 원인이었다. setInterval은 백그라운드에서도 계속 돈다.
+setInterval(function logicFollowTick(){
+  if(!logicPlaying || playing){ hideLogicHighlight(); return; }   // 채보 자체 재생 중엔 그쪽이 우선
+  const liveMtc = liveLogicMtc() - logicOffsetSec;
+  const r = mtcToChartPos(liveMtc);
+  if(!r) return;
+  scrollScoreTo(r.mi);
+  const L = slotXCache[r.mi];
+  if(L){
+    const rect = getLogicHighlightEl();
+    rect.setAttribute('x', L.x0);
+    rect.setAttribute('y', L.top - 26);
+    rect.setAttribute('width', GEO.MEASURE_W);
+    rect.setAttribute('height', 4*LG + 52);
+    rect.setAttribute('opacity', '0.16');
+  }
+}, 100);
 </script>
 
 

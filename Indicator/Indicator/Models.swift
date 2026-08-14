@@ -155,6 +155,7 @@ struct IndicatorState: Codable, Equatable {
     var currentSongSections: [String] = []
     var currentSectionIndexInSong: Int = -1
     var isPlaying: Bool = false
+    var mtcSeconds: Double = 0   // 로직 트랜스포트 원시 재생 위치(초, 00:00 기준) — 채보 앱(/chart)이 자기 마디로 환산할 때 씀
     var bpm: Double = 120.0
     var beatsPerBar: Int = 4
     var timeSignature: String = "4/4"

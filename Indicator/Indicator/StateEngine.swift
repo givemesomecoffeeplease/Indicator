@@ -430,6 +430,14 @@ class StateEngine {
 
     private func compute() -> IndicatorState {
         var state   = IndicatorState()
+        // 원시 재생 상태·트랜스포트 위치는 마커/가사 스캔 여부와 무관하게 항상 채운다 —
+        // 아래 markers.isEmpty 같은 이른 return들 때문에 채보(/chart)처럼 마커를 안 쓰는
+        // 화면은 이 값들을 영영 못 받고 있었다(2026-08-14 발견한 버그).
+        state.isPlaying  = mtcIsPlaying
+        // 재생 중엔 MTC 원시값, 정지 중엔 AX로 읽은 타임코드 표시값(정지 상태에서도 갱신됨) —
+        // 로직을 정지해 놓고 특정 마디에 갖다 둔 뒤 "여기를 1마디로"를 누르는 워크플로를 위함.
+        // MTC는 재생 중에만 전송되므로, 정지 중엔 mtcTime이 마지막 재생 위치에 멈춰 있어 못 쓴다.
+        state.mtcSeconds = mtcIsPlaying ? mtcTime : (snapshot.transportMTC > 0 ? snapshot.transportMTC : mtcTime)
         let markers = snapshot.markers
         guard !markers.isEmpty else { return state }
 
@@ -525,7 +533,6 @@ class StateEngine {
             }
         }
 
-        state.isPlaying       = mtcIsPlaying
         var barFloat = realtimeBarFloat()
         // 단방향 가드: MTC 지터로 시간이 살짝 뒤로 튀어도 슬라이드가 되돌아가지 않도록
         // (섹션 전환/점프 시 리셋)
