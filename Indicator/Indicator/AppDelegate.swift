@@ -118,6 +118,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webServer.saveSongCountdownBars = { song, bars in
             LyricsStore.shared.setCountdownBars(song: song, bars: bars)
         }
+        webServer.getDrumChart = { song in
+            DrumChartStore.shared.get(song: song)
+        }
+        webServer.saveDrumChart = { song, json in
+            DrumChartStore.shared.set(song: song, json: json)
+        }
 
         logicPoller.start()
         mtcReceiver.start()

@@ -1170,6 +1170,16 @@
              한 묶음인지도 안 보였다("마디 부분이 너무 복잡해", 2026-08-13).
              뜻이 같은 것끼리 한 알약 안에 넣는다 — 기능은 하나도 안 뺐다.
              가로폭 실측: 낱개 8개 = 452px → 묶음 2개 = 300px. 한 줄이 준다 -->
+        <div class="mgrp" role="group" aria-label="/drum 줄바꿈">
+          <button id="lineToPrevBtn" class="btn sm" title="선택한 마디(들)를 앞줄(윗줄)로 합치기 — 줄의 시작 마디를 선택했을 때만 동작. 그 뒤는 다시 4마디씩 이어져서 자투리가 맨 끝으로 밀린다">◀ 앞줄로</button>
+          <button id="lineBreakBtn" class="btn sm" title="선택한 마디 바로 앞에 줄바꿈을 넣는다 — 그 자리부터 다시 4마디씩 시작">줄바꿈</button>
+          <button id="lineToNextBtn" class="btn sm" title="선택한 마디(들)를 현재 줄에서 떼어 바로 다음 줄에 편입시키기 — 그 다음 줄만 커지고 그 뒤 줄들은 전혀 안 움직인다">뒷줄로 ▶</button>
+        </div>
+        <div class="mgrp" role="group" aria-label="줄당 목표 마디 수">
+          <button id="lineTarget4Btn" class="btn sm" title="선택한 구간을 4마디씩 순차로 재배열하기(일회성 — 마지막에 자투리 남음)">4마디로 배치</button>
+          <button id="lineTarget8Btn" class="btn sm" title="선택한 구간을 8마디씩 순차로 재배열하기(일회성 — 마지막에 자투리 남음)">8마디로 배치</button>
+          <button id="lineResetBtn" class="btn sm" title="모든 마디의 수동 줄바꿈·배치 지정을 지우고 순수 기본 4마디 그리드로 되돌리기">줄바꿈 초기화</button>
+        </div>
         <div class="mgrp" role="group" aria-label="마디 복사">
           <button id="dupM">복제</button>
           <button id="copyM">복사</button>
@@ -1186,6 +1196,30 @@
              자리를 안 늘리려고 있던 슬롯을 그대로 쓴다 (도구 줄이 폰에서 이미 세 줄) -->
         <button id="libBtn" class="btn sm" style="display:none">곡 목록</button>
       </div>
+      <!-- 표기(기본/고스트/액센트/오픈하이햇)는 그리드·리얼드럼 어디서 찍든 같은 의미라
+           두 탭 공통 영역에 둔다 — 입력 단위(4/8/16비트)만 리얼드럼 전용(커서 이동 개념이라
+           그리드엔 없음, 그리드는 항상 16비트로 보여준다). -->
+      <div class="artrow" id="artRow">
+        <span class="lbl">표기</span>
+        <button data-art="1" class="">기본</button>
+        <button data-art="2" class="sel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M8 5c-2.4 3-2.4 11 0 14"></path><path d="M16 5c2.4 3 2.4 11 0 14"></path>
+            <ellipse cx="12" cy="12" rx="2.6" ry="2" fill="currentColor" stroke="none"></ellipse>
+          </svg>고스트
+        </button>
+        <button data-art="3">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 7.5 19 12 5 16.5"></path>
+          </svg>액센트
+        </button>
+        <button data-art="4">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="6.5" r="3.2"></circle>
+            <path d="M8 13.5 16 20"></path><path d="M16 13.5 8 20"></path>
+          </svg>오픈<span class="wide">&nbsp;하이햇</span>
+        </button>
+      </div>
     </div>
 
     <div id="gridMode">
@@ -1196,29 +1230,6 @@
       <div class="drumLayout">
         <div class="kitScroll"><div class="kit" id="kit"></div></div>
         <div class="drumSide">
-          <div class="sideGroup" role="group" aria-label="표기">
-            <span class="sideLabel">표기</span>
-            <div class="artrow" id="artRow">
-              <button data-art="1" class="">기본</button>
-              <button data-art="2" class="sel">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
-                  <path d="M8 5c-2.4 3-2.4 11 0 14"></path><path d="M16 5c2.4 3 2.4 11 0 14"></path>
-                  <ellipse cx="12" cy="12" rx="2.6" ry="2" fill="currentColor" stroke="none"></ellipse>
-                </svg>고스트
-              </button>
-              <button data-art="3">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M5 7.5 19 12 5 16.5"></path>
-                </svg>액센트
-              </button>
-              <button data-art="4">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
-                  <circle cx="12" cy="6.5" r="3.2"></circle>
-                  <path d="M8 13.5 16 20"></path><path d="M16 13.5 8 20"></path>
-                </svg>오픈<span class="wide">&nbsp;하이햇</span>
-              </button>
-            </div>
-          </div>
           <div class="sideGroup" role="group" aria-label="입력 단위">
             <span class="sideLabel">입력 단위</span>
             <div class="mgrp">
@@ -1233,8 +1244,11 @@
           </div>
           <div class="sideGroup" role="group" aria-label="로직 동기화">
             <span class="sideLabel">로직 동기화</span>
-            <button id="logicAnchorBtn" class="btn sm" title="지금 로직 재생 위치를 이 채보의 1마디로 지정 — 처음부터가 아니라 곡 중간 마커부터 재생할 때 씀">여기를 1마디로</button>
-            <span id="logicSyncInfo" class="sideLabel" style="margin-top:2px;"></span>
+            <div class="mgrp">
+              <button id="logicSetFirstBtn" class="btn sm" title="지금 로직 재생 위치를 이 채보의 1마디로 지정 — 곡을 다 합친 클릭에서 편집할 때만 필요. 파일에는 저장되지 않는 편집 중 편의 기능">첫마디 설정</button>
+              <button id="logicResetFirstBtn" class="btn sm" title="기본값(로직 타임라인 맨 처음 = 1마디)으로 되돌리기">초기화</button>
+            </div>
+            <span id="logicSyncInfo" class="sideLabel" style="margin-top:2px;" title="기본은 로직 타임라인 맨 처음이 이 채보의 1마디 — 곡을 따로 클릭 파일로 만들 때는 그대로 두면 됨">기본(타임라인 처음)</span>
           </div>
         </div>
       </div>
@@ -1488,6 +1502,7 @@
 
 <div id="printArea" aria-hidden="true"></div>
 
+<script src="/notation.js"></script>
 <script>
 "use strict";
 /* ================= 데이터 ================= */
@@ -1748,7 +1763,9 @@ let scorePend = null;
     const mi = miOf(e.target);
     if(mi == null || !tapMeasures()) return;
     scorePend = {mi, x:e.clientX, y:e.clientY, drag:false};
-    if(e.pointerType === 'mouse') selectMeasure(mi);   // 마우스는 즉시 반응
+    // Shift+클릭: 기준점(selMeasure)은 그대로 두고 여기까지 범위로 잡는다(끌기와 같은 동작을
+    // 클릭 두 번으로) — 시작 마디를 먼저 클릭하고, Shift 누른 채로 끝 마디를 클릭하면 된다.
+    if(e.pointerType === 'mouse') selectMeasure(mi, e.shiftKey);
   });
 
   /* 세로로 끌면 스크롤, 가로로 끌면 범위 선택.
@@ -1853,9 +1870,20 @@ function countLabels(beatNo, div){
   return w.map(t => t === '#' ? String(beatNo) : t);
 }
 
+// 그리드는 리얼드럼과 달리 "입력 모드" 개념이 없다 — 클릭 한 번으로 정확한 칸을 바로 찍으니
+// 굳이 단위를 정할 필요가 없고, 그냥 항상 16비트(칸 4개)로 보여주면 된다. 셋잇단 등(2/4가
+// 아닌 값)은 사용자가 박머리로 직접 나눈 것이니 그대로 둔다. 무손실 확장이라 안전.
+function normalizeGridDiv(m){
+  for(let b=0; b<beatCount(m); b++){
+    ['hand','foot'].forEach(voice=>{
+      if(divOf(m, b, voice) === 2) setDiv(m, b, voice, 4);
+    });
+  }
+}
 function buildGrid(){
   gridEl.innerHTML = '';
   const m = measures[selMeasure];
+  normalizeGridDiv(m);
   const nb = beatCount(m);
   const bw = beatPx();
   const blk = document.createElement('div');
@@ -2067,7 +2095,85 @@ function yOf(pos, top){ return top + pos*LG/2; }
 /* 악보를 target SVG에 그린다.
    o = {availW, perLine:'auto'|숫자, from, to, title, cache}
    반환값은 그려진 SVG의 자연 폭(px). */
+/* 편집 화면(o.perLine==='auto')은 /drum 뷰어와 완전히 같은 그리기 엔진(notation.js)의
+   줄바꿈(buildLineGroups)+폭 고정 압축 정책을 그대로 써서, 지금 보이는 그대로가 /drum에서
+   보일 결과와 항상 일치하도록 한다 — 더 이상 별도 "미리보기"가 필요 없다.
+   출력(PNG/PDF, o.perLine이 숫자)은 종이 페이지 배치가 목적이라 기존 방식 그대로 둔다. */
+function paintAutoScore(target, o){
+  const prevT = SVGT;
+  SVGT = target;
+  target.innerHTML = '';
+  const taps = [];
+  const title = (o.title || '').trim();
+  const titleH = title ? 30 : 0;
+  const { REF_SLOT, REF_GAP, REF_PAD, REF_CLEF, REF_MEASURE_W } = Notation;
+  const targetPerLine = 4;
+  const groups = Notation.buildLineGroups(measures, [], targetPerLine);
+  const lines = groups.length;
+  const svgW = REF_CLEF + targetPerLine*REF_MEASURE_W + 8;
+  const svgH = TOP_PAD + titleH + lines*SYS_H;
+  target.setAttribute('width', svgW);
+  target.setAttribute('height', svgH);
+  target.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+  if(title){
+    const tt = el('text',{x:svgW/2, y:TOP_PAD+2, 'font-size':16, 'font-weight':'700',
+      fill:INK, 'text-anchor':'middle'});
+    tt.textContent = title;
+    target.appendChild(tt);
+  }
+  groups.forEach((g, ln)=>{
+    const gFrom = g.measureStartIdx, nInLine = g.measureCount;
+    const scale = Math.min(1, targetPerLine / nInLine);
+    const slot = REF_SLOT*scale, gap = REF_GAP*scale, pad = REF_PAD*scale, clef = REF_CLEF;
+    GEO = {SLOT_W:slot, BEAT_GAP:gap, M_PAD:pad, CLEF_W:clef, MEASURE_W: pad*2 + 16*slot + 3*gap};
+    function mwOf(m){ const bc = beatCount(m); return pad*2 + bc*4*slot + Math.max(0, bc-1)*gap; }
+    const lineTs = normTs(measures[gFrom] && measures[gFrom].ts);
+    const top = TOP_PAD + titleH + ln*SYS_H + 34;
+    const bottom = top + 4*LG;
+    let usedWidth = clef;
+    for(let k=0;k<nInLine;k++) usedWidth += mwOf(measures[gFrom+k]);
+    for(let l=0;l<5;l++)
+      target.appendChild(el('line',{x1:6,y1:top+l*LG,x2:usedWidth,y2:top+l*LG,stroke:INK,'stroke-width':1}));
+    const clefX = 15;
+    target.appendChild(el('rect',{x:clefX,y:top+LG,width:3.2,height:2*LG,fill:INK}));
+    target.appendChild(el('rect',{x:clefX+6.4,y:top+LG,width:3.2,height:2*LG,fill:INK}));
+    const tsX = clefX + 17, tsSize = 13.5;
+    const ts1 = el('text',{x:tsX,y:top+LG*1.62,'font-size':tsSize,'font-weight':'700',
+      fill:INK,'font-family':'Georgia,"Times New Roman",serif','text-anchor':'start'});
+    ts1.textContent = String(lineTs[0]);
+    const ts2 = el('text',{x:tsX,y:top+LG*3.62,'font-size':tsSize,'font-weight':'700',
+      fill:INK,'font-family':'Georgia,"Times New Roman",serif','text-anchor':'start'});
+    ts2.textContent = String(lineTs[1]);
+    target.appendChild(ts1); target.appendChild(ts2);
+    target.appendChild(el('line',{x1:6,y1:top,x2:6,y2:bottom,stroke:INK,'stroke-width':1.4}));
+    let mx = clef;
+    for(let k=0;k<nInLine;k++){
+      const mi = gFrom + k;
+      const MW = mwOf(measures[mi]);
+      if(o.cache) o.cache[mi] = {x0:mx, top, w:MW};
+      if(o.cache && tapMeasures() && mi >= selA() && mi <= selB()){
+        target.appendChild(el('rect',{x:mx, y:top-26, width:MW, height:4*LG+52,
+          fill:'#7B4BE0', opacity:0.09, rx:7, 'pointer-events':'none'}));
+      }
+      const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
+      target.appendChild(num);
+      drawMeasure(measures[mi], mx, top);
+      mx += MW;
+      target.appendChild(el('line',{x1:mx,y1:top,x2:mx,y2:bottom,stroke:INK,'stroke-width':1.4}));
+      if(o.cache && tapMeasures()) taps.push({mi, x:mx-MW, y:top-26, w:MW, h:4*LG+52});
+    }
+  });
+  taps.forEach(t=>{
+    const r = el('rect',{x:t.x, y:t.y, width:t.w, height:t.h, fill:'transparent', 'data-mi':t.mi});
+    r.style.cursor = 'pointer';
+    target.appendChild(r);
+  });
+  SVGT = prevT;
+  return svgW;
+}
+
 function paint(target, o){
+  if(o.perLine === 'auto') return paintAutoScore(target, o);
   const prevT = SVGT;
   SVGT = target;
   target.innerHTML = '';
@@ -2075,26 +2181,7 @@ function paint(target, o){
   const to = (o.to == null) ? measures.length : o.to;
   const n = Math.max(1, to - from);
   let slot, gap, pad, clef, perLine;
-  if(o.perLine === 'auto'){
-    // 좁은 화면에서는 슬롯을 좁혀 한 마디가 통째로 들어가게 한다
-    const narrow = o.availW < 560;
-    slot = narrow ? 18 : 23;
-    gap  = narrow ? 5  : 7;
-    pad  = narrow ? 12 : 16;
-    clef = narrow ? 52 : 62;
-    const fit = (s,g,p,c)=>Math.max(1, Math.floor((o.availW - c) / (p*2 + 16*s + 3*g)));
-    perLine = fit(slot, gap, pad, clef);
-    // 넓은 화면에서 한 줄에 한 마디만 들어가면 세로로만 길어져서 악보로 안 읽힌다.
-    // (아이패드 62% 칼럼 588px에서 slot 23이면 정확히 1마디였다)
-    // 슬롯을 단계적으로 좁혀 2마디가 들어가는 첫 값을 쓴다. 하한은 출력 기하값(14).
-    // 폰(narrow)은 어떤 값으로도 2마디가 안 되므로 건드리지 않는다.
-    if(!narrow && perLine < 2){
-      const CAND = [[19,6,14,58],[16,5,11,52],[14,4,9,48]];
-      for(const c of CAND){
-        if(fit(c[0],c[1],c[2],c[3]) >= 2){ slot=c[0]; gap=c[1]; pad=c[2]; clef=c[3]; perLine=fit(c[0],c[1],c[2],c[3]); break; }
-      }
-    }
-  } else {
+  {
     // 출력용 고정 레이아웃. 줄당 마디 수를 먼저 정하고 폭은 거기서 나온다.
     // 값이 화면보다 촘촘한 이유: 인쇄물은 SVG를 종이 폭에 맞춰 축소하므로
     // 한 마디가 넓을수록 오선 자체가 작아진다. 마디폭/오선높이 비를 7 언저리로
@@ -2168,7 +2255,7 @@ function paint(target, o){
     for(let k=0;k<nInLine;k++){
       const mi = gFrom + k;
       const mx = clef + k*MW;
-      if(o.cache) o.cache[mi] = {x0:mx, top};
+      if(o.cache) o.cache[mi] = {x0:mx, top, w:MW};
       // 편집 중인 마디를 옅게 깔아 준다. 오선 위에 얹히지만 7%라 선이 그대로 보인다
       if(o.cache && tapMeasures() && mi >= selA() && mi <= selB()){
         target.appendChild(el('rect',{x:mx, y:top-26, width:MW, height:4*LG+52,
@@ -3288,6 +3375,82 @@ document.getElementById('pasteM').onclick = ()=>{
   cursorB = 0; cursorK = 0;
   refreshAll(); refreshEditBtns(); commit();
 };
+// 기본은 항상 4마디씩 순차 배치(안 나누어떨어지면 맨 끝에만 자투리) — buildLineGroups 참고.
+// 이 자동 배치가 마음에 안 드는 지점만 손으로 미세조정한다.
+function currentLineGroups(){ return Notation.buildLineGroups(measures, [], 4); }
+
+// "앞줄로": 선택 구간(줄의 시작 마디부터)을 앞줄에 합친다. 선택한 마디 전체에 lineBreak=false를
+// 걸어서 그 경계들을 전부 무시하고 이어붙이게 만들고, 그 뒤로는 다시 4마디씩 자동으로 재정렬된다
+// (캐스케이드로 다시 채워지고 자투리는 맨 끝으로 밀림 — 선택 안 한 마디도 줄이 바뀌며 위치가
+// 움직일 수 있음, 의도된 동작).
+document.getElementById('lineToPrevBtn').onclick = ()=>{
+  const a = selA(), b = selB();
+  if(a <= 0) return;
+  const g = currentLineGroups().find(g => a >= g.measureStartIdx && a < g.measureStartIdx + g.measureCount);
+  if(!g || g.measureStartIdx !== a){ toast('선택한 구간이 줄의 시작이 아니에요.'); return; }
+  for(let i=a; i<=b; i++){ measures[i].lineBreak = false; delete measures[i].lineTarget; }
+  refreshAll();
+  commit();
+};
+// "줄바꿈": 선택한 마디 바로 앞에 강제로 새 줄을 시작한다 — 중간에서 줄을 끊는 단순 동작.
+function forceLineBreak(){
+  const a = selA();
+  if(a <= 0) return;
+  measures[a].lineBreak = true;
+  refreshAll();
+  commit();
+}
+document.getElementById('lineBreakBtn').onclick = forceLineBreak;
+
+// "뒷줄로": 선택 구간을 현재 줄에서 떼어내 "바로 다음 줄"에 편입시킨다. 앞줄로와 달리 캐스케이드
+// 없음 — 편입 대상 줄만 그만큼 커지고, 그 뒤 모든 줄은 원래 끝 경계 그대로 전혀 안 움직인다.
+// 방법: 선택구간 시작(a)부터 "다음 줄"의 원래 끝(mergedEnd)까지를 정확히 mergedSize짜리
+// 섬(lineTarget)으로 통째로 지정 — 섬의 시작이 자동으로 앞쪽 기본 청크를 그 자리에서 끊어주고,
+// 섬의 끝(mergedEnd)은 원래 다음 줄의 끝 그대로라 그 뒤는 손대지 않는다.
+document.getElementById('lineToNextBtn').onclick = ()=>{
+  const a = selA(), b = selB();
+  const groups = currentLineGroups();
+  const nextGroup = groups.find(g => g.measureStartIdx >= b+1);
+  if(!nextGroup || b+1 >= measures.length){ toast('편입할 다음 줄이 없어요.'); return; }
+  const mergedEnd = nextGroup.measureStartIdx + nextGroup.measureCount;
+  const mergedSize = mergedEnd - a;
+  if(mergedSize <= 0) return;
+  for(let i=a; i<mergedEnd; i++) measures[i].lineTarget = mergedSize;
+  refreshAll();
+  commit();
+};
+// "줄바꿈 초기화": 모든 마디의 수동 줄바꿈/배치 지정을 지우고 순수 기본 4마디 그리드로 되돌린다.
+document.getElementById('lineResetBtn').onclick = ()=>{
+  measures.forEach(m=>{ delete m.lineBreak; delete m.lineTarget; });
+  refreshAll();
+  commit();
+};
+// "4마디로 배치"/"8마디로 배치": "이 마디들은 N마디짜리 그룹"이라는 지속되는 이름표(lineTarget)를
+// 붙이는 게 아니라, 그 순간 선택 구간을 N마디씩 순차로 갈라주는 일회성 재배열이다(자투리는
+// 구간 끝에 남고, 선택 밖은 전혀 안 건드림). 기본 렌더링 단위가 4마디라, N=4는 구간 시작·끝에
+// 강제 줄바꿈만 꽂으면 되지만(자연스럽게 4씩 갈라짐), N=8처럼 기본보다 큰 값은 중간의 자연스러운
+// 4마디 정지점들을 "앞줄로"와 같은 억제(lineBreak=false)로 이어붙여야 한 줄에 N마디가 온전히
+// 표시된다 — N마디 경계마다 강제 줄바꿈(true), 그 사이 4마디 정지점은 전부 억제(false).
+function arrangeInLine(a, b, n){
+  for(let i=a; i<=b; i++) delete measures[i].lineTarget;
+  for(let off=a; off<=b; off+=n){
+    measures[off].lineBreak = true;
+    for(let k=off+4; k<Math.min(off+n, b+1); k++) measures[k].lineBreak = false;
+  }
+  if(b+1 < measures.length) measures[b+1].lineBreak = true;
+}
+document.getElementById('lineTarget4Btn').onclick = ()=>{
+  const a = selA(), b = selB();
+  arrangeInLine(a, b, 4);
+  refreshAll();
+  commit();
+};
+document.getElementById('lineTarget8Btn').onclick = ()=>{
+  const a = selA(), b = selB();
+  arrangeInLine(a, b, 8);
+  refreshAll();
+  commit();
+};
 document.getElementById('dupM').onclick = ()=>{
   const copy = JSON.parse(JSON.stringify(measures[selMeasure]));
   measures.splice(selMeasure+1, 0, copy); selMeasure++; cursorB = 0; cursorK = 0;
@@ -4093,6 +4256,9 @@ function normalizeMeasures(src){
   return src.map(mm=>{
     const ts = normTs(mm && mm.ts);
     const m = emptyMeasure(normDiv(mm && mm.div, ts[0]), ts);
+    if(mm && mm.lineBreak === true) m.lineBreak = true;    // 강제 줄바꿈("줄바꿈")
+    else if(mm && mm.lineBreak === false) m.lineBreak = false;   // 자연 경계 무시("앞줄로")
+    if(mm && typeof mm.lineTarget === 'number' && mm.lineTarget > 0) m.lineTarget = mm.lineTarget;   // 4/8 배치 또는 "뒷줄로"가 계산한 임의 크기 섬
     if(!mm || typeof mm !== 'object') return m;
     INSTR.forEach(i=>{
       const row = mm[i.id];
@@ -4707,9 +4873,11 @@ function applyPadView(){
        칸만 좁히면 오선 높이는 그대로라 음표가 서로 붙어 버린다.
      - 그 밖(폰·2단 편집): 폭에서 계산 */
   const sel = document.getElementById('perLineSel');
-  const onePane = b.classList.contains('edition-pad') && !ip;
+  // "한 단 패드 고정 4마디"는 이제 paintAutoScore()가 항상 하는 일이라(폭 고정, 화면 크기와
+  // 무관) 더 이상 여기서 숫자로 강제할 필요가 없다 — 그냥 'auto'로 두면 같은 결과가 나오면서
+  // /drum과도 완전히 같은 화면(줄바꿈·lineBreak 반영)이 된다. 인쇄 미리보기(검토 모드)만
+  // 종이 페이지 배치가 목적이라 여전히 고정 숫자를 쓴다.
   screenPerLine = (padView === 'review' && ip) ? Math.max(1, +(sel ? sel.value : 4) || 4)
-                : onePane ? 4
                 : 'auto';
   // 연주·검토는 입력 패널이 없으므로 그리드 모드로 되돌려 둔다
   if(solo && inputMode !== 'grid'){ if(micStream) stopMic(); setMode('grid'); }
@@ -4975,57 +5143,41 @@ if(_restored){
 
 /* ================= 로직 재생 따라가기 =================
    인디케이터가 이미 index.html/singer.html에 뿌려주는 것과 같은 /events SSE를 구독해서,
-   로직 트랜스포트의 원시 위치(mtcSeconds)를 이 채보의 마디/박으로 환산해 커서를 옮긴다.
-   레퍼런스 음원을 로직 클릭트랙에 올려두고 들으면서 채보할 때, 지금 로직이 어느 마디를
-   지나고 있는지 악보에서 바로 보여주기 위함 — 사운드 재생은 전혀 안 하고 커서만 따라간다.
-   이 채보의 1마디 = 로직 세션 00:00(맨 처음)이 기본 가정이지만, 곡 중간 마커부터 재생하는
-   경우가 많아 "여기를 1마디로" 버튼으로 기준점(logicOffsetSec)을 직접 지정할 수 있다 —
-   지정한 순간의 로직 위치를 빼서 상대 위치로 환산한다.
+   로직이 지금 재생 중인 마디에 맞춰 이 채보의 하이라이트를 옮긴다.
+
+   기본값: 이 채보의 1마디 = 로직 타임라인의 맨 처음(barPosition 1.0). 곡마다 따로 클릭 파일을
+   만들어 그 파일 하나만 재생하며 채보하는 보통 워크플로에서는 그대로 맞는다.
+
+   예외: 세트리스트 전체를 합친 클릭(그 곡이 타임라인 중간 어딘가에서 시작함) 안에서 편집하고
+   싶을 때만 "첫마디 설정" 버튼으로 지금 로직 위치를 1마디로 지정한다. 이 값은 **세션에만
+   있고 파일(.mai.json)에는 절대 저장되지 않는다** — 편집 중 편의를 위한 것일 뿐, 새로고침하면
+   초기화된다("초기화" 버튼으로도 즉시 되돌릴 수 있음).
+
    채보 자체의 ▶ 재생(playing)이 켜져 있으면 그쪽이 우선이고, 이 기능은 잠시 멈춘다. */
-let logicMtc = 0, logicPlaying = false, logicBroadcastAt = 0, logicOffsetSec = 0;
-(function connectLogicSSE(){
-  let es;
-  try{ es = new EventSource('/events'); }catch(e){ return; }
-  es.onmessage = e=>{
-    let st; try{ st = JSON.parse(e.data); }catch(err){ return; }
-    const wasPlaying = logicPlaying;
-    logicMtc = +st.mtcSeconds || 0;
-    logicPlaying = !!st.isPlaying;
-    logicBroadcastAt = +st.broadcastTimestampMs || Date.now();
-    if(wasPlaying && !logicPlaying) hideLogicHighlight();   // 로직이 멈추면 하이라이트 끔
-  };
-  es.onerror = ()=>{ logicPlaying = false; };   // EventSource가 알아서 재연결을 시도한다
-})();
-function liveLogicMtc(){
-  return logicMtc + Math.max(0, (Date.now()-logicBroadcastAt)/1000);
-}
-document.getElementById('logicAnchorBtn').onclick = ()=>{
-  logicOffsetSec = liveLogicMtc();
+const DEFAULT_START_BAR_POS = 1.0;
+let manualStartBarPos = null;   // 세션 전용 — draftPayload 등 어디에도 저장하지 않는다
+let lastKnownBarPos = null;
+let logicCurMeasure = -1;
+
+function effectiveStartBarPos(){ return manualStartBarPos !== null ? manualStartBarPos : DEFAULT_START_BAR_POS; }
+function refreshLogicSyncInfo(){
   const info = document.getElementById('logicSyncInfo');
-  if(info) info.textContent = `기준 ${logicOffsetSec.toFixed(1)}s로 지정됨`;
-};
-// mtc(초) → {mi: 마디 인덱스, pos: 마디 안 박 위치(실수)}. 마디 길이 누적으로 훑는다(재생 tick()과 동일 방식).
-// pos는 그 박의 실제 입력 격자(div, 손 기준)에 맞춰 스냅한다 — 채보 자체 재생이 음표 칸 단위로
-// 딱딱 끊겨 움직이는 것과 같은 느낌을 주기 위해, 매끄러운 실수 위치 대신 계단식으로 이동시킨다.
-function mtcToChartPos(mtc){
-  let t = 0;
-  for(let mi=0; mi<measures.length; mi++){
-    const m = measures[mi], bd = beatDurFor(m), nb = beatCount(m), dur = bd*nb;
-    if(mtc < t+dur || mi===measures.length-1){
-      const bp = Math.min(nb-1e-4, Math.max(0,(mtc-t))/bd);
-      const b = Math.floor(bp), frac = bp - b;
-      const d = divOf(m, b, 'hand') || 4;
-      const k = Math.min(d-1, Math.round(frac*d));
-      return {mi, pos: b + k/d};
-    }
-    t += dur;
-  }
-  return null;
+  if(info) info.textContent = manualStartBarPos !== null
+    ? `수동 지정됨 (${manualStartBarPos.toFixed(2)})`
+    : '기본(타임라인 처음)';
 }
-// 커서(가는 세로선)가 계속 옮겨다니면 산만하다는 피드백 — 대신 지금 마디 전체를
-// 옅게 깔아주는 사각형 하나만 움직인다(선택 마디 하이라이트와 같은 스타일, 다른 색).
-// renderScore()가 SVG를 통째로 새로 그릴 때마다 이 rect도 같이 사라지므로, 매 틱 없으면
-// 다시 만든다(자기 복구) — renderScore() 쪽을 따로 손 안 대도 되게.
+document.getElementById('logicSetFirstBtn').onclick = ()=>{
+  if(lastKnownBarPos === null) return;
+  manualStartBarPos = lastKnownBarPos;
+  logicCurMeasure = -1;
+  refreshLogicSyncInfo();
+};
+document.getElementById('logicResetFirstBtn').onclick = ()=>{
+  manualStartBarPos = null;
+  logicCurMeasure = -1;
+  refreshLogicSyncInfo();
+};
+
 function getLogicHighlightEl(){
   let r = document.getElementById('logicHighlight');
   if(!r || !r.isConnected){
@@ -5043,25 +5195,38 @@ function hideLogicHighlight(){
   const r = document.getElementById('logicHighlight');
   if(r) r.setAttribute('opacity', '0');
 }
-// requestAnimationFrame은 이 창이 포커스를 잃으면(로직 창 쪽을 보고 있을 때 등) 브라우저가
-// 아예 멈춰버린다 — 정작 이 기능이 필요한 상황(로직을 조작하며 채보 창은 그냥 띄워만 둠)에서
-// 안 움직이는 원인이었다. setInterval은 백그라운드에서도 계속 돈다.
-setInterval(function logicFollowTick(){
-  if(!logicPlaying || playing){ hideLogicHighlight(); return; }   // 채보 자체 재생 중엔 그쪽이 우선
-  const liveMtc = liveLogicMtc() - logicOffsetSec;
-  const r = mtcToChartPos(liveMtc);
-  if(!r) return;
-  scrollScoreTo(r.mi);
-  const L = slotXCache[r.mi];
-  if(L){
-    const rect = getLogicHighlightEl();
-    rect.setAttribute('x', L.x0);
-    rect.setAttribute('y', L.top - 26);
-    rect.setAttribute('width', GEO.MEASURE_W);
-    rect.setAttribute('height', 4*LG + 52);
-    rect.setAttribute('opacity', '0.16');
-  }
-}, 100);
+(function connectLogicSSE(){
+  let es;
+  try{ es = new EventSource('/events'); }catch(e){ return; }
+  es.onmessage = e=>{
+    let st; try{ st = JSON.parse(e.data); }catch(err){ return; }
+    if(typeof st.barPosition === 'number') lastKnownBarPos = st.barPosition;
+    if(playing) { hideLogicHighlight(); return; }   // 채보 자체 재생 중엔 그쪽이 우선
+    if(!st.isPlaying || typeof st.barPosition !== 'number'){ hideLogicHighlight(); return; }
+    // floor: barPosition은 마디 N의 시작=N부터 다음 마디 직전=N+0.999...까지 연속으로 늘어나는 값이라
+    // round를 쓰면 마디 중간(N+0.5)에서 벌써 다음 마디로 넘어가 타이밍이 반 마디 어긋난다.
+    const mi = Math.floor(st.barPosition - effectiveStartBarPos());
+    if(mi === logicCurMeasure) return;
+    logicCurMeasure = mi;
+    if(mi < 0 || mi >= measures.length){ hideLogicHighlight(); return; }
+    scrollScoreTo(mi);
+    const L = slotXCache[mi];
+    if(L){
+      const rect = getLogicHighlightEl();
+      rect.setAttribute('x', L.x0);
+      rect.setAttribute('y', L.top - 26);
+      rect.setAttribute('width', L.w || GEO.MEASURE_W);
+      rect.setAttribute('height', 4*LG + 52);
+      rect.setAttribute('opacity', '0.16');
+    }
+  };
+  es.onerror = ()=>{ hideLogicHighlight(); };   // EventSource가 알아서 재연결을 시도한다
+})();
+
+// 편집 화면(악보 탭) 자체가 이제 /drum과 같은 그리기 엔진(notation.js)의 줄바꿈+폭 고정
+// 압축 정책을 그대로 쓰므로(paintAutoScore), 별도 "미리보기" 팝업이 필요 없다 — 여기서
+// 보이는 그대로가 .mai.json을 업로드했을 때 /drum에서 보일 결과다(섹션 경계만 예외 — 이
+// 화면은 곡을 모르므로 섹션 시작 강제 줄바꿈은 반영 못 함).
 </script>
 
 

@@ -20,8 +20,11 @@
 		BB00020B00000000000000AA /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010B00000000000000AA /* index.html */; };
 		BB00020C00000000000000AA /* singer.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010C00000000000000AA /* singer.html */; };
 		BB00020D00000000000000AA /* chart.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010D00000000000000AA /* chart.html */; };
+		BB00020E00000000000000AA /* drum.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010E00000000000000AA /* drum.html */; };
+		BB00020F00000000000000AA /* notation.js in Resources */ = {isa = PBXBuildFile; fileRef = BB00010F00000000000000AA /* notation.js */; };
 		F808FA292FEDAB0700C36F76 /* LyricsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA282FEDAB0700C36F76 /* LyricsStore.swift */; };
 		F808FA2B2FEDAB0700C36F76 /* ScheduleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */; };
+		F808FA2D2FEDAB0700C36F76 /* DrumChartStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA2C2FEDAB0700C36F76 /* DrumChartStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,8 +42,11 @@
 		BB00010B00000000000000AA /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
 		BB00010C00000000000000AA /* singer.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = singer.html; sourceTree = "<group>"; };
 		BB00010D00000000000000AA /* chart.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = chart.html; sourceTree = "<group>"; };
+		BB00010E00000000000000AA /* drum.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = drum.html; sourceTree = "<group>"; };
+		BB00010F00000000000000AA /* notation.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = notation.js; sourceTree = "<group>"; };
 		F808FA282FEDAB0700C36F76 /* LyricsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsStore.swift; sourceTree = "<group>"; };
 		F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleStore.swift; sourceTree = "<group>"; };
+		F808FA2C2FEDAB0700C36F76 /* DrumChartStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumChartStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -59,6 +65,7 @@
 			children = (
 				F808FA282FEDAB0700C36F76 /* LyricsStore.swift */,
 				F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */,
+				F808FA2C2FEDAB0700C36F76 /* DrumChartStore.swift */,
 				BB00000300000000000000AA /* Indicator */,
 				BB00000200000000000000AA /* Products */,
 			);
@@ -96,6 +103,8 @@
 				BB00010B00000000000000AA /* index.html */,
 				BB00010C00000000000000AA /* singer.html */,
 				BB00010D00000000000000AA /* chart.html */,
+				BB00010E00000000000000AA /* drum.html */,
+				BB00010F00000000000000AA /* notation.js */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -165,6 +174,8 @@
 				BB00020B00000000000000AA /* index.html in Resources */,
 				BB00020C00000000000000AA /* singer.html in Resources */,
 				BB00020D00000000000000AA /* chart.html in Resources */,
+				BB00020E00000000000000AA /* drum.html in Resources */,
+				BB00020F00000000000000AA /* notation.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -182,6 +193,7 @@
 				BB00020400000000000000AA /* LogicPoller.swift in Sources */,
 				F808FA292FEDAB0700C36F76 /* LyricsStore.swift in Sources */,
 				F808FA2B2FEDAB0700C36F76 /* ScheduleStore.swift in Sources */,
+				F808FA2D2FEDAB0700C36F76 /* DrumChartStore.swift in Sources */,
 				BB00020500000000000000AA /* StateEngine.swift in Sources */,
 				BB00020600000000000000AA /* WebServer.swift in Sources */,
 				BB00020700000000000000AA /* SSEBroadcaster.swift in Sources */,

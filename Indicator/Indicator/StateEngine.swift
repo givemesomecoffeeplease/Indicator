@@ -438,6 +438,7 @@ class StateEngine {
         // 로직을 정지해 놓고 특정 마디에 갖다 둔 뒤 "여기를 1마디로"를 누르는 워크플로를 위함.
         // MTC는 재생 중에만 전송되므로, 정지 중엔 mtcTime이 마지막 재생 위치에 멈춰 있어 못 쓴다.
         state.mtcSeconds = mtcIsPlaying ? mtcTime : (snapshot.transportMTC > 0 ? snapshot.transportMTC : mtcTime)
+        state.barPosition = ScheduleStore.shared.barPositionAt(mtcSeconds: state.mtcSeconds)
         let markers = snapshot.markers
         guard !markers.isEmpty else { return state }
 

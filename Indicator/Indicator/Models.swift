@@ -156,6 +156,7 @@ struct IndicatorState: Codable, Equatable {
     var currentSectionIndexInSong: Int = -1
     var isPlaying: Bool = false
     var mtcSeconds: Double = 0   // 로직 트랜스포트 원시 재생 위치(초, 00:00 기준) — 채보 앱(/chart)이 자기 마디로 환산할 때 씀
+    var barPosition: Double? = nil   // 실제 로직 템포맵 기준 절대 마디 위치(소수점 포함, ScheduleStore 스캔 데이터 있을 때만) — 드럼 뷰어(/drum) 라이브 동기화용
     var bpm: Double = 120.0
     var beatsPerBar: Int = 4
     var timeSignature: String = "4/4"

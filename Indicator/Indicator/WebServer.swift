@@ -11,6 +11,8 @@ class WebServer {
     private var bandContent: String = ""
     private var singerContent: String = ""
     private var chartContent: String = ""
+    private var drumContent: String = ""
+    private var notationJs: String = ""
 
     // Wired up by AppDelegate after init
     var getMarkers: (() -> [Marker])? = nil
@@ -24,6 +26,9 @@ class WebServer {
     var onLyricsSaved: (() -> Void)? = nil
     var getSongCountdownBars: ((_ song: String) -> Int)? = nil
     var saveSongCountdownBars: ((_ song: String, _ bars: Int) -> Void)? = nil
+    // 드럼 채보(/chart에서 내보낸 .mai.json, /edit에서 곡별로 업로드) — 원본 JSON을 그대로 보관
+    var getDrumChart: ((_ song: String) -> Data?)? = nil
+    var saveDrumChart: ((_ song: String, _ json: Data) -> Void)? = nil
 
     func start(port: UInt16) {
         loadHTML()
@@ -119,7 +124,11 @@ class WebServer {
         case ("GET", "/band"):                        handleBand(conn)
         case ("GET", "/singer"):                      handleSinger(conn)
         case ("GET", "/chart"):                        handleChart(conn)
+        case ("GET", "/drum"):                         handleDrum(conn)
+        case ("GET", "/notation.js"):                  handleNotationJs(conn)
         case ("GET", "/api/sections"):                handleSections(conn)
+        case _ where method == "GET" && path.hasPrefix("/api/drumChart"): handleGetDrumChart(conn, path: path)
+        case ("POST", "/save-drum-chart"):            handleSaveDrumChart(conn, body: body)
         case ("GET", "/edit"):                        handleEdit(conn)
         case ("POST", "/save"):                       handleSave(conn, body: body)
         case ("POST", "/save-song-meta"):             handleSaveSongMeta(conn, body: body)
@@ -158,6 +167,7 @@ class WebServer {
         <h1>Indicator</h1>
         <a class='btn singer' href='/singer'>싱어</a>
         <a class='btn band' href='/band'>밴드</a>
+        <a class='btn band' href='/drum'>드럼</a>
         <p class='sub'>선택 후 홈 화면에 추가하면 다음엔 바로 열려요</p>
         </body></html>
         """
@@ -176,16 +186,85 @@ class WebServer {
         send(conn, body: chartContent.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
     }
 
+    private func handleDrum(_ conn: NWConnection) {
+        send(conn, body: drumContent.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
+    }
+
+    private func handleNotationJs(_ conn: NWConnection) {
+        send(conn, body: notationJs.data(using: .utf8) ?? Data(), contentType: "application/javascript; charset=utf-8")
+    }
+
     private func handleSections(_ conn: NWConnection) {
         let markers = getMarkers?() ?? []
         var result: [[String: Any]] = []
         var currentSong = ""
+        var occCounts: [String: Int] = [:]   // "song|section" -> 지금까지 등장 횟수 (드럼 뷰어 곡 연결용 occurrenceIndex)
         for m in markers {
-            if m.isSong { currentSong = m.displayName }
-            else { result.append(["song": currentSong, "section": m.displayName, "mtcSeconds": m.mtcSeconds]) }
+            if m.isSong {
+                currentSong = m.displayName
+                occCounts = [:]
+            } else {
+                let key = "\(currentSong)|\(m.displayName)"
+                let occIdx = occCounts[key] ?? 0
+                occCounts[key] = occIdx + 1
+                let (d, _) = getLyricOcc?(currentSong, m.displayName, occIdx) ?? (SectionData(), false)
+                var entry: [String: Any] = [
+                    "song": currentSong, "section": m.displayName, "occurrenceIndex": occIdx,
+                    "mtcSeconds": m.mtcSeconds, "lyricCue": d.lyricCue
+                ]
+                if let bp = ScheduleStore.shared.barPositionAt(mtcSeconds: m.mtcSeconds) { entry["barPosition"] = bp }
+                result.append(entry)
+            }
         }
         let data = (try? JSONSerialization.data(withJSONObject: result)) ?? Data()
         send(conn, body: data, contentType: "application/json; charset=utf-8")
+    }
+
+    // MARK: - /api/drumChart, /save-drum-chart
+    // 드럼 채보(/chart에서 만든 .mai.json)를 곡 단위로 저장/조회한다. "채보 1마디 = 그 곡의
+    // #Song 마커 시작 마디"로 항상 고정(사용자가 채보를 그렇게 만들기로 함) — 그래서 별도
+    // 오프셋 입력 없이, 이 곡의 시작 마디 barPosition만 같이 실어 보내면 /drum이 바로 쓸 수 있다.
+
+    private func queryParam(_ path: String, _ key: String) -> String? {
+        guard let qIdx = path.firstIndex(of: "?") else { return nil }
+        let query = path[path.index(after: qIdx)...]
+        for pair in query.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            guard kv.count == 2, kv[0] == key else { continue }
+            return String(kv[1]).removingPercentEncoding
+        }
+        return nil
+    }
+
+    private func handleGetDrumChart(_ conn: NWConnection, path: String) {
+        guard let song = queryParam(path, "song"), !song.isEmpty else {
+            send(conn, body: Data("{}".utf8), contentType: "application/json; charset=utf-8")
+            return
+        }
+        // startBarPosition은 그 곡의 #Song 마커 시작 마디 — 채보가 아직 업로드 안 됐어도 항상
+        // 계산해 준다. /chart 편집 중 라이브 추적(마커 없이도 곡 시작과 자동으로 맞춤)에도 쓰인다.
+        var obj: [String: Any] = [:]
+        if let chartJson = getDrumChart?(song) {
+            obj = (try? JSONSerialization.jsonObject(with: chartJson) as? [String: Any]) ?? [:]
+        }
+        if let marker = (getMarkers?() ?? []).first(where: { $0.isSong && $0.displayName == song }),
+           let sbp = ScheduleStore.shared.barPositionAt(mtcSeconds: marker.mtcSeconds) {
+            obj["startBarPosition"] = sbp
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
+        send(conn, body: data, contentType: "application/json; charset=utf-8")
+    }
+
+    private func handleSaveDrumChart(_ conn: NWConnection, body: Data) {
+        if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+           let song = obj["song"] as? String, !song.isEmpty,
+           let chart = obj["chart"],
+           let chartData = try? JSONSerialization.data(withJSONObject: chart) {
+            saveDrumChart?(song, chartData)
+            send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")
+        } else {
+            send(conn, body: Data("{\"ok\":false}".utf8), contentType: "application/json")
+        }
     }
 
     // MARK: - SSE
@@ -663,6 +742,40 @@ class WebServer {
             importBtn.onclick=()=>{pendingImportSong=song;$('import-song-inp').click();};
             actDiv.appendChild(exportBtn);actDiv.appendChild(importBtn);
             titleEl.appendChild(actDiv);
+
+            // 드럼 채보(/chart에서 "저장"으로 내보낸 .mai.json)를 이 곡에 업로드.
+            // 채보 1마디 = 이 곡의 #Song 마커 시작 마디로 항상 고정하는 워크플로라
+            // 별도 정렬 입력이 필요 없다 — 파일만 골라 올리면 끝.
+            const drumWrap=document.createElement('div');drumWrap.style.cssText='display:flex;align-items:center;gap:6px;margin-left:12px;font-size:13px;color:var(--sub)';
+            const drumStatus=document.createElement('span');drumStatus.textContent='드럼 채보: 확인 중…';
+            const drumBtn=document.createElement('button');
+            drumBtn.className='btn btn-sm btn-sec';drumBtn.textContent='.mai.json 업로드';
+            const drumInp=document.createElement('input');
+            drumInp.type='file';drumInp.accept='.json,.mai.json';drumInp.style.display='none';
+            drumBtn.onclick=()=>drumInp.click();
+            drumInp.onchange=()=>{
+              const f=drumInp.files[0];if(!f)return;
+              const r=new FileReader();
+              r.onload=()=>{
+                let chart;
+                try{ chart=JSON.parse(r.result); }
+                catch(e){ showMsg('읽을 수 있는 파일이 아니에요.'); return; }
+                if(!chart||!Array.isArray(chart.measures)){ showMsg('드럼 채보(.mai.json) 파일이 맞는지 확인해주세요.'); return; }
+                fetch('/save-drum-chart',{method:'POST',headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({song,chart})})
+                  .then(r=>r.json()).then(res=>{
+                    drumStatus.textContent=res.ok?'드럼 채보: 있음':'드럼 채보: 저장 실패';
+                    showMsg(res.ok?'드럼 채보를 저장했어요.':'드럼 채보 저장에 실패했어요.');
+                  }).catch(()=>{ drumStatus.textContent='드럼 채보: 저장 실패'; });
+              };
+              r.readAsText(f);
+              drumInp.value='';
+            };
+            fetch('/api/drumChart?song='+encodeURIComponent(song)).then(r=>r.json()).then(d=>{
+              drumStatus.textContent = (d && Array.isArray(d.measures)) ? '드럼 채보: 있음' : '드럼 채보: 없음';
+            }).catch(()=>{ drumStatus.textContent='드럼 채보: 없음'; });
+            drumWrap.appendChild(drumStatus);drumWrap.appendChild(drumBtn);drumWrap.appendChild(drumInp);
+            titleEl.appendChild(drumWrap);
           }
           renderSections(song);
         }
@@ -1259,14 +1372,22 @@ class WebServer {
         function showMsg(m){const el=$('save-msg');el.textContent=m;el.style.opacity='1';setTimeout(()=>el.style.opacity='0',2200);}
 
         // ── HTML 내보내기/가져오기 ──
-        function buildExportData(song){
+        // 드럼 채보(DrumChartStore)는 LyricsStore와 마찬가지로 인메모리 저장이라 앱을
+        // 재시작하면 사라진다 — "전체 내보내기" 백업에 같이 실어서 재시작해도 잃지 않게 한다.
+        async function buildExportData(song){
           const s=DATA.find(d=>d.song===song);
           if(!s)return null;
           const sections=s.sections.map(sec=>{
             const st=loadState(song,sec.sec,sec.occIdx);
             return{sec:sec.sec,occIdx:sec.occIdx,totalBars:sec.totalBars,durationSec:sec.durationSec||0,slides:slidesOf(st)};
           });
-          return[{song,countdownBars:s.countdownBars??1,sections}];
+          let drumChart=null;
+          try{
+            const r=await fetch('/api/drumChart?song='+encodeURIComponent(song));
+            const d=await r.json();
+            if(d&&Array.isArray(d.measures)&&d.measures.length)drumChart=d;
+          }catch(e){}
+          return[{song,countdownBars:s.countdownBars??1,sections,drumChart}];
         }
 
         async function buildStandaloneHtml(exportData,filename){
@@ -1301,7 +1422,7 @@ class WebServer {
           const date=prompt('예배 날짜를 입력하세요 (예: 20260628)','');
           if(date===null)return;
           const allSongs=[...new Set(DATA.map(s=>s.song))];
-          const exportData=allSongs.flatMap(song=>buildExportData(song)||[]);
+          const exportData=(await Promise.all(allSongs.map(song=>buildExportData(song)))).flatMap(x=>x||[]);
           if(!exportData.length){showMsg('곡 데이터 없음');return;}
           const fname=(date?date+'_':'')+'가사편집';
           const html=await buildStandaloneHtml(exportData,fname);
@@ -1315,7 +1436,7 @@ class WebServer {
 
         async function standaloneDownload(){
           const allSongs=[...new Set(DATA.map(s=>s.song))];
-          const exportData=allSongs.flatMap(song=>buildExportData(song)||[]);
+          const exportData=(await Promise.all(allSongs.map(song=>buildExportData(song)))).flatMap(x=>x||[]);
           if(!exportData.length)return;
           const html=await buildStandaloneHtml(exportData);
           const blob=new Blob([html],{type:'text/html;charset=utf-8'});
@@ -1354,6 +1475,13 @@ class WebServer {
               dest.countdownBars=srcSong.countdownBars;
               fetch('/save-song-meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({song:dest.song,countdownBars:srcSong.countdownBars})});
             };
+            // 드럼 채보는 DrumChartStore가 인메모리라 백업 파일에 들어있으면 그대로 복원 —
+            // 지금 화면 목록에는 안 보이지만(그건 DATA에 안 실려있음) /drum·다음 "드럼 채보:
+            // 있음/없음" 표시에서 바로 반영된다.
+            const mergeDrumChart=(destSongName,srcSong)=>{
+              if(!srcSong.drumChart||!Array.isArray(srcSong.drumChart.measures)||!srcSong.drumChart.measures.length)return;
+              fetch('/save-drum-chart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({song:destSongName,chart:srcSong.drumChart})});
+            };
             if(targetSongName){
               const srcSong=importedData.find(s=>s.song===targetSongName)||importedData[0];
               if(!srcSong){showMsg('데이터 없음');return;}
@@ -1364,6 +1492,7 @@ class WebServer {
                 if(destSec)mergeSec(destSec,srcSec);
               });
               mergeCountdown(dest,srcSong);
+              mergeDrumChart(targetSongName,srcSong);
               importedSongs.add(targetSongName);
             } else {
               importedData.forEach(importSong=>{
@@ -1374,6 +1503,7 @@ class WebServer {
                   if(destSec)mergeSec(destSec,srcSec);
                 });
                 mergeCountdown(dest,importSong);
+                mergeDrumChart(importSong.song,importSong);
                 importedSongs.add(importSong.song);
               });
             }
@@ -1714,6 +1844,18 @@ class WebServer {
             chartContent = content
         } else {
             chartContent = "<html><body><h1>chart.html not found</h1></body></html>"
+        }
+        if let url = Bundle.main.url(forResource: "drum", withExtension: "html"),
+           let content = try? String(contentsOf: url, encoding: .utf8) {
+            drumContent = content
+        } else {
+            drumContent = "<html><body><h1>drum.html not found</h1></body></html>"
+        }
+        if let url = Bundle.main.url(forResource: "notation", withExtension: "js"),
+           let content = try? String(contentsOf: url, encoding: .utf8) {
+            notationJs = content
+        } else {
+            notationJs = "console.error('notation.js not found');"
         }
     }
 }
