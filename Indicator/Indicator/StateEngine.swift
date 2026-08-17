@@ -44,10 +44,6 @@ class StateEngine {
     private var sectionEntryMTC: TimeInterval = 0   // 이 섹션 진입 시점의 MTC
     private var sectionDurationSec: Double = 0
 
-    // ── bar↔MTC 앵커 (재생 중 동시에 알고 있는 값으로 업데이트) ──
-    private var anchorBar: Int = 0
-    private var anchorMTC: TimeInterval = 0
-
     // ── 카운트다운 ─────────────────────────────────────────
     // 스캔된 템포맵 기준 진짜 박 그리드(MTC)로 표시 시각을 정하고,
     // 한 번 표시된 숫자는 절대 되돌아가지 않는 단방향 가드로 MTC 지터 깜빡임 차단.
@@ -81,28 +77,19 @@ class StateEngine {
         self.snapshot = snapshot
         debugLog("[AX] mtcTime=\(String(format:"%.3f",mtcTime)) markers=\(snapshot.markers.count) bpm=\(snapshot.bpm) playing=\(mtcIsPlaying)")
 
-        // 재생 중에는 앵커 갱신
-        if mtcIsPlaying && snapshot.transportBar > 0 && mtcTime > 0 {
-            anchorBar = snapshot.transportBar
-            anchorMTC = mtcTime
-        }
-
         let detectedIdx: Int
         if mtcIsPlaying {
             detectedIdx = detectSectionIdx(at: mtcTime)
-        } else if snapshot.transportMTC > 0 {
-            // AX 타임코드 디스플레이 — 정지 상태에서도 읽힘, 점프 즉시 반영
-            detectedIdx = detectSectionIdx(at: snapshot.transportMTC)
-        } else if anchorBar > 0 {
-            // 폴백: 앵커로 추산
-            let barDiff = Double(snapshot.transportBar - anchorBar)
-            let estimatedMTC = anchorMTC + barDiff * Double(currentSectionBeatsPerBar) * notatedBeatDuration()
-            detectedIdx = detectSectionIdx(at: estimatedMTC)
         } else {
-            detectedIdx = -1
+            // 정지 상태: 문자열로 표시되는 SMPTE 타임코드(transportMTC)를 매 폴링마다 다시
+            // 파싱하던 이전 방식은 AX 읽기 타이밍(로직 UI 리페인트와 겹침)에 따라 값이 미세하게
+            // 흔들려 두 섹션 사이를 왔다갔다하는 버그가 있었음. 정수로 그대로 읽히는 마디 번호
+            // (transportBar)는 문자열 파싱을 거치지 않아 흔들릴 이유가 없고, 섹션 판정에는
+            // 마디 단위 정확도면 충분(마커는 항상 마디 경계에 위치) — 이걸로 대체.
+            detectedIdx = detectSectionIdxByBar(snapshot.transportBar)
         }
 
-        debugLog("[AX] playing=\(mtcIsPlaying) transportBar=\(snapshot.transportBar) anchorBar=\(anchorBar) detectedIdx=\(detectedIdx) currentIdx=\(currentSectionIdx)")
+        debugLog("[AX] playing=\(mtcIsPlaying) transportBar=\(snapshot.transportBar) detectedIdx=\(detectedIdx) currentIdx=\(currentSectionIdx)")
 
         if detectedIdx != currentSectionIdx, detectedIdx >= 0 {
             let detectedMTC = markerMTC(at: detectedIdx)
@@ -269,18 +256,11 @@ class StateEngine {
         let all   = snapshot.markers
         let songs = all.filter { $0.isSong }
         guard !songs.isEmpty else { return nil }
-        let refMTC: Double
         if mtcIsPlaying {
-            refMTC = mtcTime
-        } else if snapshot.transportMTC > 0 {
-            refMTC = snapshot.transportMTC
-        } else if anchorBar > 0 {
-            let barDiff = Double(snapshot.transportBar - anchorBar)
-            refMTC = anchorMTC + barDiff * Double(currentSectionBeatsPerBar) * notatedBeatDuration()
-        } else {
-            refMTC = mtcTime
+            return songs.last(where: { $0.mtcSeconds <= mtcTime + 0.5 }) ?? songs[0]
         }
-        return songs.last(where: { $0.mtcSeconds <= refMTC + 0.5 }) ?? songs[0]
+        // 정지 상태: update()와 동일한 이유로 문자열 타임코드 대신 정수 마디(transportBar)로 판정.
+        return songs.last(where: { (markerBar($0) ?? Int.max) <= snapshot.transportBar }) ?? songs[0]
     }
 
     private func markersInCurrentSong() -> [Marker] {
@@ -293,6 +273,20 @@ class StateEngine {
     private func detectSectionIdx(at mtcSec: Double) -> Int {
         let markers = markersInCurrentSong()
         guard let last = markers.indices.last(where: { markers[$0].mtcSeconds <= mtcSec + 0.1 }) else { return -1 }
+        return last
+    }
+
+    // 마커의 절대 마디 번호(정수로 반올림 — 마커는 항상 마디 경계에 있다는 전제, 템포맵 보간
+    // 부동소수점/양자화 오차로 8.0이 7.997처럼 나와도 반올림하면 흡수됨).
+    private func markerBar(_ m: Marker) -> Int? {
+        guard let bp = ScheduleStore.shared.barPositionAt(mtcSeconds: m.mtcSeconds) else { return nil }
+        return Int(bp.rounded())
+    }
+
+    // 정지 상태 전용: 정수 마디 번호로 섹션 판정 (문자열 타임코드 파싱 노이즈 없음).
+    private func detectSectionIdxByBar(_ bar: Int) -> Int {
+        let markers = markersInCurrentSong()
+        guard let last = markers.indices.last(where: { (markerBar(markers[$0]) ?? Int.max) <= bar }) else { return -1 }
         return last
     }
 

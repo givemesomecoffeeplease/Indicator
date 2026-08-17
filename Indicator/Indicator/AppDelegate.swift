@@ -1,5 +1,4 @@
 import Cocoa
-import SwiftUI
 import Darwin
 import CoreMIDI
 import CoreImage
@@ -8,7 +7,6 @@ import UniformTypeIdentifiers
 class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem?
-    private var settingsWindow: NSWindow?
 
     let mtcReceiver  = MTCReceiver()
     let logicPoller  = LogicPoller()
@@ -217,14 +215,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(addrItem)
         menu.addItem(NSMenuItem(title: "뷰어 접속 QR 보기", action: #selector(showQRPanel), keyEquivalent: ""))
         menu.addItem(.separator())
-        let editItem = NSMenuItem(title: "가사·노트 편집 열기", action: #selector(openEditPage), keyEquivalent: "")
+        let editItem = NSMenuItem(title: "콘텐츠 편집 열기", action: #selector(openEditPage), keyEquivalent: "")
         editItem.representedObject = "http://\(ip):8888/edit"
         menu.addItem(editItem)
-        let chartItem = NSMenuItem(title: "채보 편집 열기", action: #selector(openEditPage), keyEquivalent: "")
+        let chartItem = NSMenuItem(title: "드럼 스코어 편집 열기", action: #selector(openEditPage), keyEquivalent: "")
         chartItem.representedObject = "http://\(ip):8888/chart"
         menu.addItem(chartItem)
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "설정...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "AX 트리 덤프 (디버그)", action: #selector(dumpAXTree), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "로그 파일 열기", action: #selector(openLogFile), keyEquivalent: ""))
@@ -362,23 +358,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func openSettings() {
-        if settingsWindow == nil {
-            let win = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 400, height: 160),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            win.title = "Indicator 설정"
-            win.contentView = NSHostingView(rootView: SettingsView())
-            win.center()
-            win.isReleasedWhenClosed = false
-            settingsWindow = win
-        }
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
 
     @objc private func refreshMarkers() {
         logicPoller.refreshMarkers()

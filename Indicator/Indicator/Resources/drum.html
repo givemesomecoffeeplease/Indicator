@@ -21,11 +21,14 @@
      줄마다 구분 박스를 두지 않고 전체를 하나의 연속된 흰 페이지로 — chart.html 편집 화면과 같은 느낌. */
   #scoreWrap{flex:1;overflow-y:auto;overflow-x:hidden;padding:14px 16px 60px;background:#f4f2ee}
   .line{position:relative;margin-top:6px}
-  .line .cap{position:absolute;top:0;display:flex;align-items:baseline;gap:10px;min-height:20px;
-             white-space:nowrap;transform:translateX(-2px)}
-  .line .cap .sec{font-size:16px;font-weight:700;color:#2a7a5c}
-  .line .cap .lyr{font-size:15px;color:#8a8578;overflow:hidden;text-overflow:ellipsis}
-  .line svg{display:block;width:100%;height:auto;margin-top:22px}
+  /* 가사가 한 줄로 잘려 보이던 문제 수정 — 슬라이드 전체(줄바꿈 포함)를 그대로 보여준다.
+     세로로 쌓이는 만큼 폭도 넉넉히 줘서(60%) 짧은 마디 폭 안에 갇혀 줄바꿈이 과하게
+     일어나지 않도록 함. */
+  .line .cap{position:absolute;top:0;display:flex;flex-direction:column;gap:2px;max-width:60%;
+             transform:translateX(-2px)}
+  .line .cap .sec{font-size:16px;font-weight:700;color:#2a7a5c;white-space:nowrap}
+  .line .cap .lyr{font-size:15px;color:#8a8578;white-space:pre-line;line-height:1.35}
+  .line svg{display:block;width:100%;height:auto;margin-top:56px}
   #noLink{flex:1;display:flex;align-items:center;justify-content:center;color:#666;font-size:13px;padding:24px;text-align:center;background:#14141a}
 </style>
 </head>

@@ -194,6 +194,20 @@ class WebServer {
         send(conn, body: notationJs.data(using: .utf8) ?? Data(), contentType: "application/javascript; charset=utf-8")
     }
 
+    // 토큰 배열 → 줄바꿈 포함 평문 (br=개행, char=그 글자, ghost=무시) — /api/sections가
+    // lyricCue(저장 시 첫 줄만 잘려 저장됨) 대신 첫 슬라이드 "전체"를 보낼 때 사용.
+    private func plainText(from tokens: [LyricToken]) -> String {
+        var out = ""
+        for t in tokens {
+            switch t.type {
+            case .br: out += "\n"
+            case .char: out += t.char ?? ""
+            case .ghost: break
+            }
+        }
+        return out
+    }
+
     private func handleSections(_ conn: NWConnection) {
         let markers = getMarkers?() ?? []
         var result: [[String: Any]] = []
@@ -208,9 +222,12 @@ class WebServer {
                 let occIdx = occCounts[key] ?? 0
                 occCounts[key] = occIdx + 1
                 let (d, _) = getLyricOcc?(currentSong, m.displayName, occIdx) ?? (SectionData(), false)
+                // 첫 슬라이드 전체(여러 줄 가능)를 보낸다 — d.lyricCue는 저장 시 첫 줄만 잘려
+                // 저장되므로 /drum 캡션이 슬라이드 절반만 보이는 문제가 있었음.
+                let fullCue = d.slides.first.map { plainText(from: $0.tokens) } ?? d.lyricCue
                 var entry: [String: Any] = [
                     "song": currentSong, "section": m.displayName, "occurrenceIndex": occIdx,
-                    "mtcSeconds": m.mtcSeconds, "lyricCue": d.lyricCue
+                    "mtcSeconds": m.mtcSeconds, "lyricCue": fullCue
                 ]
                 if let bp = ScheduleStore.shared.barPositionAt(mtcSeconds: m.mtcSeconds) { entry["barPosition"] = bp }
                 result.append(entry)
