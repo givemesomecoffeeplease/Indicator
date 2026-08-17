@@ -102,10 +102,11 @@ function loadSong(songName){
         .forEach(o=>{
           // floor: barPosition은 마디 N의 시작=N부터 다음 마디 직전=N+0.999...까지 연속으로 늘어나는
           // 값이라 round를 쓰면 마디 중간(N+0.5)에서 벌써 다음 마디로 넘어가 타이밍이 반 마디 어긋난다.
-          // +1e-6: 마커가 정확히 마디 경계(예: 8.0)에 있어도 템포맵 보간 부동소수점 오차로
-          // 7.999999...처럼 살짝 못 미치게 나올 수 있어, floor가 한 마디 전으로 잘못 내림하는
-          // 문제 보정 — 섹션명·가사가 항상 정확히 한 마디씩 일찍 표시되던 버그의 원인이었다.
-          const mi = Math.floor(o.barPosition - startBarPos + 1e-6);
+          // +0.02: 마커가 마디 경계(예: 8.0)에 있어도 실측 결과 barPosition이 7.997~7.999처럼
+          // 최대 0.003 정도 못 미치게 나옴(로직 마커 타임코드가 프레임 단위로 양자화되며 생기는
+          // 실제 오차 — 1e-6 수준의 순수 부동소수점 오차가 아니었음, 이전 수정이 못 잡은 원인).
+          // floor가 한 마디 전으로 잘못 내림해 섹션명·가사가 항상 한 마디씩 일찍 표시되던 버그.
+          const mi = Math.floor(o.barPosition - startBarPos + 0.02);
           if(mi >= 0 && mi < measures.length){
             sectionLineMeta[mi] = {sectionLabel: o.section, lyricCue: o.lyricCue || ''};
           }
