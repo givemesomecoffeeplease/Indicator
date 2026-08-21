@@ -143,6 +143,23 @@
      920px까지 열면 0.82배 — 같은 4마디가 눈에 띄게 커진다.
      768·820 세로는 화면이 더 좁아서 이 값이 아무 영향을 안 준다. */
   body.edition-pad:not(.edition-ipad) main{max-width:920px;}
+  /* 데스크톱/태블릿 폭 창에서 상/하 1단 레이아웃이 창 높이만큼 안 늘어나고 콘텐츠
+     실제 높이만큼만 차지해, 창이 작으면 스크롤이 필요하고 크면 아래에 빈 검은
+     공간이 남던 문제 수정(2026-08-22). 아이패드 좌우 2단(.edition-ipad)이 이미 쓰는
+     "body를 뷰포트 높이 flex column으로 고정 + main을 내부 스크롤 컨테이너로" 방식을
+     좌우 분할 없이 그대로 가져온다 — main 하나가 화면을 꽉 채우고, 그 안에서만 스크롤된다.
+     폰 폭(좁은 화면)은 원래의 자연스러운 문서 스크롤을 그대로 둔다(모바일에서는 이 방식이
+     더 자연스럽다는 2026-08-15 결정 유지). */
+  body.edition-pad:not(.edition-ipad){
+    display:flex;flex-direction:column;height:100vh;padding-bottom:0;overflow:hidden;
+  }
+  @supports (height:1dvh){ body.edition-pad:not(.edition-ipad){height:100dvh;} }
+  body.edition-pad:not(.edition-ipad) .topbar{flex:0 0 auto;}
+  body.edition-pad:not(.edition-ipad) main{
+    flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+    padding-bottom:calc(96px + env(safe-area-inset-bottom));   /* 고정 도크에 안 가리게 */
+  }
 
   /* ── 제목 줄 ──────────────────────────────
      되돌리기·다시하기를 도구 줄에서 여기로 올린다(2026-08-13 요청).
@@ -1044,7 +1061,8 @@
     /* 아이패드 2단은 body를 flex + 100dvh + overflow:hidden으로 세운다.
        인쇄에서 그대로 두면 #printArea가 한 화면 높이의 flex 아이템이 되어
        첫 페이지만 나온다. 인쇄에서는 일반 흐름으로 되돌린다. */
-    body.edition-ipad{display:block !important;height:auto !important;overflow:visible !important;}
+    body.edition-ipad,
+    body.edition-pad:not(.edition-ipad){display:block !important;height:auto !important;overflow:visible !important;}
     body > *{display:none !important;}
     body > #printArea{display:block !important;}
     /* 여백을 @page가 아니라 .page 안쪽 패딩으로 준다.
@@ -1184,6 +1202,7 @@
           <button id="dupM">복제</button>
           <button id="copyM">복사</button>
           <button id="pasteM" disabled="">붙여넣기</button>
+          <button id="repeatM" title="⌘D — 바로 앞 마디와 내용을 똑같이 채우고, 표기는 리핏 마디 기호(𝄎)로 압축해서 보여준다. 다시 누르면 해제(내용은 그대로 편집 가능한 음표로 남음)">반복(𝄎)</button>
         </div>
         <div class="mgrp" role="group" aria-label="마디 지우기">
           <button id="clrM">비우기</button>
@@ -2039,8 +2058,11 @@ gridEl.addEventListener('click', e=>{
 
 function setCell(insId, step, val){
   if((measures[selMeasure][insId][step]|0) === val) return false;
+  // 반복 표시된 마디를 직접 편집하면 더 이상 "앞 마디와 동일"이 아니므로 표시를 해제하고
+  // (내용은 이미 앞 마디에서 복사돼 있던 그대로) 독립된 음표로 바로 이어서 편집한다.
+  if(measures[selMeasure].repeatPrev) delete measures[selMeasure].repeatPrev;
   measures[selMeasure][insId][step] = val;
-  refreshGrid(); renderScore(); refreshStepDots();
+  refreshGrid(); renderScore(); refreshStepDots(); refreshEditBtns();
   return true;
 }
 /* 마디마다 나누기가 다를 수 있으므로 **칸의 개수 자체가 달라진다.**
@@ -2352,7 +2374,17 @@ function isTuplet(d){ return d===3 || d===6; }
 function voiceHasAny(m, voice){
   return INSTR.some(i => i.voice===voice && m[i.id].some(v=>v));
 }
+// notation.js의 동명 함수와 동일한 그림 — 이 파일은 편집용 자체 렌더 엔진을 별도로 두고 있어
+// (notation.js와 충돌 방지) 중복 유지. 둘 중 하나만 고치면 화면마다 다르게 보이니 항상 같이 고칠 것.
+function drawRepeatBarGlyph(cx, top){
+  const midY = top + 2*LG;
+  SVGT.appendChild(el('line', {x1:cx-6.5, y1:midY+LG*0.9, x2:cx+6.5, y2:midY-LG*0.9,
+    stroke:INK, 'stroke-width':1.6, 'stroke-linecap':'round'}));
+  SVGT.appendChild(el('circle', {cx:cx-4.2, cy:midY-LG*0.55, r:1.7, fill:INK}));
+  SVGT.appendChild(el('circle', {cx:cx+4.2, cy:midY+LG*0.55, r:1.7, fill:INK}));
+}
 function drawMeasure(m, mx, top){
+  if(m && m.repeatPrev){ drawRepeatBarGlyph(mx + GEO.MEASURE_W/2, top); return; }
   const hasH = voiceHasAny(m,'hand'), hasF = voiceHasAny(m,'foot');
   // 마디가 통째로 비면 온쉼표 하나만.
   // Weinberg: 두 성부에 공통인 쉼표는 원래 자리에 한 번만 적어도 된다
@@ -3358,6 +3390,12 @@ function refreshEditBtns(){
     p.disabled = !clipM;
     p.textContent = clipM ? (clipM.length > 1 ? `붙여넣기 ${clipM.length}마디` : '붙여넣기') : '붙여넣기';
   }
+  const rm = document.getElementById('repeatM');
+  if(rm){
+    const on = !!(measures[selMeasure] && measures[selMeasure].repeatPrev);
+    rm.classList.toggle('on', on);
+    rm.setAttribute('aria-pressed', on);
+  }
 }
 document.getElementById('copyM').onclick = ()=>{
   clipM = JSON.parse(JSON.stringify(measures.slice(selA(), selB()+1)));
@@ -3456,6 +3494,24 @@ document.getElementById('dupM').onclick = ()=>{
   measures.splice(selMeasure+1, 0, copy); selMeasure++; cursorB = 0; cursorK = 0;
   refreshAll(); commit();
 };
+// "반복(𝄎)": 바로 앞 마디의 실제 음표 데이터를 그대로 복사해 넣는다(재생·편집 등 기존 로직이
+// 전부 그대로 동작하도록) — 그 위에 repeatPrev 플래그만 얹어서, 화면 표기만 리핏 마디 기호로
+// 압축해 보여준다(drawMeasure에서 처리). 줄바꿈 지정(lineBreak/lineTarget)은 그 마디의 "위치"에
+// 속하는 값이라 내용 복사에 딸려오면 안 되므로 명시적으로 제외. 이미 반복 상태면 토글 해제만
+// 하고 복사된 내용은 그대로 둔다(그 자리에서 바로 독립된 음표로 편집 가능).
+document.getElementById('repeatM').onclick = ()=>{
+  const a = selMeasure;
+  if(measures[a].repeatPrev){
+    delete measures[a].repeatPrev;
+  } else {
+    if(a <= 0){ toast('첫 마디는 반복할 앞 마디가 없어요.'); return; }
+    const src = JSON.parse(JSON.stringify(measures[a-1]));
+    delete src.lineBreak; delete src.lineTarget; delete src.repeatPrev;
+    measures[a] = src;
+    measures[a].repeatPrev = true;
+  }
+  refreshAll(); refreshEditBtns(); commit();
+};
 document.getElementById('clrM').onclick = ()=>{
   measures[selMeasure] = emptyMeasure(null, measures[selMeasure].ts);
   refreshAll(); commit();
@@ -3479,17 +3535,28 @@ document.addEventListener('keydown', e=>{
   else if(k === 'y'){ e.preventDefault(); redo(); }
   else if(k === 'c'){ e.preventDefault(); document.getElementById('copyM').click(); }
   else if(k === 'v'){ e.preventDefault(); document.getElementById('pasteM').click(); }
+  else if(k === 'd'){ e.preventDefault(); document.getElementById('repeatM').click(); }   // 반복(𝄎) 토글 — 브라우저 기본 "북마크 추가" 막고 사용
 });
 
 /* 상태 표시줄 가림막은 스크롤했을 때만 켠다. 맨 위에서는 블룸을 가리면 안 된다.
    passive + rAF — 스크롤마다 클래스를 만지면 iOS에서 스크롤이 끈적해진다. */
 (function initSafeTop(){
   let ticking = false;
+  // 데스크톱/태블릿 폭(edition-pad)에서는 문서가 아니라 main 안에서 스크롤되므로
+  // (위 "창 높이 채우기" 레이아웃), window.scrollY만 보면 이 모드에서 항상 0으로 고정된다 —
+  // main의 scrollTop도 같이 확인해야 스크롤 시 상태바 가림막이 정상 작동한다.
+  const mainEl = document.querySelector('main');
   function read(){
     ticking = false;
-    document.body.classList.toggle('is-scrolled', window.scrollY > 4);
+    const y = Math.max(window.scrollY, mainEl ? mainEl.scrollTop : 0);
+    document.body.classList.toggle('is-scrolled', y > 4);
   }
   addEventListener('scroll', ()=>{
+    if(ticking) return;
+    ticking = true;
+    requestAnimationFrame(read);
+  }, {passive:true});
+  if(mainEl) mainEl.addEventListener('scroll', ()=>{
     if(ticking) return;
     ticking = true;
     requestAnimationFrame(read);
@@ -4259,6 +4326,7 @@ function normalizeMeasures(src){
     if(mm && mm.lineBreak === true) m.lineBreak = true;    // 강제 줄바꿈("줄바꿈")
     else if(mm && mm.lineBreak === false) m.lineBreak = false;   // 자연 경계 무시("앞줄로")
     if(mm && typeof mm.lineTarget === 'number' && mm.lineTarget > 0) m.lineTarget = mm.lineTarget;   // 4/8 배치 또는 "뒷줄로"가 계산한 임의 크기 섬
+    if(mm && mm.repeatPrev === true) m.repeatPrev = true;   // 리핏 마디 기호(𝄎) — 앞 마디와 내용 동일 표시
     if(!mm || typeof mm !== 'object') return m;
     INSTR.forEach(i=>{
       const row = mm[i.id];
@@ -4402,6 +4470,7 @@ function padHit(id){
       k = 0; b++;
       if(b >= beatCount(measures[mi])){ b = 0; mi = (mi+1) % measures.length; }
     }
+    if(measures[mi].repeatPrev) delete measures[mi].repeatPrev;   // 편집됐으니 반복 표시 해제
     measures[mi][id][idxAt(measures[mi], voice, b, k)] = art;
     recDirty = true;
     if(mi===selMeasure) refreshGrid();
@@ -4422,8 +4491,9 @@ function padHit(id){
   const idx = cursorIdx(voice0);
   const cur = measures[selMeasure][id][idx]|0;
   const val = (cur === art) ? ART.OFF : art;
+  if(measures[selMeasure].repeatPrev) delete measures[selMeasure].repeatPrev;   // 편집됐으니 반복 표시 해제
   measures[selMeasure][id][idx] = val;
-  refreshGrid(); renderScore(); refreshStepDots(); commit();
+  refreshGrid(); renderScore(); refreshStepDots(); refreshEditBtns(); commit();
   if(autoAdv && val){
     // 킥+하이햇처럼 동시에 누르는 두 키는 보통 수십ms 안에 들어오므로,
     // 그보다 조금 긴 여유만 두고 바로 다음 칸으로 넘어간다(예전 400ms는 체감상 너무 느렸음).

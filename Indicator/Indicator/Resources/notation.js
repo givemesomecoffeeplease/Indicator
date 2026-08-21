@@ -291,7 +291,17 @@ function drawRestAt(x, top, voice, kind){
 function drawWholeRest(x, top, voice){
   restGlyph(x, top + (voice==='foot' ? 4*LG : LG), 'w');
 }
+// 리핏 마디 기호(simile mark, SMuFL repeat1Bar와 같은 뜻) — 사선 하나 + 점 두 개.
+// Bravura 실제 외곽선 대신 기본 도형으로 재현(폰트 파일 없이도 항상 동일하게 그려짐).
+function drawRepeatBarGlyph(cx, top){
+  const midY = top + 2*LG;
+  SVGT.appendChild(el('line', {x1:cx-6.5, y1:midY+LG*0.9, x2:cx+6.5, y2:midY-LG*0.9,
+    stroke:INK, 'stroke-width':1.6, 'stroke-linecap':'round'}));
+  SVGT.appendChild(el('circle', {cx:cx-4.2, cy:midY-LG*0.55, r:1.7, fill:INK}));
+  SVGT.appendChild(el('circle', {cx:cx+4.2, cy:midY+LG*0.55, r:1.7, fill:INK}));
+}
 function drawMeasure(m, mx, top, mw){
+  if(m && m.repeatPrev){ drawRepeatBarGlyph(mx + mw/2, top); return; }
   const hasH = voiceHasAny(m,'hand'), hasF = voiceHasAny(m,'foot');
   if(!hasH && !hasF){ drawWholeRest(mx + mw/2, top, 'both'); return; }
   if(!hasH) drawWholeRest(mx + mw/2, top, 'hand');
