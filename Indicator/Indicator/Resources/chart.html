@@ -2177,7 +2177,10 @@ function paintAutoScore(target, o){
       const mi = gFrom + k;
       const MW = mwOf();
       GEO.SLOT_W = slotFor(beatCount(measures[mi]));
-      if(o.cache) o.cache[mi] = {x0:mx, top, w:MW};
+      // slot/gap/pad도 같이 저장 — updateEditCursor()가 전체 렌더 끝난 뒤(GEO가 마지막에
+      // 그린 마디 기준 값으로 남아있는 시점에) 실행되므로, 공유 GEO 대신 그 마디 고유의
+      // 값을 여기서 읽어야 한다(줄마다 마디 수가 달라 압축 비율이 다르면 어긋났었음).
+      if(o.cache) o.cache[mi] = {x0:mx, top, w:MW, slot:GEO.SLOT_W, gap, pad};
       if(o.cache && tapMeasures() && mi >= selA() && mi <= selB()){
         target.appendChild(el('rect',{x:mx, y:top-26, width:MW, height:4*LG+52,
           fill:'#7B4BE0', opacity:0.09, rx:7, 'pointer-events':'none'}));
@@ -3206,7 +3209,9 @@ function scheduleVisual(mi, voice, b, k, pos, t){
     const cur = document.getElementById('cursor');
     const L = slotXCache[mi];
     if(cur && L){
-      const x = xAtPos(L.x0, pos);
+      // updateEditCursor()와 동일한 이유로 공유 GEO 대신 이 마디 고유의 slot/gap/pad로 계산.
+      const b = Math.floor(pos + 1e-9), beatW = 4*(L.slot ?? GEO.SLOT_W);
+      const x = L.x0 + (L.pad ?? GEO.M_PAD) + b*(beatW + (L.gap ?? GEO.BEAT_GAP)) + (pos-b)*beatW + 6;
       cur.setAttribute('x1',x); cur.setAttribute('x2',x);
       cur.setAttribute('y1',L.top-20); cur.setAttribute('y2',L.top+4*LG+20);
       cur.setAttribute('opacity',0.85);
@@ -4663,7 +4668,11 @@ function updateEditCursor(){
     clampCursor();
     const L = slotXCache[selMeasure];
     if(L){
-      const x = xAtPos(L.x0, cursorPos());
+      // 공유 GEO 대신 이 마디를 그릴 때 실제로 쓴 slot/gap/pad로 직접 계산한다 — xAtPos()는
+      // 그 시점의 공유 GEO를 참조해서, 줄마다 마디 수(압축 비율)가 다르면 지금 선택된 마디가
+      // 아니라 가장 마지막에 그려진 마디 기준으로 계산돼 어긋나는 문제가 있었다.
+      const pos = cursorPos(), b = Math.floor(pos + 1e-9), beatW = 4*(L.slot ?? GEO.SLOT_W);
+      const x = L.x0 + (L.pad ?? GEO.M_PAD) + b*(beatW + (L.gap ?? GEO.BEAT_GAP)) + (pos-b)*beatW + 6;
       cur.setAttribute('x1',x); cur.setAttribute('x2',x);
       cur.setAttribute('y1',L.top-20); cur.setAttribute('y2',L.top+4*LG+20);
       cur.setAttribute('opacity',0.45);
