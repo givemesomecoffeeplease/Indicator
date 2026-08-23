@@ -4655,6 +4655,12 @@ function updateEditCursor(){
   const cur = document.getElementById('cursor');
   if(!cur || playing) return;
   if(inputMode==='drum'){
+    // refreshStepDots()는 그리기 전에 항상 clampCursor()로 cursorB/K를 지금 선택된 마디
+    // 기준 유효 범위로 보정하는데, 여기(악보 위 커서 선)는 그 보정이 없었다. 박 수가 다른
+    // 마디로 넘어간 직후(예: 마디 재배치·앞줄로) cursorB가 이전 마디 기준 값으로 남아있으면
+    // 점 표시는 보정된 위치를 보여주는데 악보 커서 선은 범위를 벗어난 값으로 계산돼 마디
+    // 끝(또는 그 너머)에 그려지는 불일치가 있었음 — 동일하게 보정해서 항상 일치시킨다.
+    clampCursor();
     const L = slotXCache[selMeasure];
     if(L){
       const x = xAtPos(L.x0, cursorPos());
