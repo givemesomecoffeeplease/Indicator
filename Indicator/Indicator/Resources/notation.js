@@ -333,11 +333,14 @@ function paint(target, o){
   const n = Math.max(1, to - from);
   const refCount = o.refCount || Math.max(1, o.perLine || n);   // 이 줄이 대표하는 "표준 마디 수"(보통 4)
   const scale = Math.min(1, refCount / n);
-  GEO = {SLOT_W: REF_SLOT*scale, BEAT_GAP: REF_GAP*scale, M_PAD: REF_PAD*scale, CLEF_W: REF_CLEF};
-  function measureWidthFor(m){
-    const bc = beatCount(m);
-    return GEO.M_PAD*2 + bc*4*GEO.SLOT_W + Math.max(0, bc-1)*GEO.BEAT_GAP;
-  }
+  const basePad = REF_PAD*scale, baseGap = REF_GAP*scale, baseSlot = REF_SLOT*scale;
+  // 마디 폭은 박 수와 무관하게 항상 동일(기준 4박 마디 폭) — 변박이어도 줄이 들쭉날쭉해지지
+  // 않고, 입력 탭 영역도 항상 일정하게 유지된다(2026-08-22, 비례 폭 방식에서 변경).
+  // 그 안의 슬롯 폭만 박 수에 맞게 늘이거나 줄여서 항상 같은 폭을 채운다.
+  const FIXED_MW = basePad*2 + 4*4*baseSlot + 3*baseGap;
+  function slotFor(bc){ return Math.max(2, (FIXED_MW - basePad*2 - Math.max(0,bc-1)*baseGap) / (4*bc)); }
+  function measureWidthFor(){ return FIXED_MW; }
+  GEO = {SLOT_W: baseSlot, BEAT_GAP: baseGap, M_PAD: basePad, CLEF_W: REF_CLEF};
   const SYS_H = 150, TOP_PAD = 26;
   const svgW = GEO.CLEF_W + refCount*REF_MEASURE_W + 8;   // 항상 고정 폭 — 마디 수와 무관
   const svgH = TOP_PAD + SYS_H;
@@ -367,15 +370,29 @@ function paint(target, o){
   target.appendChild(el('line',{x1:6,y1:top,x2:6,y2:bottom,stroke:INK,'stroke-width':1.4}));
   let mx = GEO.CLEF_W;
   for(let mi=from; mi<to; mi++){
-    const MW = measureWidthFor(measures[mi]);
+    const MW = FIXED_MW;
+    GEO = {SLOT_W: slotFor(beatCount(measures[mi])), BEAT_GAP: baseGap, M_PAD: basePad, CLEF_W: REF_CLEF};
     if(o.cache) o.cache[mi] = {x0:mx, top, w:MW};
     const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
     target.appendChild(num);
+    // 줄 중간에서 박자표가 바뀌어도 더 이상 강제로 줄을 끊지 않으므로(2026-08-22), 그 지점에
+    // 정식 표기법대로 작은 박자표를 그려 왜 마디 폭이 달라졌는지 표기상 드러낸다.
+    if(mi > from && tsKey(measures[mi]) !== tsKey(measures[mi-1])) drawInlineTs(mx, top, normTs(measures[mi].ts));
     drawMeasure(measures[mi], mx, top, MW);
     mx += MW;
     target.appendChild(el('line',{x1:mx,y1:top,x2:mx,y2:bottom,stroke:INK,'stroke-width':1.4}));
   }
   return svgW;
+}
+function drawInlineTs(x, top, ts){
+  const size = 11;
+  const t1 = el('text',{x:x+3,y:top+LG*1.55,'font-size':size,'font-weight':'700',
+    fill:INK,'font-family':'Georgia,"Times New Roman",serif','text-anchor':'start'});
+  t1.textContent = String(ts[0]);
+  const t2 = el('text',{x:x+3,y:top+LG*3.55,'font-size':size,'font-weight':'700',
+    fill:INK,'font-family':'Georgia,"Times New Roman",serif','text-anchor':'start'});
+  t2.textContent = String(ts[1]);
+  SVGT.appendChild(t1); SVGT.appendChild(t2);
 }
 
 /* 줄바꿈 — 왼쪽에서 오른쪽으로 훑는 단순 순차 모델.
@@ -413,7 +430,9 @@ function buildLineGroups(measures, sectionBreaks, targetPerLine){
     }
     // 기본 순차 targetPerLine 청크. 자연 경계(딱 target개째)에 다다르면 suppress(false)가
     // 연쇄로 붙어있는 만큼 계속 이어붙인다("앞줄로"). 강제 줄바꿈(true)이나 섹션 경계,
-    // 다음 섬의 시작을 만나면 그 자리에서 무조건 끊는다.
+    // 다음 섬의 시작을 만나면 그 자리에서 무조건 끊는다. 박자표 변경은 더 이상 강제로 줄을
+    // 끊지 않는다(2026-08-22) — 필요하면 사용자가 "줄바꿈"으로 직접 끊는다. 대신 바뀌는
+    // 지점에 인라인 박자표를 그려서(paint 쪽) 표기상 드러나게 한다.
     let cnt = 0;
     while(i + cnt < N){
       const nextIdx = i + cnt;
@@ -421,14 +440,12 @@ function buildLineGroups(measures, sectionBreaks, targetPerLine){
         const nm = measures[nextIdx];
         if((nm && typeof nm.lineTarget === 'number' && nm.lineTarget > 0) || sectionSet.has(nextIdx)) break;
         if(nm && nm.lineBreak === true) break;
-        if(tsKey(measures[nextIdx]) !== tsKey(measures[i])) break;   // 박자표가 바뀌면 항상 새 줄
       }
       cnt++;
       if(cnt === targetPerLine){
         while(i+cnt < N){
           const nm = measures[i+cnt];
           if(!nm || nm.lineBreak !== false || (typeof nm.lineTarget === 'number' && nm.lineTarget > 0) || sectionSet.has(i+cnt)) break;
-          if(tsKey(measures[i+cnt]) !== tsKey(measures[i])) break;
           cnt++;
         }
         break;

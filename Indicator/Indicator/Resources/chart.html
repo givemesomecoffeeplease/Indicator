@@ -2128,7 +2128,7 @@ function paintAutoScore(target, o){
   const taps = [];
   const title = (o.title || '').trim();
   const titleH = title ? 30 : 0;
-  const { REF_SLOT, REF_GAP, REF_PAD, REF_CLEF, REF_MEASURE_W } = Notation;
+  const { REF_SLOT, REF_GAP, REF_PAD, REF_CLEF, REF_MEASURE_W, tsKey } = Notation;
   const targetPerLine = 4;
   const groups = Notation.buildLineGroups(measures, [], targetPerLine);
   const lines = groups.length;
@@ -2147,8 +2147,12 @@ function paintAutoScore(target, o){
     const gFrom = g.measureStartIdx, nInLine = g.measureCount;
     const scale = Math.min(1, targetPerLine / nInLine);
     const slot = REF_SLOT*scale, gap = REF_GAP*scale, pad = REF_PAD*scale, clef = REF_CLEF;
-    GEO = {SLOT_W:slot, BEAT_GAP:gap, M_PAD:pad, CLEF_W:clef, MEASURE_W: pad*2 + 16*slot + 3*gap};
-    function mwOf(m){ const bc = beatCount(m); return pad*2 + bc*4*slot + Math.max(0, bc-1)*gap; }
+    // 마디 폭은 박 수와 무관하게 항상 동일(기준 4박 마디 폭) — 변박이어도 줄이 들쭉날쭉해지지
+    // 않는다(2026-08-22, notation.js와 동일 원칙). 슬롯 폭만 박 수에 맞게 조절해서 채운다.
+    const FIXED_MW = pad*2 + 16*slot + 3*gap;
+    function slotFor(bc){ return Math.max(2, (FIXED_MW - pad*2 - Math.max(0,bc-1)*gap) / (4*bc)); }
+    function mwOf(){ return FIXED_MW; }
+    GEO = {SLOT_W:slot, BEAT_GAP:gap, M_PAD:pad, CLEF_W:clef, MEASURE_W: FIXED_MW};
     const lineTs = normTs(measures[gFrom] && measures[gFrom].ts);
     const top = TOP_PAD + titleH + ln*SYS_H + 34;
     const bottom = top + 4*LG;
@@ -2171,7 +2175,8 @@ function paintAutoScore(target, o){
     let mx = clef;
     for(let k=0;k<nInLine;k++){
       const mi = gFrom + k;
-      const MW = mwOf(measures[mi]);
+      const MW = mwOf();
+      GEO.SLOT_W = slotFor(beatCount(measures[mi]));
       if(o.cache) o.cache[mi] = {x0:mx, top, w:MW};
       if(o.cache && tapMeasures() && mi >= selA() && mi <= selB()){
         target.appendChild(el('rect',{x:mx, y:top-26, width:MW, height:4*LG+52,
@@ -2179,6 +2184,9 @@ function paintAutoScore(target, o){
       }
       const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
       target.appendChild(num);
+      // 줄 중간에서 박자표가 바뀌어도 더 이상 강제로 줄을 안 끊으므로(2026-08-22), 그 지점에
+      // 정식 표기법대로 작은 박자표를 그려 마디 폭이 왜 달라졌는지 드러낸다.
+      if(k > 0 && tsKey(measures[mi]) !== tsKey(measures[mi-1])) drawInlineTs(mx, top, normTs(measures[mi].ts));
       drawMeasure(measures[mi], mx, top);
       mx += MW;
       target.appendChild(el('line',{x1:mx,y1:top,x2:mx,y2:bottom,stroke:INK,'stroke-width':1.4}));
@@ -2382,6 +2390,17 @@ function drawRepeatBarGlyph(cx, top){
     stroke:INK, 'stroke-width':1.6, 'stroke-linecap':'round'}));
   SVGT.appendChild(el('circle', {cx:cx-4.2, cy:midY-LG*0.55, r:1.7, fill:INK}));
   SVGT.appendChild(el('circle', {cx:cx+4.2, cy:midY+LG*0.55, r:1.7, fill:INK}));
+}
+// notation.js의 동명 함수와 동일 — 줄 중간 박자표 변경 지점에 인라인으로 작게 그리는 표기.
+function drawInlineTs(x, top, ts){
+  const size = 11;
+  const t1 = el('text',{x:x+3,y:top+LG*1.55,'font-size':size,'font-weight':'700',
+    fill:INK,'font-family':'Georgia,"Times New Roman",serif','text-anchor':'start'});
+  t1.textContent = String(ts[0]);
+  const t2 = el('text',{x:x+3,y:top+LG*3.55,'font-size':size,'font-weight':'700',
+    fill:INK,'font-family':'Georgia,"Times New Roman",serif','text-anchor':'start'});
+  t2.textContent = String(ts[1]);
+  SVGT.appendChild(t1); SVGT.appendChild(t2);
 }
 function drawMeasure(m, mx, top){
   if(m && m.repeatPrev){ drawRepeatBarGlyph(mx + GEO.MEASURE_W/2, top); return; }
