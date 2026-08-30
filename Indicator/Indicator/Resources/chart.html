@@ -1255,6 +1255,7 @@
               <button id="entryDiv4" class="btn sm" title="박 머리만 짚는 입력 모드(단축키 4) — 마디 데이터는 안 건드림">4비트</button>
               <button id="entryDiv8" class="btn sm on" title="박마다 8분음표 간격으로 짚는 입력 모드(단축키 8) — 마디 데이터는 안 건드림">8비트</button>
               <button id="entryDiv16" class="btn sm" title="박마다 16분음표 간격으로 짚는 입력 모드(8을 빠르게 두 번) — 이 단위로 실제로 찍을 때만 그 박이 무손실로 확장됨">16비트</button>
+              <button id="entryDiv32" class="btn sm" title="박마다 32분음표 간격으로 짚는 입력 모드(8을 빠르게 세 번) — 이 단위로 실제로 찍을 때만 그 박이 무손실로 확장됨">32비트</button>
             </div>
           </div>
           <div class="sideGroup">
@@ -4651,10 +4652,12 @@ function refreshStepDots(){
 function syncEntryDivButtons(){
   const b4 = document.getElementById('entryDiv4');
   const b8 = document.getElementById('entryDiv8'), b16 = document.getElementById('entryDiv16');
+  const b32 = document.getElementById('entryDiv32');
   if(!b8 || !b16) return;
   if(b4) b4.classList.toggle('on', entryDiv===1);
   b8.classList.toggle('on', entryDiv===2);
   b16.classList.toggle('on', entryDiv===4);
+  if(b32) b32.classList.toggle('on', entryDiv===8);
 }
 function updateEditCursor(){
   const cur = document.getElementById('cursor');
@@ -4709,14 +4712,16 @@ function setEntryDiv(d){
 document.getElementById('entryDiv4') && (document.getElementById('entryDiv4').onclick = ()=> setEntryDiv(1));
 document.getElementById('entryDiv8').onclick = ()=> setEntryDiv(2);
 document.getElementById('entryDiv16').onclick = ()=> setEntryDiv(4);
-// 단축키: 4 → 4비트, 8 → 8비트(짧게 두 번 연속이면 16비트로).
-let last8PressAt = 0;
+document.getElementById('entryDiv32') && (document.getElementById('entryDiv32').onclick = ()=> setEntryDiv(8));
+// 단축키: 4 → 4비트, 8 → 8비트(연속으로 빠르게 누른 횟수에 따라 8→16→32비트로 순환).
+let last8PressAt = 0, press8Streak = 0;
 function handleEntryDivKey(key){
-  if(key === '4'){ setEntryDiv(1); return true; }
+  if(key === '4'){ setEntryDiv(1); press8Streak = 0; return true; }
   if(key === '8'){
     const now = Date.now();
-    if(now - last8PressAt < 350){ setEntryDiv(4); last8PressAt = 0; }
-    else { setEntryDiv(2); last8PressAt = now; }
+    press8Streak = (now - last8PressAt < 350) ? press8Streak + 1 : 1;
+    last8PressAt = now;
+    setEntryDiv([2,2,4,8][Math.min(press8Streak,3)]);   // 1번=8비트, 2번=16비트, 3번(이상)=32비트
     return true;
   }
   return false;
@@ -4758,7 +4763,7 @@ document.addEventListener('keydown', e=>{
       refreshChips(); buildGrid(); renderScore(); refreshStepDots(); updateEditCursor();
       return;
     }
-    // 4 → 4비트, 8 → 8비트(빠르게 두 번이면 16비트) — 입력 단위 전환.
+    // 4 → 4비트, 8 → 8비트(빠르게 연속으로 누르면 16비트→32비트) — 입력 단위 전환.
     if(handleEntryDivKey(e.key)){ e.preventDefault(); return; }
   }
   if(e.shiftKey) return;  // Shift+Space(재생) 등 다른 조합과 안 겹치게 — 패드는 Shift 없이만
