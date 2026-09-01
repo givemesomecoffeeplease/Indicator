@@ -26,7 +26,7 @@ class WebServer {
     var onLyricsSaved: (() -> Void)? = nil
     var getSongCountdownBars: ((_ song: String) -> Int)? = nil
     var saveSongCountdownBars: ((_ song: String, _ bars: Int) -> Void)? = nil
-    // 드럼 채보(/chart에서 내보낸 .mai.json, /edit에서 곡별로 업로드) — 원본 JSON을 그대로 보관
+    // 드럼 채보(/chart에서 내보낸 .drum.json, /edit에서 곡별로 업로드) — 원본 JSON을 그대로 보관
     var getDrumChart: ((_ song: String) -> Data?)? = nil
     var saveDrumChart: ((_ song: String, _ json: Data) -> Void)? = nil
 
@@ -238,7 +238,7 @@ class WebServer {
     }
 
     // MARK: - /api/drumChart, /save-drum-chart
-    // 드럼 채보(/chart에서 만든 .mai.json)를 곡 단위로 저장/조회한다. "채보 1마디 = 그 곡의
+    // 드럼 채보(/chart에서 만든 .drum.json)를 곡 단위로 저장/조회한다. "채보 1마디 = 그 곡의
     // #Song 마커 시작 마디"로 항상 고정(사용자가 채보를 그렇게 만들기로 함) — 그래서 별도
     // 오프셋 입력 없이, 이 곡의 시작 마디 barPosition만 같이 실어 보내면 /drum이 바로 쓸 수 있다.
 
@@ -760,15 +760,15 @@ class WebServer {
             actDiv.appendChild(exportBtn);actDiv.appendChild(importBtn);
             titleEl.appendChild(actDiv);
 
-            // 드럼 채보(/chart에서 "저장"으로 내보낸 .mai.json)를 이 곡에 업로드.
+            // 드럼 채보(/chart에서 "저장"으로 내보낸 .drum.json)를 이 곡에 업로드.
             // 채보 1마디 = 이 곡의 #Song 마커 시작 마디로 항상 고정하는 워크플로라
             // 별도 정렬 입력이 필요 없다 — 파일만 골라 올리면 끝.
             const drumWrap=document.createElement('div');drumWrap.style.cssText='display:flex;align-items:center;gap:6px;margin-left:12px;font-size:13px;color:var(--sub)';
             const drumStatus=document.createElement('span');drumStatus.textContent='드럼 채보: 확인 중…';
             const drumBtn=document.createElement('button');
-            drumBtn.className='btn btn-sm btn-sec';drumBtn.textContent='.mai.json 업로드';
+            drumBtn.className='btn btn-sm btn-sec';drumBtn.textContent='.drum.json 업로드';
             const drumInp=document.createElement('input');
-            drumInp.type='file';drumInp.accept='.json,.mai.json';drumInp.style.display='none';
+            drumInp.type='file';drumInp.accept='.json,.mai.json,.drum.json';drumInp.style.display='none';
             drumBtn.onclick=()=>drumInp.click();
             drumInp.onchange=()=>{
               const f=drumInp.files[0];if(!f)return;
@@ -777,7 +777,7 @@ class WebServer {
                 let chart;
                 try{ chart=JSON.parse(r.result); }
                 catch(e){ showMsg('읽을 수 있는 파일이 아니에요.'); return; }
-                if(!chart||!Array.isArray(chart.measures)){ showMsg('드럼 채보(.mai.json) 파일이 맞는지 확인해주세요.'); return; }
+                if(!chart||!Array.isArray(chart.measures)){ showMsg('드럼 채보(.drum.json) 파일이 맞는지 확인해주세요.'); return; }
                 fetch('/save-drum-chart',{method:'POST',headers:{'Content-Type':'application/json'},
                   body:JSON.stringify({song,chart})})
                   .then(r=>r.json()).then(res=>{

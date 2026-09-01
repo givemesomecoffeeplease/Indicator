@@ -7,7 +7,7 @@ import Foundation
 class DrumChartStore {
     static let shared = DrumChartStore()
 
-    private var charts: [String: Data] = [:]   // song name -> 원본 .mai.json 그대로
+    private var charts: [String: Data] = [:]   // song name -> 원본 .drum.json 그대로
 
     init() {}
 

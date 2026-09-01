@@ -163,7 +163,7 @@ function startFreshWith(songName){
   fetchChartData(songName).then(data=>{
     if(loadingCurrent !== songName) return;   // 그 사이 다른 곡으로 또 넘어갔으면 버림
     if(!data){
-      showEmpty(`"${songName}" 곡에 업로드된 드럼 채보가 없습니다.\n/edit에서 그 곡에 .mai.json을 업로드해 주세요.`);
+      showEmpty(`"${songName}" 곡에 업로드된 드럼 채보가 없습니다.\n/edit에서 그 곡에 .drum.json을 업로드해 주세요.`);
       return;
     }
     showScore();
