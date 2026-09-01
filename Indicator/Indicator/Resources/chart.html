@@ -1785,7 +1785,7 @@ let scorePend = null;
   s.addEventListener('pointerdown', e=>{
     const mi = miOf(e.target);
     if(mi == null || !tapMeasures()) return;
-    scorePend = {mi, x:e.clientX, y:e.clientY, drag:false};
+    scorePend = {mi, x:e.clientX, y:e.clientY, drag:false, shift:e.shiftKey};
     // Shift+클릭: 기준점(selMeasure)은 그대로 두고 여기까지 범위로 잡는다(끌기와 같은 동작을
     // 클릭 두 번으로) — 시작 마디를 먼저 클릭하고, Shift 누른 채로 끝 마디를 클릭하면 된다.
     if(e.pointerType === 'mouse') selectMeasure(mi, e.shiftKey);
@@ -1810,7 +1810,12 @@ let scorePend = null;
   }, {passive:true});
 
   window.addEventListener('pointerup', ()=>{
-    if(scorePend && !scorePend.drag) selectMeasure(scorePend.mi);
+    // pointerdown에서 이미 Shift 상태를 반영해 선택을 끝냈는데(마우스), 여기서 Shift 없이
+    // 다시 selectMeasure를 부르면 방금 넓힌 범위가 그 자리에서 한 마디로 되돌아가 버렸다
+    // (Shift+클릭 범위 선택이 안 되던 버그의 원인) — pointerdown 때 잡아둔 shift 상태를
+    // 그대로 다시 넘겨서 mi가 그대로면 아무 일도 안 일어나게 한다. 이 호출은 원래 터치용
+    // (pointerdown이 mouse가 아니면 선택을 안 하므로 pointerup이 확정 지점) 이었다.
+    if(scorePend && !scorePend.drag) selectMeasure(scorePend.mi, scorePend.shift);
     scorePend = null;
   });
   window.addEventListener('pointercancel', ()=>{ scorePend = null; });

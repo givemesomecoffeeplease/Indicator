@@ -1,5 +1,24 @@
 # Indicator
 
+## 2026-09-03 (2차) — `/chart` Shift+클릭 범위 선택이 곧바로 풀리던 버그 수정
+
+### 증상
+마디를 클릭해 기준점으로 잡고 Shift+클릭으로 범위를 넓혀도, 넓힌 범위가 그 자리에서 바로 한 마디로 되돌아감(복사/붙여넣기로 여러 마디 선택이 안 되는 것처럼 보이는 원인이었음).
+
+### 원인
+악보 위 마디 클릭 핸들러가 `pointerdown`/`pointerup` 두 이벤트를 같이 씀:
+- `pointerdown`: `selectMeasure(mi, e.shiftKey)` — Shift 상태를 정확히 반영해 범위를 넓힘.
+- `pointerup`: `selectMeasure(scorePend.mi)` — **Shift 상태 없이** 같은 마디로 다시 호출 → `selectMeasure`의 "Shift 없음" 분기가 무조건 `selMeasure=selEnd=mi`로 되돌려버림.
+
+`pointerup`의 이 호출은 원래 **터치 환경용**이었음(터치는 `pointerdown`에서 `e.pointerType!=='mouse'`라 선택을 안 하고 `pointerup`이 실제 확정 지점) — 그런데 마우스에서도 무조건 실행돼서, `pointerdown`이 방금 정확히 잡아둔 Shift 범위를 곧바로 지워버리고 있었음.
+
+### 수정
+`pointerdown` 시점에 잡아두는 `scorePend`에 `shift: e.shiftKey`도 같이 저장, `pointerup`에서 `selectMeasure(scorePend.mi, scorePend.shift)`로 그 값을 그대로 다시 넘김 — 마우스는 `pointerdown`이 이미 확정한 값과 같은 인자로 재호출되니(`selectMeasure`의 `i===selEnd` 얼리 리턴) 사실상 아무 일도 안 일어나고, 터치는 원래 의도대로 `pointerup`이 확정 지점 역할을 그대로 유지.
+
+실제 pointerdown+pointerup 이벤트를 순서대로 디스패치해 재현 — 수정 전엔 Shift+클릭 후 범위가 즉시 1마디로 붕괴, 수정 후엔 `[1,3]`(3마디) 그대로 유지되는 것 확인.
+
+---
+
 ## 2026-09-03 — `/drum` 헤더 제거 + 진짜 연속 스크롤 + 텍스트 확대 + 크레센도/디크레센도 신설
 
 ### `/drum` 헤더 제거 + 곡 전환 시 재생성 없는 진짜 연속 스크롤
