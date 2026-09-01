@@ -5304,32 +5304,45 @@ function hideLogicHighlight(){
   const r = document.getElementById('logicHighlight');
   if(r) r.setAttribute('opacity', '0');
 }
+// index.html/singer.html과 동일한 재연결 패턴 — "EventSource가 알아서 재연결한다"는 가정만
+// 믿었더니, 화면을 오래 켜둬서(백그라운드 탭·절전 등) 연결이 조용히 끊긴 뒤 다시 안 살아나
+// 로직 하이라이트가 멈춘 채로 안 보이는 문제가 있었음(2026-08-30). 직접 닫고 지수 백오프로
+// 재연결한다.
 (function connectLogicSSE(){
-  let es;
-  try{ es = new EventSource('/events'); }catch(e){ return; }
-  es.onmessage = e=>{
-    let st; try{ st = JSON.parse(e.data); }catch(err){ return; }
-    if(typeof st.barPosition === 'number') lastKnownBarPos = st.barPosition;
-    if(playing) { hideLogicHighlight(); return; }   // 채보 자체 재생 중엔 그쪽이 우선
-    if(!st.isPlaying || typeof st.barPosition !== 'number'){ hideLogicHighlight(); return; }
-    // floor: barPosition은 마디 N의 시작=N부터 다음 마디 직전=N+0.999...까지 연속으로 늘어나는 값이라
-    // round를 쓰면 마디 중간(N+0.5)에서 벌써 다음 마디로 넘어가 타이밍이 반 마디 어긋난다.
-    const mi = Math.floor(st.barPosition - effectiveStartBarPos());
-    if(mi === logicCurMeasure) return;
-    logicCurMeasure = mi;
-    if(mi < 0 || mi >= measures.length){ hideLogicHighlight(); return; }
-    scrollScoreTo(mi);
-    const L = slotXCache[mi];
-    if(L){
-      const rect = getLogicHighlightEl();
-      rect.setAttribute('x', L.x0);
-      rect.setAttribute('y', L.top - 26);
-      rect.setAttribute('width', L.w || GEO.MEASURE_W);
-      rect.setAttribute('height', 4*LG + 52);
-      rect.setAttribute('opacity', '0.16');
-    }
-  };
-  es.onerror = ()=>{ hideLogicHighlight(); };   // EventSource가 알아서 재연결을 시도한다
+  let es, reconnectDelay = 1000;
+  function connect(){
+    try{ es = new EventSource('/events'); }catch(e){ return; }
+    es.onopen = ()=>{ reconnectDelay = 1000; };
+    es.onmessage = e=>{
+      let st; try{ st = JSON.parse(e.data); }catch(err){ return; }
+      if(typeof st.barPosition === 'number') lastKnownBarPos = st.barPosition;
+      if(playing) { hideLogicHighlight(); return; }   // 채보 자체 재생 중엔 그쪽이 우선
+      if(!st.isPlaying || typeof st.barPosition !== 'number'){ hideLogicHighlight(); return; }
+      // floor: barPosition은 마디 N의 시작=N부터 다음 마디 직전=N+0.999...까지 연속으로 늘어나는 값이라
+      // round를 쓰면 마디 중간(N+0.5)에서 벌써 다음 마디로 넘어가 타이밍이 반 마디 어긋난다.
+      const mi = Math.floor(st.barPosition - effectiveStartBarPos());
+      if(mi === logicCurMeasure) return;
+      logicCurMeasure = mi;
+      if(mi < 0 || mi >= measures.length){ hideLogicHighlight(); return; }
+      scrollScoreTo(mi);
+      const L = slotXCache[mi];
+      if(L){
+        const rect = getLogicHighlightEl();
+        rect.setAttribute('x', L.x0);
+        rect.setAttribute('y', L.top - 26);
+        rect.setAttribute('width', L.w || GEO.MEASURE_W);
+        rect.setAttribute('height', 4*LG + 52);
+        rect.setAttribute('opacity', '0.16');
+      }
+    };
+    es.onerror = ()=>{
+      hideLogicHighlight();
+      es.close();
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+    };
+  }
+  connect();
 })();
 
 // 편집 화면(악보 탭) 자체가 이제 /drum과 같은 그리기 엔진(notation.js)의 줄바꿈+폭 고정
