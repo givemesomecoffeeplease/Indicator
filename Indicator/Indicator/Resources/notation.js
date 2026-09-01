@@ -391,7 +391,7 @@ function paint(target, o){
     mx += MW;
     target.appendChild(el('line',{x1:mx,y1:top,x2:mx,y2:bottom,stroke:INK,'stroke-width':1.4}));
   }
-  // 크레센도/디크레센도(2026-09-03) — 연속으로 같은 태그가 붙은 마디들에 걸쳐 오선 아래
+  // 크레센도/디크레센도(2026-09-03) — 연속으로 같은 태그가 붙은 마디들에 걸쳐 오선 위
   // 하이핀 하나로 크게 그린다. cache가 다 채워진 뒤(이 루프가 끝난 뒤)에만 그릴 수 있다.
   drawDynamicsRow(measures, from, to, dynCache);
   return svgW;
@@ -411,7 +411,7 @@ function drawDynamicsRow(measuresArr, from, to, cache){
     let j = i;
     while(j < to && measuresArr[j] && measuresArr[j].dynamic === dyn) j++;
     const first = cache[i], last = cache[j-1];
-    if(first && last) drawHairpin(first.x0 + 4, last.x0 + last.w - 4, first.top + 4*LG + 30, dyn);
+    if(first && last) drawHairpin(first.x0 + 4, last.x0 + last.w - 4, first.top - 22, dyn);
     i = j;
   }
 }
