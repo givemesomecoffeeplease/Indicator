@@ -1203,6 +1203,7 @@
           <button id="copyM">복사</button>
           <button id="pasteM" disabled="">붙여넣기</button>
           <button id="repeatM" title="⌘D — 바로 앞 마디와 내용을 똑같이 채우고, 표기는 리핏 마디 기호(𝄎)로 압축해서 보여준다. 다시 누르면 해제(내용은 그대로 편집 가능한 음표로 남음)">반복(𝄎)</button>
+          <button id="textM" title="이 마디 위에 짧은 텍스트(연주 큐 등)를 표시. /drum 뷰어에도 그대로 보임">텍스트</button>
         </div>
         <div class="mgrp" role="group" aria-label="마디 지우기">
           <button id="clrM">비우기</button>
@@ -2188,6 +2189,12 @@ function paintAutoScore(target, o){
       }
       const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
       target.appendChild(num);
+      // 마디 위 자유 텍스트(연주 큐 등) — 마디 번호와 같은 높이, 우측 정렬로 겹치지 않게.
+      if(measures[mi] && measures[mi].text){
+        const ann = el('text',{x:mx+MW-2,y:top-14,'font-size':10,'font-weight':'700',fill:'#7B4BE0','text-anchor':'end'});
+        ann.textContent = measures[mi].text;
+        target.appendChild(ann);
+      }
       // 줄 중간에서 박자표가 바뀌어도 더 이상 강제로 줄을 안 끊으므로(2026-08-22), 그 지점에
       // 정식 표기법대로 작은 박자표를 그려 마디 폭이 왜 달라졌는지 드러낸다.
       if(k > 0 && tsKey(measures[mi]) !== tsKey(measures[mi-1])) drawInlineTs(mx, top, normTs(measures[mi].ts));
@@ -2298,6 +2305,12 @@ function paint(target, o){
       // 마디 번호
       const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
       target.appendChild(num);
+      // 마디 위 자유 텍스트(연주 큐 등) — 마디 번호와 같은 높이, 우측 정렬로 겹치지 않게.
+      if(measures[mi] && measures[mi].text){
+        const ann = el('text',{x:mx+MW-2,y:top-14,'font-size':10,'font-weight':'700',fill:'#7B4BE0','text-anchor':'end'});
+        ann.textContent = measures[mi].text;
+        target.appendChild(ann);
+      }
       drawMeasure(measures[mi], mx, top);
       // 마디선
       target.appendChild(el('line',{x1:mx+MW,y1:top,x2:mx+MW,y2:bottom,stroke:INK,'stroke-width':1.4}));
@@ -3421,6 +3434,12 @@ function refreshEditBtns(){
     rm.classList.toggle('on', on);
     rm.setAttribute('aria-pressed', on);
   }
+  const tm = document.getElementById('textM');
+  if(tm){
+    const has = !!(measures[selMeasure] && measures[selMeasure].text);
+    tm.classList.toggle('on', has);
+    tm.textContent = has ? `텍스트: ${measures[selMeasure].text}` : '텍스트';
+  }
 }
 document.getElementById('copyM').onclick = ()=>{
   clipM = JSON.parse(JSON.stringify(measures.slice(selA(), selB()+1)));
@@ -3535,6 +3554,15 @@ document.getElementById('repeatM').onclick = ()=>{
     measures[a] = src;
     measures[a].repeatPrev = true;
   }
+  refreshAll(); refreshEditBtns(); commit();
+};
+document.getElementById('textM').onclick = ()=>{
+  const a = selMeasure;
+  const cur = measures[a].text || '';
+  const v = prompt('이 마디 위에 표시할 텍스트 (비우면 삭제)', cur);
+  if(v === null) return;   // 취소
+  const trimmed = v.trim();
+  if(trimmed) measures[a].text = trimmed; else delete measures[a].text;
   refreshAll(); refreshEditBtns(); commit();
 };
 document.getElementById('clrM').onclick = ()=>{
@@ -4352,6 +4380,7 @@ function normalizeMeasures(src){
     else if(mm && mm.lineBreak === false) m.lineBreak = false;   // 자연 경계 무시("앞줄로")
     if(mm && typeof mm.lineTarget === 'number' && mm.lineTarget > 0) m.lineTarget = mm.lineTarget;   // 4/8 배치 또는 "뒷줄로"가 계산한 임의 크기 섬
     if(mm && mm.repeatPrev === true) m.repeatPrev = true;   // 리핏 마디 기호(𝄎) — 앞 마디와 내용 동일 표시
+    if(mm && typeof mm.text === 'string' && mm.text) m.text = mm.text;   // 마디 위 자유 텍스트(연주 큐 등)
     if(!mm || typeof mm !== 'object') return m;
     INSTR.forEach(i=>{
       const row = mm[i.id];

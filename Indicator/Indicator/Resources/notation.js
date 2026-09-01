@@ -375,6 +375,12 @@ function paint(target, o){
     if(o.cache) o.cache[mi] = {x0:mx, top, w:MW};
     const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
     target.appendChild(num);
+    // 마디 위 자유 텍스트(연주 큐 등) — 마디 번호와 같은 높이, 우측 정렬로 겹치지 않게.
+    if(measures[mi] && measures[mi].text){
+      const ann = el('text',{x:mx+MW-2,y:top-14,'font-size':10,'font-weight':'700',fill:'#7B4BE0','text-anchor':'end'});
+      ann.textContent = measures[mi].text;
+      target.appendChild(ann);
+    }
     // 줄 중간에서 박자표가 바뀌어도 더 이상 강제로 줄을 끊지 않으므로(2026-08-22), 그 지점에
     // 정식 표기법대로 작은 박자표를 그려 왜 마디 폭이 달라졌는지 표기상 드러낸다.
     if(mi > from && tsKey(measures[mi]) !== tsKey(measures[mi-1])) drawInlineTs(mx, top, normTs(measures[mi].ts));
