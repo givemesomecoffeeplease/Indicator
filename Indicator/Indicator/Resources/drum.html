@@ -21,14 +21,18 @@
      줄마다 구분 박스를 두지 않고 전체를 하나의 연속된 흰 페이지로 — chart.html 편집 화면과 같은 느낌. */
   #scoreWrap{flex:1;overflow-y:auto;overflow-x:hidden;padding:14px 16px 60px;background:#f4f2ee}
   .line{position:relative;margin-top:6px}
-  /* 가사가 한 줄로 잘려 보이던 문제 수정 — 슬라이드 전체(줄바꿈 포함)를 그대로 보여준다.
+  /* 캡션(섹션명·가사)을 마디 위가 아니라 아래에 둔다(2026-09-02) — 그 줄을 연주하는 동안
+     가사가 바로 아래 보이는 배치. 정확한 x위치(그 섹션이 실제 시작하는 마디)는 margin-left를
+     퍼센트로 줘서 맞춘다 — position:absolute+top으로 하면 svg 렌더 높이가 뷰포트 폭에 따라
+     반응형으로 바뀌어서 정확한 세로 위치를 CSS만으로 알 수 없다(JS로 매번 재는 것보다
+     일반 문서 흐름에 맡기는 게 더 견고함).
+     가사가 한 줄로 잘려 보이던 문제 수정 — 슬라이드 전체(줄바꿈 포함)를 그대로 보여준다.
      세로로 쌓이는 만큼 폭도 넉넉히 줘서(60%) 짧은 마디 폭 안에 갇혀 줄바꿈이 과하게
      일어나지 않도록 함. */
-  .line .cap{position:absolute;top:0;display:flex;flex-direction:column;gap:2px;max-width:60%;
-             transform:translateX(-2px)}
+  .line .cap{margin-top:4px;display:flex;flex-direction:column;gap:2px;max-width:60%}
   .line .cap .sec{font-size:16px;font-weight:700;color:#2a7a5c;white-space:nowrap}
   .line .cap .lyr{font-size:15px;color:#8a8578;white-space:pre-line;line-height:1.35}
-  .line svg{display:block;width:100%;height:auto;margin-top:56px}
+  .line svg{display:block;width:100%;height:auto;margin-top:6px}
   /* 다음 곡 미리보기 구분선 — 지금 재생 중인 곡과 확실히 구분되도록 옅게, 그리고 곡이
      아직 안 바뀌었다는 걸 알 수 있게 "다음 곡"이라고 명시한다. */
   .nextDivider{margin:28px 0 4px;padding-top:16px;border-top:2px dashed #d8d4c8;
@@ -186,11 +190,11 @@ function renderLines(){
   const hasNext = nextLineGroups.length > 0;
   linesEl.innerHTML =
     lineGroups.map((g, gi)=>
-      `<div class="line" id="line${gi}"><div class="cap" id="cap${gi}"></div><svg xmlns="${SVG_NS}"></svg></div>`
+      `<div class="line" id="line${gi}"><svg xmlns="${SVG_NS}"></svg><div class="cap" id="cap${gi}"></div></div>`
     ).join('')
     + (hasNext ? `<div class="nextDivider">다음 곡 · ${esc(nextSongName)}</div>` : '')
     + (hasNext ? nextLineGroups.map((g, gi)=>
-        `<div class="line" id="nline${gi}"><div class="cap" id="ncap${gi}"></div><svg xmlns="${SVG_NS}"></svg></div>`
+        `<div class="line" id="nline${gi}"><svg xmlns="${SVG_NS}"></svg><div class="cap" id="ncap${gi}"></div></div>`
       ).join('') : '');
   posCache = {};
   lineGroups.forEach((g, gi)=>{
@@ -215,7 +219,7 @@ function paintCaption(svgEl, g, capId, cache){
   const svgW = svgEl.viewBox.baseVal.width || 1;
   const leftPct = pos ? (pos.x0 / svgW * 100) : 0;
   const capEl = document.getElementById(capId);
-  capEl.style.left = leftPct + '%';
+  capEl.style.marginLeft = leftPct + '%';
   capEl.innerHTML = `<span class="sec">${esc(g.meta.sectionLabel)}</span>${g.meta.lyricCue ? `<span class="lyr">${esc(g.meta.lyricCue)}</span>` : ''}`;
 }
 function esc(s){ return String(s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }

@@ -375,9 +375,10 @@ function paint(target, o){
     if(o.cache) o.cache[mi] = {x0:mx, top, w:MW};
     const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
     target.appendChild(num);
-    // 마디 위 자유 텍스트(연주 큐 등) — 마디 번호와 같은 높이, 우측 정렬로 겹치지 않게.
+    // 마디 위 자유 텍스트(연주 큐 등) — 좌측 정렬, 마디 번호(x=mx+2) 바로 오른쪽에 이어붙여
+    // 같은 왼쪽 구역에 있어도 숫자와 안 겹치게 한다.
     if(measures[mi] && measures[mi].text){
-      const ann = el('text',{x:mx+MW-2,y:top-14,'font-size':10,'font-weight':'700',fill:'#7B4BE0','text-anchor':'end'});
+      const ann = el('text',{x:mx+16,y:top-14,'font-size':10,'font-weight':'700',fill:'#7B4BE0','text-anchor':'start'});
       ann.textContent = measures[mi].text;
       target.appendChild(ann);
     }
