@@ -369,16 +369,18 @@ function paint(target, o){
   target.appendChild(ts1); target.appendChild(ts2);
   target.appendChild(el('line',{x1:6,y1:top,x2:6,y2:bottom,stroke:INK,'stroke-width':1.4}));
   let mx = GEO.CLEF_W;
+  const dynCache = o.cache || {};   // 크레센도 등 위치 계산용 — 호출부가 cache를 안 넘겨도 항상 채운다
   for(let mi=from; mi<to; mi++){
     const MW = FIXED_MW;
     GEO = {SLOT_W: slotFor(beatCount(measures[mi])), BEAT_GAP: baseGap, M_PAD: basePad, CLEF_W: REF_CLEF};
-    if(o.cache) o.cache[mi] = {x0:mx, top, w:MW};
+    dynCache[mi] = {x0:mx, top, w:MW};
     const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
     target.appendChild(num);
     // 마디 위 자유 텍스트(연주 큐 등) — 좌측 정렬, 마디 번호(x=mx+2) 바로 오른쪽에 이어붙여
-    // 같은 왼쪽 구역에 있어도 숫자와 안 겹치게 한다.
+    // 같은 왼쪽 구역에 있어도 숫자와 안 겹치게 한다. 섹션명 캡션과 같은 크기(16px/700)로
+    // 눈에 잘 띄게 키운다(2026-09-03) — 원래 10px는 공연 중 잘 안 보인다는 피드백.
     if(measures[mi] && measures[mi].text){
-      const ann = el('text',{x:mx+16,y:top-14,'font-size':10,'font-weight':'700',fill:'#7B4BE0','text-anchor':'start'});
+      const ann = el('text',{x:mx+20,y:top-10,'font-size':16,'font-weight':'700',fill:'#7B4BE0','text-anchor':'start'});
       ann.textContent = measures[mi].text;
       target.appendChild(ann);
     }
@@ -389,7 +391,29 @@ function paint(target, o){
     mx += MW;
     target.appendChild(el('line',{x1:mx,y1:top,x2:mx,y2:bottom,stroke:INK,'stroke-width':1.4}));
   }
+  // 크레센도/디크레센도(2026-09-03) — 연속으로 같은 태그가 붙은 마디들에 걸쳐 오선 아래
+  // 하이핀 하나로 크게 그린다. cache가 다 채워진 뒤(이 루프가 끝난 뒤)에만 그릴 수 있다.
+  drawDynamicsRow(measures, from, to, dynCache);
   return svgW;
+}
+function drawHairpin(x1, x2, y, type){
+  const halfH = 9;
+  const apexX = (type==='cresc') ? x1 : x2, openX = (type==='cresc') ? x2 : x1;
+  SVGT.appendChild(el('line',{x1:apexX,y1:y,x2:openX,y2:y-halfH,stroke:INK,'stroke-width':2,'stroke-linecap':'round'}));
+  SVGT.appendChild(el('line',{x1:apexX,y1:y,x2:openX,y2:y+halfH,stroke:INK,'stroke-width':2,'stroke-linecap':'round'}));
+}
+function drawDynamicsRow(measuresArr, from, to, cache){
+  if(!cache) return;
+  let i = from;
+  while(i < to){
+    const dyn = measuresArr[i] && measuresArr[i].dynamic;
+    if(dyn !== 'cresc' && dyn !== 'decresc'){ i++; continue; }
+    let j = i;
+    while(j < to && measuresArr[j] && measuresArr[j].dynamic === dyn) j++;
+    const first = cache[i], last = cache[j-1];
+    if(first && last) drawHairpin(first.x0 + 4, last.x0 + last.w - 4, first.top + 4*LG + 30, dyn);
+    i = j;
+  }
 }
 function drawInlineTs(x, top, ts){
   const size = 11;

@@ -1204,6 +1204,8 @@
           <button id="pasteM" disabled="">붙여넣기</button>
           <button id="repeatM" title="⌘D — 바로 앞 마디와 내용을 똑같이 채우고, 표기는 리핏 마디 기호(𝄎)로 압축해서 보여준다. 다시 누르면 해제(내용은 그대로 편집 가능한 음표로 남음)">반복(𝄎)</button>
           <button id="textM" title="이 마디 위에 짧은 텍스트(연주 큐 등)를 표시. /drum 뷰어에도 그대로 보임">텍스트</button>
+          <button id="crescM" title="선택한 마디 구간에 크레센도(점점 세게) 하이핀을 오선 아래 크게 표시. 다시 누르면 해제">크레센도</button>
+          <button id="decrescM" title="선택한 마디 구간에 디크레센도(점점 여리게) 하이핀을 오선 아래 크게 표시. 다시 누르면 해제">디크레센도</button>
         </div>
         <div class="mgrp" role="group" aria-label="마디 지우기">
           <button id="clrM">비우기</button>
@@ -2175,6 +2177,7 @@ function paintAutoScore(target, o){
     target.appendChild(ts1); target.appendChild(ts2);
     target.appendChild(el('line',{x1:6,y1:top,x2:6,y2:bottom,stroke:INK,'stroke-width':1.4}));
     let mx = clef;
+    const dynCache = o.cache || {};   // 크레센도 등 위치 계산용 — 호출부가 cache를 안 넘겨도 항상 채운다
     for(let k=0;k<nInLine;k++){
       const mi = gFrom + k;
       const MW = mwOf();
@@ -2182,7 +2185,7 @@ function paintAutoScore(target, o){
       // slot/gap/pad도 같이 저장 — updateEditCursor()가 전체 렌더 끝난 뒤(GEO가 마지막에
       // 그린 마디 기준 값으로 남아있는 시점에) 실행되므로, 공유 GEO 대신 그 마디 고유의
       // 값을 여기서 읽어야 한다(줄마다 마디 수가 달라 압축 비율이 다르면 어긋났었음).
-      if(o.cache) o.cache[mi] = {x0:mx, top, w:MW, slot:GEO.SLOT_W, gap, pad};
+      dynCache[mi] = {x0:mx, top, w:MW, slot:GEO.SLOT_W, gap, pad};
       if(o.cache && tapMeasures() && mi >= selA() && mi <= selB()){
         target.appendChild(el('rect',{x:mx, y:top-26, width:MW, height:4*LG+52,
           fill:'#7B4BE0', opacity:0.09, rx:7, 'pointer-events':'none'}));
@@ -2190,9 +2193,10 @@ function paintAutoScore(target, o){
       const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
       target.appendChild(num);
       // 마디 위 자유 텍스트(연주 큐 등) — 좌측 정렬, 마디 번호(x=mx+2) 바로 오른쪽에 이어붙여
-      // 같은 왼쪽 구역에 있어도 숫자와 안 겹치게 한다.
+      // 같은 왼쪽 구역에 있어도 숫자와 안 겹치게 한다. 섹션명 캡션과 같은 크기(16px/700)로
+      // 눈에 잘 띄게 키운다(2026-09-03) — 원래 10px는 공연 중 잘 안 보인다는 피드백.
       if(measures[mi] && measures[mi].text){
-        const ann = el('text',{x:mx+16,y:top-14,'font-size':10,'font-weight':'700',fill:'#7B4BE0','text-anchor':'start'});
+        const ann = el('text',{x:mx+20,y:top-10,'font-size':16,'font-weight':'700',fill:'#7B4BE0','text-anchor':'start'});
         ann.textContent = measures[mi].text;
         target.appendChild(ann);
       }
@@ -2204,6 +2208,9 @@ function paintAutoScore(target, o){
       target.appendChild(el('line',{x1:mx,y1:top,x2:mx,y2:bottom,stroke:INK,'stroke-width':1.4}));
       if(o.cache && tapMeasures()) taps.push({mi, x:mx-MW, y:top-26, w:MW, h:4*LG+52});
     }
+    // 크레센도/디크레센도(2026-09-03) — 연속으로 같은 태그가 붙은 마디들에 걸쳐 오선 아래
+    // 하이핀 하나로 크게 그린다.
+    drawDynamicsRow(measures, gFrom, gFrom+nInLine, dynCache);
   });
   taps.forEach(t=>{
     const r = el('rect',{x:t.x, y:t.y, width:t.w, height:t.h, fill:'transparent', 'data-mi':t.mi});
@@ -2294,10 +2301,11 @@ function paint(target, o){
     // 시작 세로줄
     target.appendChild(el('line',{x1:6,y1:top,x2:6,y2:bottom,stroke:INK,'stroke-width':1.4}));
 
+    const dynCache = o.cache || {};   // 크레센도 등 위치 계산용 — 호출부가 cache를 안 넘겨도 항상 채운다
     for(let k=0;k<nInLine;k++){
       const mi = gFrom + k;
       const mx = clef + k*MW;
-      if(o.cache) o.cache[mi] = {x0:mx, top, w:MW};
+      dynCache[mi] = {x0:mx, top, w:MW};
       // 편집 중인 마디를 옅게 깔아 준다. 오선 위에 얹히지만 7%라 선이 그대로 보인다
       if(o.cache && tapMeasures() && mi >= selA() && mi <= selB()){
         target.appendChild(el('rect',{x:mx, y:top-26, width:MW, height:4*LG+52,
@@ -2307,9 +2315,10 @@ function paint(target, o){
       const num = el('text',{x:mx+2,y:top-14,'font-size':10,fill:'#8E88A0'}); num.textContent = mi+1;
       target.appendChild(num);
       // 마디 위 자유 텍스트(연주 큐 등) — 좌측 정렬, 마디 번호(x=mx+2) 바로 오른쪽에 이어붙여
-      // 같은 왼쪽 구역에 있어도 숫자와 안 겹치게 한다.
+      // 같은 왼쪽 구역에 있어도 숫자와 안 겹치게 한다. 섹션명 캡션과 같은 크기(16px/700)로
+      // 눈에 잘 띄게 키운다(2026-09-03) — 원래 10px는 공연 중 잘 안 보인다는 피드백.
       if(measures[mi] && measures[mi].text){
-        const ann = el('text',{x:mx+16,y:top-14,'font-size':10,'font-weight':'700',fill:'#7B4BE0','text-anchor':'start'});
+        const ann = el('text',{x:mx+20,y:top-10,'font-size':16,'font-weight':'700',fill:'#7B4BE0','text-anchor':'start'});
         ann.textContent = measures[mi].text;
         target.appendChild(ann);
       }
@@ -2319,6 +2328,7 @@ function paint(target, o){
       // 탭 영역은 맨 위에 깔아야 하므로 모아 뒀다가 마지막에 붙인다
       if(o.cache && tapMeasures()) taps.push({mi, x:mx, y:top-26, w:MW, h:4*LG+52});
     }
+    drawDynamicsRow(measures, gFrom, gFrom+nInLine, dynCache);
   }
   taps.forEach(t=>{
     const r = el('rect',{x:t.x, y:t.y, width:t.w, height:t.h, fill:'transparent', 'data-mi':t.mi});
@@ -2420,6 +2430,26 @@ function drawInlineTs(x, top, ts){
     fill:INK,'font-family':'Georgia,"Times New Roman",serif','text-anchor':'start'});
   t2.textContent = String(ts[1]);
   SVGT.appendChild(t1); SVGT.appendChild(t2);
+}
+// notation.js의 동명 함수들과 동일 — 크레센도/디크레센도를 연속 마디에 걸쳐 오선 아래 크게 그린다.
+function drawHairpin(x1, x2, y, type){
+  const halfH = 9;
+  const apexX = (type==='cresc') ? x1 : x2, openX = (type==='cresc') ? x2 : x1;
+  SVGT.appendChild(el('line',{x1:apexX,y1:y,x2:openX,y2:y-halfH,stroke:INK,'stroke-width':2,'stroke-linecap':'round'}));
+  SVGT.appendChild(el('line',{x1:apexX,y1:y,x2:openX,y2:y+halfH,stroke:INK,'stroke-width':2,'stroke-linecap':'round'}));
+}
+function drawDynamicsRow(measuresArr, from, to, cache){
+  if(!cache) return;
+  let i = from;
+  while(i < to){
+    const dyn = measuresArr[i] && measuresArr[i].dynamic;
+    if(dyn !== 'cresc' && dyn !== 'decresc'){ i++; continue; }
+    let j = i;
+    while(j < to && measuresArr[j] && measuresArr[j].dynamic === dyn) j++;
+    const first = cache[i], last = cache[j-1];
+    if(first && last) drawHairpin(first.x0 + 4, last.x0 + last.w - 4, first.top + 4*LG + 30, dyn);
+    i = j;
+  }
 }
 function drawMeasure(m, mx, top){
   if(m && m.repeatPrev){ drawRepeatBarGlyph(mx + GEO.MEASURE_W/2, top); return; }
@@ -3567,6 +3597,17 @@ document.getElementById('textM').onclick = ()=>{
   if(trimmed) measures[a].text = trimmed; else delete measures[a].text;
   refreshAll(); refreshEditBtns(); commit();
 };
+// 크레센도/디크레센도 — 선택 구간 전체(selA~selB)에 태그를 걸어 연속 마디에 걸친 하이핀 하나로
+// 그려지게 한다(drawDynamicsRow가 연속 태그를 자동으로 하나로 합쳐 그림). 이미 선택 구간
+// 전체가 같은 종류로 걸려 있으면 토글 해제.
+function setDynamic(type){
+  const a = selA(), b = selB();
+  const allSet = measures.slice(a, b+1).every(m=>m.dynamic===type);
+  for(let i=a; i<=b; i++){ if(allSet) delete measures[i].dynamic; else measures[i].dynamic = type; }
+  refreshAll(); commit();
+}
+document.getElementById('crescM').onclick = ()=> setDynamic('cresc');
+document.getElementById('decrescM').onclick = ()=> setDynamic('decresc');
 document.getElementById('clrM').onclick = ()=>{
   measures[selMeasure] = emptyMeasure(null, measures[selMeasure].ts);
   refreshAll(); commit();
@@ -4383,6 +4424,7 @@ function normalizeMeasures(src){
     if(mm && typeof mm.lineTarget === 'number' && mm.lineTarget > 0) m.lineTarget = mm.lineTarget;   // 4/8 배치 또는 "뒷줄로"가 계산한 임의 크기 섬
     if(mm && mm.repeatPrev === true) m.repeatPrev = true;   // 리핏 마디 기호(𝄎) — 앞 마디와 내용 동일 표시
     if(mm && typeof mm.text === 'string' && mm.text) m.text = mm.text;   // 마디 위 자유 텍스트(연주 큐 등)
+    if(mm && (mm.dynamic === 'cresc' || mm.dynamic === 'decresc')) m.dynamic = mm.dynamic;   // 크레센도/디크레센도
     if(!mm || typeof mm !== 'object') return m;
     INSTR.forEach(i=>{
       const row = mm[i.id];
