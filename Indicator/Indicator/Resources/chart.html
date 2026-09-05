@@ -718,6 +718,15 @@
     display:inline-flex;align-items:center;justify-content:center;}
   #loopBtn.on{background:transparent;color:var(--lime);border-color:var(--lime);
     box-shadow:0 0 12px -2px #C9F24D66;}
+  /* 녹음 버튼 — 재생 버튼 바로 옆, 빨간 점 아이콘. 평소엔 옅게(아이콘 자체 색만 빨강),
+     실제로 기록 중(.live)일 땐 배경까지 빨강+살짝 펄스로 눈에 띄게 — 리드인 카운트 중과
+     구분해서 "지금 진짜로 찍히고 있다"를 확실히 알 수 있게 한다. */
+  #recordBtn{width:42px;height:42px;padding:0;border-radius:50%;
+    background:var(--surface-2);border:1px solid transparent;
+    display:inline-flex;align-items:center;justify-content:center;}
+  #recordBtn.live{background:#E5484D;box-shadow:0 0 0 3px #E5484D33;animation:recPulse 1.1s ease-in-out infinite;}
+  #recordBtn.live .icn circle{fill:#fff;}
+  @keyframes recPulse{0%,100%{box-shadow:0 0 0 3px #E5484D33;}50%{box-shadow:0 0 0 6px #E5484D22;}}
   /* 구간 반복 버튼. 켜지면 "1–4"처럼 구간을 그대로 보여 준다 —
      아이콘만 두면 켜졌는지 어디인지 알 수 없다 */
   /* 구간 반복은 패드 전용이다. 폰은 한두 마디를 찍는 도구라 구간을 돌릴 일이 없고,
@@ -1297,13 +1306,8 @@
             <span class="sideLabel">찍은 뒤</span>
             <button id="autoAdvBtn" class="btn sm on">자동 이동</button>
           </div>
-          <!-- 원래 있던 실시간 녹음 로직(재생 중 패드를 치면 그 박 나누기 격자에 맞춰
-               자동 퀀타이즈 기록)에 시작 스위치가 없어 실제로 쓸 방법이 없었음(2026-09-06
-               리포트로 발견) — 리얼드럼 탭에서만 의미 있는 기능이라 이 탭에만 노출. -->
-          <div class="sideGroup" role="group" aria-label="녹음">
-            <span class="sideLabel">녹음</span>
-            <button id="recordBtn" class="btn sm" title="켜고 재생을 누르면 한 마디 리드인 후 자동으로 기록을 시작합니다(재생 중 패드를 치면 그 박 나누기 격자에 맞춰 기록됨). 다시 누르면 꺼짐">녹음</button>
-          </div>
+          <!-- 녹음 버튼은 독(dock)의 재생 버튼 옆으로 이동함(2026-09-06 2차) — 여기 있던
+               토글+재생 2단계 방식은 "누르면 바로 시작"으로 바뀌어 이 자리엔 안 둠. -->
           <div class="sideGroup" role="group" aria-label="로직 동기화">
             <span class="sideLabel">로직 동기화</span>
             <div class="mgrp">
@@ -1388,6 +1392,14 @@
 <div class="dock">
   <div class="transport">
     <button id="playBtn" aria-label="정지"><svg class="icn" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.8" y="6.8" width="10.4" height="10.4" rx="2.6" fill="currentColor"></rect></svg></button>
+    <!-- 녹음 — 리얼드럼 탭에서만 보임(setMode가 display 토글). 누르면 바로 한 마디 리드인 후
+         녹음 시작(따로 "재생"을 또 누를 필요 없음, 2026-09-06 피드백으로 2단계→1단계로 변경).
+         빨간 점 아이콘, 실제로 기록 중일 땐 CSS로 꽉 찬 빨강+테두리(.live)로 구분. -->
+    <button id="recordBtn" class="btn" style="display:none" aria-pressed="false"
+      aria-label="녹음 — 누르면 한 마디 리드인 후 바로 녹음이 시작됩니다"
+      title="누르면 한 마디 리드인 후 바로 녹음이 시작됩니다(재생 중 패드를 치면 그 박 나누기 격자에 맞춰 기록됨)">
+      <svg class="icn" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="#E5484D"></circle></svg>
+    </button>
     <!-- 요청 13 "Metronome 옵션 or 예비박".
          버튼 두 개를 넣었더니 폰(390)과 아이패드 2단 좁은 칼럼(357)에서
          BPM 슬라이더가 0px까지 눌렸다. 하나로 합쳐 **세 단계로 돈다** —
@@ -3276,6 +3288,7 @@ function tick(){
     if(recordArmAt != null && curM === recordArmAt){
       recording = true;
       recordArmAt = null;
+      syncRecordBtn();
     }
     const last = practiceRun ? rangeEnd : measures.length-1;
     if(curM > last){
@@ -3437,23 +3450,29 @@ function stopPlay(natural){
   recording = false;
   recordArmAt = null;   // 리드인 중 정지해도 다음 재생에 잘못 남지 않게
   if(recDirty){ recDirty = false; commit(); }   // 녹음 한 판을 한 번의 실행 취소로
-  const rb = document.getElementById('recBtn');
-  if(rb){ rb.classList.remove('recording'); rb.textContent = '● 녹음'; }
+  syncRecordBtn();
   updateEditCursor();
 }
-playBtn.onclick = ()=> playing ? stopPlay() : startPlay({recordLeadIn: recordArmed});
+playBtn.onclick = ()=> playing ? stopPlay() : startPlay();
 
-/* 녹음 버튼 — 리얼드럼 탭 안에만 있는 토글(HTML에서 #drumMode 자식이라 그리드 탭에서는
-   자동으로 안 보임). 켠 채로 재생을 누르면 위 startPlay가 리드인 후 자동 기록을 시작한다.
-   원래 있던 녹음 로직 자체는 손 안 댐 — 이걸 실제로 켤 스위치가 화면에 없던 게 문제였음. */
-let recordArmed = false;
+/* 녹음 버튼 — 리얼드럼 탭에서만 보이는 독(dock) 버튼. **누르면 그 자리에서 바로**
+   startPlay({recordLeadIn:true})를 호출한다 — 처음엔 "켜고 따로 재생을 누르는" 2단계였는데,
+   실사용 피드백으로 누르는 즉시 리드인+녹음이 시작되는 1단계로 바꿈. 이미 재생 중이면
+   정지로 동작(재생 버튼과 동일). syncRecordBtn()이 실제로 기록 중(recording===true)일
+   때만 꽉 찬 표시(.live)로 구분 — 리드인 카운트 중엔 아직 안 켜짐. */
+function syncRecordBtn(){
+  const rb = document.getElementById('recordBtn');
+  if(!rb) return;
+  rb.classList.toggle('live', recording);
+  rb.setAttribute('aria-pressed', recording);
+}
 (function initRecordBtn(){
   const rb = document.getElementById('recordBtn');
   if(!rb) return;
   rb.onclick = ()=>{
-    recordArmed = !recordArmed;
-    rb.classList.toggle('on', recordArmed);
-    rb.setAttribute('aria-pressed', recordArmed);
+    if(playing){ stopPlay(); return; }
+    startPlay({recordLeadIn: true});
+    syncRecordBtn();
   };
 })();
 document.getElementById('loopBtn').onclick = e=>{
@@ -4734,6 +4753,8 @@ function setMode(m){
   document.getElementById('tabDrum').classList.toggle('sel', m==='drum');
   document.getElementById('gridMode').style.display = m==='grid' ? '' : 'none';
   document.getElementById('drumMode').style.display = m==='drum' ? '' : 'none';
+  const rb = document.getElementById('recordBtn');
+  if(rb) rb.style.display = m==='drum' ? '' : 'none';   // 녹음은 리얼드럼 탭에서만 의미가 있다
   const pm = document.getElementById('practiceMode');
   if(pm){ pm.style.display='none'; document.getElementById('tabPractice').classList.remove('sel'); }
   if(m==='drum'){ buildKit(); refreshStepDots(); refreshKitScale(); }
@@ -5077,6 +5098,7 @@ document.getElementById('tabPractice').onclick = ()=>{
   document.getElementById('tabDrum').classList.remove('sel');
   document.getElementById('gridMode').style.display = 'none';
   document.getElementById('drumMode').style.display = 'none';
+  const rb0 = document.getElementById('recordBtn'); if(rb0) rb0.style.display = 'none';
   setPracticeTab(true);
   updateEditCursor();
 };
