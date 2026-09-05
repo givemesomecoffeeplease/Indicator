@@ -732,6 +732,14 @@
     opacity:0;transform:scale(.7);transition:opacity .12s,transform .12s;
   }
   #metBtn.with-cin .cin{opacity:1;transform:scale(1);}
+  /* 8비트 서브클릭 배지 — 예비박 배지(cin, 오른쪽 아래)와 안 겹치게 반대쪽(왼쪽 위)에 둔다 */
+  #metBtn .sub{
+    position:absolute;left:-2px;top:-2px;
+    font-size:8px;font-style:normal;font-weight:800;letter-spacing:.02em;line-height:1;
+    padding:2px 3px;border-radius:5px;background:var(--lilac);color:#14121A;
+    opacity:0;transform:scale(.7);transition:opacity .12s,transform .12s;
+  }
+  #metBtn.with-sub .sub{opacity:1;transform:scale(1);}
   body.edition-pad .rangebtn{
     display:inline-flex;
     height:42px;min-height:42px;padding:0 11px;border-radius:var(--r-pill);
@@ -1289,6 +1297,13 @@
             <span class="sideLabel">찍은 뒤</span>
             <button id="autoAdvBtn" class="btn sm on">자동 이동</button>
           </div>
+          <!-- 원래 있던 실시간 녹음 로직(재생 중 패드를 치면 그 박 나누기 격자에 맞춰
+               자동 퀀타이즈 기록)에 시작 스위치가 없어 실제로 쓸 방법이 없었음(2026-09-06
+               리포트로 발견) — 리얼드럼 탭에서만 의미 있는 기능이라 이 탭에만 노출. -->
+          <div class="sideGroup" role="group" aria-label="녹음">
+            <span class="sideLabel">녹음</span>
+            <button id="recordBtn" class="btn sm" title="켜고 재생을 누르면 한 마디 리드인 후 자동으로 기록을 시작합니다(재생 중 패드를 치면 그 박 나누기 격자에 맞춰 기록됨). 다시 누르면 꺼짐">녹음</button>
+          </div>
           <div class="sideGroup" role="group" aria-label="로직 동기화">
             <span class="sideLabel">로직 동기화</span>
             <div class="mgrp">
@@ -1384,6 +1399,7 @@
         <path d="M9 3h6l3 18H6z"></path><path d="M7.5 15h9"></path><path d="M12 17.5 17 6.5"></path>
       </svg>
       <i class="cin" aria-hidden="true">1·2</i>
+      <i class="sub" aria-hidden="true">8</i>
     </button>
     <button id="loopBtn" class="btn on" aria-pressed="true" aria-label="구간 반복">
       <svg class="icn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -3087,9 +3103,10 @@ const SYNTH = {
   tom1(t){ tom(t, 232, 0.30); },
   tom2(t){ tom(t, 178, 0.34); },
   ftom(t){ tom(t, 118, 0.44); },
-  click(t){                                                // 메트로놈은 드라이
-    const c = ac(), o = osc('square', 1500), g = c.createGain();
-    env(g.gain, t, 0.0008, 0.16, 0.028, 'lin');
+  click(t, weak){                                          // 메트로놈은 드라이
+    // weak=true는 8비트 서브클릭(박과 박 사이, "&") — 박 자체보다 낮은 음+작은 소리로 구분
+    const c = ac(), o = osc('square', weak ? 1000 : 1500), g = c.createGain();
+    env(g.gain, t, 0.0008, weak ? 0.085 : 0.16, 0.028, 'lin');
     o.connect(g).connect(bus().dry); o.start(t); o.stop(t+0.05);
     releaseAfter(t, [g]);                                  // voice()를 안 거치므로 직접 끊는다
   },
@@ -3219,8 +3236,12 @@ function tick(){
     const bd = beatDurFor(m), nb = beatCount(m);
 
     const tEv    = evIdx < evList.length ? mStartT + evList[evIdx].pos * bd : Infinity;
-    const wantCl = (recording || metOn()) && (lastClickBeat + 1 < nb);
-    const tCl    = wantCl ? mStartT + (lastClickBeat + 1) * bd : Infinity;
+    // 8비트 서브클릭 켜져 있으면 lastClickBeat를 "반박" 단위로 센다(짝수=박 자체, 홀수=그 사이 &).
+    // 꺼져 있으면 기존 그대로 박 단위 — 단위만 다를 뿐 로직은 그대로라 켜고 끄기가 안전하다.
+    const clickStep = metSubOn() ? bd/2 : bd;
+    const clickCount = metSubOn() ? nb*2 : nb;
+    const wantCl = (recording || metOn()) && (lastClickBeat + 1 < clickCount);
+    const tCl    = wantCl ? mStartT + (lastClickBeat + 1) * clickStep : Infinity;
     const tEnd   = mStartT + nb * bd;
 
     const t = Math.min(tEv, tCl, tEnd);
@@ -3228,7 +3249,8 @@ function tick(){
 
     // 메트로놈이 먼저 (같은 시각이면 클릭 → 음표 순서로 처리된다)
     if(t === tCl){
-      if(t >= c.currentTime - 0.01) SOUND.click(t);
+      const weak = metSubOn() && ((lastClickBeat + 1) % 2 === 1);
+      if(t >= c.currentTime - 0.01) SOUND.click(t, weak);
       lastClickBeat++;
       continue;
     }
@@ -3267,6 +3289,7 @@ function tick(){
    연습 모드의 체크박스(마이크 채점과 묶인 것)와 독의 버튼(그냥 재생용).
    연습 중에는 연습 쪽 체크박스가 우선한다. */
 let metMode = 0;                 // 0 꺼짐 / 1 메트로놈 / 2 메트로놈+예비박
+let metSub = false;              // 8비트 서브클릭(박 사이 "&"도 들려줌) — metMode와 별개 독립 토글
 const MET_TITLE = ['메트로놈 — 꺼짐. 누르면 박을 들려줍니다',
                    '메트로놈 켜짐. 한 번 더 누르면 예비박까지',
                    '메트로놈 + 예비박 — 재생 전에 한 마디를 세어 줍니다'];
@@ -3275,16 +3298,34 @@ function metOn(){
   return metMode >= 1;
 }
 function cinOn(){ return metMode === 2; }
+function metSubOn(){ return metSub; }
 (function initMetToggle(){
   const mb = document.getElementById('metBtn');
   const sync = ()=>{
     mb.classList.toggle('on', metMode >= 1);
     mb.classList.toggle('with-cin', metMode === 2);
+    mb.classList.toggle('with-sub', metSub);
     mb.setAttribute('aria-pressed', metMode >= 1);
-    mb.title = MET_TITLE[metMode];
+    const subHint = metSub ? ' · 8비트 서브클릭 켜짐(꾹 눌러 끄기)' : ' · 꾹 누르면 박 사이 8비트 클릭도 켤 수 있습니다';
+    mb.title = MET_TITLE[metMode] + subHint;
     mb.setAttribute('aria-label', MET_TITLE[metMode]);
   };
-  mb.onclick = ()=>{ metMode = (metMode + 1) % 3; sync(); };
+  // 짧게 탭 = 기존 3단 순환, 꾹 누르고 있으면(500ms) 8비트 서브클릭 on/off.
+  // 꾹 누르기가 발동했으면 그 뒤 손 뗄 때 나오는 click 이벤트는 무시해야
+  // 순환까지 같이 동작해버리는 걸 막을 수 있다.
+  let pressTimer = null, longFired = false;
+  mb.addEventListener('pointerdown', ()=>{
+    longFired = false;
+    pressTimer = setTimeout(()=>{ longFired = true; metSub = !metSub; sync(); }, 500);
+  });
+  const cancelPress = ()=> clearTimeout(pressTimer);
+  mb.addEventListener('pointerup', cancelPress);
+  mb.addEventListener('pointerleave', cancelPress);
+  mb.addEventListener('pointercancel', cancelPress);
+  mb.onclick = ()=>{
+    if(longFired){ longFired = false; return; }
+    metMode = (metMode + 1) % 3; sync();
+  };
   sync();
 })();
 /* 재생 커서 컬럼.
@@ -3349,19 +3390,30 @@ function startPlay(opts){
     // 그냥 재생에도 구간이 걸린다. 연습 모드의 구간(rngStart/rngEnd)과는 별개다
     rangeStart = clampM(loopRange.a); rangeEnd = clampM(loopRange.b);
     if(rangeEnd < rangeStart) rangeEnd = rangeStart;
-    curM = rangeStart;
-    preSteps = cinOn() ? beatCount(measures[curM]) : 0;
-  } else {
-    // 그냥 재생(구간 반복 안 걸림)은 지금 선택한 마디부터 시작 — 곡 맨 처음이 아니라
-    rangeStart = selA(); rangeEnd = measures.length-1;
     // 녹음 리드인: 목표 마디 한 마디 전부터 미리 재생 시작 — 녹음 버튼 누르자마자
-    // 바로 쳐야 하는 상황을 피하고, 실제 기록은 목표 마디에 도달했을 때 tick()에서 켠다
+    // 바로 쳐야 하는 상황을 피하고, 실제 기록은 목표 마디에 도달했을 때 tick()에서 켠다.
+    // 리드인으로 갈 앞 마디가 없으면(구간이 1마디부터 시작) 리드인 없이 바로 기록 시작.
     if(opts && opts.recordLeadIn && rangeStart > 0){
       curM = rangeStart - 1;
       recordArmAt = rangeStart;
     } else {
       curM = rangeStart;
       recordArmAt = null;
+      if(opts && opts.recordLeadIn) recording = true;
+    }
+    preSteps = cinOn() ? beatCount(measures[curM]) : 0;
+  } else {
+    // 그냥 재생(구간 반복 안 걸림)은 지금 선택한 마디부터 시작 — 곡 맨 처음이 아니라
+    rangeStart = selA(); rangeEnd = measures.length-1;
+    if(opts && opts.recordLeadIn && rangeStart > 0){
+      curM = rangeStart - 1;
+      recordArmAt = rangeStart;
+    } else {
+      curM = rangeStart;
+      recordArmAt = null;
+      // 리드인 갈 앞 마디가 없는 경우(1마디부터 녹음) — 예전엔 이 경우 recording이 영영
+      // true가 안 돼서 녹음 버튼을 눌러도 1마디부터는 아예 기록이 안 되는 버그가 있었음
+      if(opts && opts.recordLeadIn) recording = true;
     }
     preSteps = cinOn() ? beatCount(measures[curM]) : 0;
   }
@@ -3389,7 +3441,21 @@ function stopPlay(natural){
   if(rb){ rb.classList.remove('recording'); rb.textContent = '● 녹음'; }
   updateEditCursor();
 }
-playBtn.onclick = ()=> playing ? stopPlay() : startPlay();
+playBtn.onclick = ()=> playing ? stopPlay() : startPlay({recordLeadIn: recordArmed});
+
+/* 녹음 버튼 — 리얼드럼 탭 안에만 있는 토글(HTML에서 #drumMode 자식이라 그리드 탭에서는
+   자동으로 안 보임). 켠 채로 재생을 누르면 위 startPlay가 리드인 후 자동 기록을 시작한다.
+   원래 있던 녹음 로직 자체는 손 안 댐 — 이걸 실제로 켤 스위치가 화면에 없던 게 문제였음. */
+let recordArmed = false;
+(function initRecordBtn(){
+  const rb = document.getElementById('recordBtn');
+  if(!rb) return;
+  rb.onclick = ()=>{
+    recordArmed = !recordArmed;
+    rb.classList.toggle('on', recordArmed);
+    rb.setAttribute('aria-pressed', recordArmed);
+  };
+})();
 document.getElementById('loopBtn').onclick = e=>{
   looping = !looping; e.currentTarget.classList.toggle('on', looping);
   e.currentTarget.setAttribute('aria-pressed', looping);
