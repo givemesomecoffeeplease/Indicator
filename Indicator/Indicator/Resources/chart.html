@@ -1258,7 +1258,7 @@
         <!-- 플램은 표기(art)와 성격이 다르다 — 기본/고스트/액센트 음 어디에나 겹쳐 붙을 수 있는
              장식음이라, 배타적 선택(selArt)이 아니라 독립 토글(flamMode)로 둔다.
              켠 상태에서 이미 음이 있는 칸을 누르면 그 칸에 플램만 켜짐/꺼짐 (음 자체는 안 바뀜). -->
-        <button id="flamToggle" data-flam-toggle title="이미 찍힌 음에 플램(장식음)을 붙이거나 뗍니다">
+        <button id="flamToggle" data-flam-toggle title="켜고 칸을 누르면 음+플램이 같이 찍힙니다. 이미 음이 있으면 플램만 붙였다 뗐다 합니다">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
             <ellipse cx="15" cy="17" rx="3.2" ry="2.4" fill="currentColor" stroke="none"></ellipse>
             <path d="M17.6 15.5 17.6 6"></path>
@@ -4698,8 +4698,10 @@ function padHit(id){
       k = 0; b++;
       if(b >= beatCount(measures[mi])){ b = 0; mi = (mi+1) % measures.length; }
     }
+    const recIdx = idxAt(measures[mi], voice, b, k);
     if(measures[mi].repeatPrev) delete measures[mi].repeatPrev;   // 편집됐으니 반복 표시 해제
-    measures[mi][id][idxAt(measures[mi], voice, b, k)] = art;
+    measures[mi][id][recIdx] = art;
+    if(flamMode) measures[mi][id+'Flam'][recIdx] = 1;   // 리얼드럼 녹음 중에도 플램 모드면 그대로 반영
     recDirty = true;
     if(mi===selMeasure) refreshGrid();
     renderScore(); refreshStepDots();
@@ -4717,6 +4719,14 @@ function padHit(id){
     buildGrid();
   }
   const idx = cursorIdx(voice0);
+  if(flamMode){
+    // 그리드의 플램 모드와 완전히 같은 규칙: 빈 칸이면 지금 표기로 음을 찍으며 플램도
+    // 같이 켜고, 이미 음이 있으면 음은 그대로 두고 플램만 토글(음을 지우지 않는다 —
+    // 아래 일반 입력의 "같은 표기 다시 누르면 지워짐" 규칙과 다르게 동작해야 함).
+    toggleFlam(id, idx);
+    commit();
+    return;
+  }
   const cur = measures[selMeasure][id][idx]|0;
   const val = (cur === art) ? ART.OFF : art;
   if(measures[selMeasure].repeatPrev) delete measures[selMeasure].repeatPrev;   // 편집됐으니 반복 표시 해제
