@@ -1424,7 +1424,7 @@
     <button id="rangeBtn" class="btn rangebtn" aria-pressed="false" title="구간 반복 — 정한 마디만 돌립니다">구간</button>
   </div>
   <div class="tempo">
-    <div class="readout"><b id="bpmVal">100</b><span>BPM</span></div>
+    <div class="readout"><b id="bpmVal" contenteditable="true" inputmode="numeric" role="textbox" aria-label="BPM 직접 입력 — 탭해서 숫자를 바로 칠 수 있습니다">100</b><span>BPM</span></div>
     <!-- 바만 있으면 정확한 값을 못 맞춘다("120으로"가 안 된다).
          ‹ ›는 **5씩, 5의 배수로 붙여** 움직인다 — 137에서 ›를 누르면 140이다.
          자리가 있는 한 단 패드에서만 내놓는다 (2단 357px에는 안 들어간다) -->
@@ -1560,6 +1560,21 @@
       <button id="loopApply" class="btn ink">구간 반복 켜기</button>
       <button id="loopOff" class="btn sm">전체로</button>
       <button id="rangeClose" class="btn sm">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 리얼드럼 패드 단축키 설정 — 패드를 꾹 누르면 열림(openKeyPop) -->
+<div class="pop" id="keyPop" role="dialog" aria-label="단축키 설정">
+  <div class="popcard">
+    <header><b id="keyPopTitle">단축키</b><span>키보드에서 키를 눌러 추가·제거(같은 키 다시 누르면 빠짐)</span></header>
+    <div class="rangerow">
+      <div id="keyPopCurrent" style="font-size:19px;font-weight:700;letter-spacing:.04em;min-height:24px;">(없음)</div>
+    </div>
+    <div class="rangerow">
+      <button id="keyPopClear" class="btn sm">모두 지우기</button>
+      <button id="keyPopDone" class="btn ink">완료</button>
+      <button id="keyPopCancel" class="btn sm">취소</button>
     </div>
   </div>
 </div>
@@ -3513,6 +3528,32 @@ function stepBpm(dir){
 document.getElementById('bpmDn').onclick = ()=> stepBpm(-1);
 document.getElementById('bpmUp').onclick = ()=> stepBpm(+1);
 
+/* BPM 직접 입력 — 숫자(<b id="bpmVal">)를 탭하면 그 자리에서 바로 타이핑해 바꿀 수 있다.
+   태그를 그대로 <b>(contenteditable)로 둔 이유: 이 태그를 겨냥한 CSS 선택자가 여러 군데
+   (아이패드/재생 중 크기 변화 등)에 있어서, <input>으로 바꾸면 전부 안 먹는다. */
+(function initBpmEdit(){
+  const el = document.getElementById('bpmVal');
+  el.addEventListener('focus', ()=>{
+    const r = document.createRange(); r.selectNodeContents(el);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  });
+  el.addEventListener('keydown', e=>{
+    if(e.key === 'Enter'){ e.preventDefault(); el.blur(); }
+  });
+  // 숫자·백스페이스·화살표 등만 통과시키고 나머지는 애초에 못 치게 막는다
+  el.addEventListener('beforeinput', e=>{
+    if(e.data != null && !/^[0-9]+$/.test(e.data)) e.preventDefault();
+  });
+  el.addEventListener('blur', ()=>{
+    const lo = +bpmRange.min, hi = +bpmRange.max;
+    let v = parseInt(el.textContent, 10);
+    if(!isFinite(v)) v = bpm;
+    v = Math.max(lo, Math.min(hi, v));
+    bpm = v; bpmRange.value = v; el.textContent = v;
+    autosaveSoon();
+  });
+})();
+
 function refreshAll(){
   refreshChips(); refreshGrid(); renderScore(); refreshStepDots();
   if(typeof syncTotalM === 'function') syncTotalM();
@@ -4720,18 +4761,55 @@ const KEY_TO_PAD = {
   ' ': 'kick', 'j': 'hihat', 'f': 'snare', 'r': 'tom1',
   'u': 'tom2', 'l': 'ftom', 'e': 'crash', 'i': 'crash', 'k': 'ride',
 };
+// 위 기본값은 **객체를 새로 만들지 않고 그 자리에서 고친다** — delete/대입만 하고
+// 참조(KEY_TO_PAD) 자체는 그대로 둬야, 이 상수를 이미 캡처해 둔 다른 클로저(키다운
+// 핸들러 등)를 전부 다시 찾아 고칠 필요가 없다.
+const KEYMAP_KEY = 'drumchart.keymap';    // localStorage — 사용자가 커스텀한 단축키 저장
+function loadKeyBindings(){
+  if(!STORAGE_OK) return;
+  const raw = lsGet(KEYMAP_KEY);
+  if(!raw) return;
+  let saved;
+  try{ saved = JSON.parse(raw); }catch(e){ return; }
+  if(!saved || typeof saved !== 'object') return;
+  const validIds = new Set(INSTR.map(i=>i.id));
+  const next = {};
+  Object.entries(saved).forEach(([k,v])=>{ if(typeof k==='string' && k.length===1 && validIds.has(v)) next[k]=v; });
+  if(!Object.keys(next).length) return;
+  Object.keys(KEY_TO_PAD).forEach(k=>delete KEY_TO_PAD[k]);
+  Object.assign(KEY_TO_PAD, next);
+}
+function saveKeyBindings(){
+  if(STORAGE_OK) lsSet(KEYMAP_KEY, JSON.stringify(KEY_TO_PAD));
+}
+loadKeyBindings();
 // 악기 id → 눌러야 할 키 라벨(들). 크래쉬처럼 키가 두 개면 "E/I"로 합쳐 보여준다.
-const PAD_KEY_LABEL = (()=>{
+// 사용자가 단축키를 바꿀 수 있어서(2026-09-06) 매번 다시 계산할 수 있게 함수로 뺌.
+function computePadKeyLabels(){
   const byPad = {};
   Object.entries(KEY_TO_PAD).forEach(([key, id])=>{
     const label = key === ' ' ? 'SPACE' : key.toUpperCase();
     byPad[id] = byPad[id] ? byPad[id] + '/' + label : label;
   });
   return byPad;
-})();
+}
+let PAD_KEY_LABEL = computePadKeyLabels();
+function updatePadBadge(insId){
+  const el = padEls[insId];
+  if(!el) return;
+  let badge = el.querySelector('.keybadge');
+  const label = PAD_KEY_LABEL[insId];
+  if(label){
+    if(!badge){ badge = document.createElement('span'); badge.className = 'keybadge'; el.appendChild(badge); }
+    badge.textContent = label;
+  } else if(badge){
+    badge.remove();
+  }
+}
 function buildKit(){
   const kit = document.getElementById('kit');
   if(kit.childElementCount) return;
+  let padPressTimer = null, padLongFired = false;
   INSTR.forEach(ins=>{
     const p = KIT_POS[ins.id];
     const d = document.createElement('div');
@@ -4746,11 +4824,72 @@ function buildKit(){
       badge.textContent = label;
       d.appendChild(badge);
     }
-    d.addEventListener('pointerdown', e=>{ e.preventDefault(); padHit(ins.id); });
+    // 짧게 누르면 그대로 타격(기존과 동일, 지연 없음) — 꾹 누르고 있으면(550ms) 그 위에
+    // 단축키 설정 팝업이 뜬다. 타격 자체는 이미 눌린 순간 났으니 꾹 눌러도 손해가 없다.
+    d.addEventListener('pointerdown', e=>{
+      e.preventDefault();
+      padHit(ins.id);
+      padLongFired = false;
+      padPressTimer = setTimeout(()=>{ padLongFired = true; openKeyPop(ins.id); }, 550);
+    });
+    d.addEventListener('pointerup', ()=> clearTimeout(padPressTimer));
+    d.addEventListener('pointerleave', ()=> clearTimeout(padPressTimer));
+    d.addEventListener('pointercancel', ()=> clearTimeout(padPressTimer));
     kit.appendChild(d);
     padEls[ins.id] = d;
   });
 }
+
+/* 단축키 설정 팝업 — 꾹 누른 패드의 악기에 새 키를 배정한다.
+   여러 키 가능(크래쉬의 E/I처럼) — 팝업이 열린 동안 누르는 키를 하나씩 토글로 추가/제거.
+   완료를 눌러야 실제로 반영·저장된다(취소하면 그대로 버려짐). */
+let keyPopIns = null, keyPopKeys = [];
+function renderKeyPop(){
+  const el = document.getElementById('keyPopCurrent');
+  el.textContent = keyPopKeys.length
+    ? keyPopKeys.map(k=> k===' ' ? 'SPACE' : k.toUpperCase()).join(' · ')
+    : '(없음 — 키보드에서 키를 눌러 추가)';
+}
+function openKeyPop(insId){
+  keyPopIns = insId;
+  keyPopKeys = Object.keys(KEY_TO_PAD).filter(k=>KEY_TO_PAD[k]===insId);
+  document.getElementById('keyPopTitle').textContent = byId[insId].name + ' 단축키';
+  renderKeyPop();
+  document.getElementById('keyPop').classList.add('is-open');
+}
+function closeKeyPop(){
+  document.getElementById('keyPop').classList.remove('is-open');
+  keyPopIns = null;
+}
+function saveKeyPop(){
+  if(keyPopIns){
+    Object.keys(KEY_TO_PAD).forEach(k=>{ if(KEY_TO_PAD[k] === keyPopIns) delete KEY_TO_PAD[k]; });
+    // 고른 키가 다른 악기에 이미 쓰이고 있었으면 그쪽에서 뺏어온다(한 키 = 한 악기, 충돌 방지)
+    keyPopKeys.forEach(k=>{ KEY_TO_PAD[k] = keyPopIns; });
+    PAD_KEY_LABEL = computePadKeyLabels();
+    INSTR.forEach(i=>updatePadBadge(i.id));
+    saveKeyBindings();
+  }
+  closeKeyPop();
+}
+document.addEventListener('keydown', e=>{
+  if(keyPopIns === null) return;
+  if(e.key === 'Escape'){ e.preventDefault(); closeKeyPop(); return; }
+  if(e.key === 'Enter'){ e.preventDefault(); saveKeyPop(); return; }
+  if(e.key === 'Backspace' || e.key === 'Delete'){ e.preventDefault(); keyPopKeys.pop(); renderKeyPop(); return; }
+  if(e.metaKey || e.ctrlKey || e.altKey) return;   // 조합키는 무시(브라우저 단축키와 충돌 방지)
+  if(e.key.length !== 1) return;                    // Shift/Tab 등 특수키 제외, 알파벳·공백만
+  e.preventDefault();
+  const k = e.key.toLowerCase();
+  const idx = keyPopKeys.indexOf(k);
+  if(idx >= 0) keyPopKeys.splice(idx, 1);            // 이미 있으면 다시 눌러서 뺄 수 있음(토글)
+  else keyPopKeys.push(k);
+  renderKeyPop();
+});
+document.getElementById('keyPopDone').onclick = saveKeyPop;
+document.getElementById('keyPopCancel').onclick = closeKeyPop;
+document.getElementById('keyPopClear').onclick = ()=>{ keyPopKeys = []; renderKeyPop(); };
+document.getElementById('keyPop').addEventListener('click', e=>{ if(e.target.id==='keyPop') closeKeyPop(); });
 function setMode(m){
   inputMode = m;
   document.getElementById('tabGrid').classList.toggle('sel', m==='grid');
