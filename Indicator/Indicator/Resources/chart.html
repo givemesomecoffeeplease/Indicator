@@ -3500,7 +3500,7 @@ document.getElementById('loopBtn').onclick = e=>{
 };
 document.addEventListener('keydown', e=>{
   // 스페이스바는 킥 입력에 배정돼 있어(KEY_TO_PAD) 재생은 Shift+Space로 분리
-  if(e.code==='Space' && e.shiftKey && !e.repeat && e.target.tagName!=='INPUT'){ e.preventDefault(); playBtn.click(); }
+  if(e.code==='Space' && e.shiftKey && !e.repeat && e.target.tagName!=='INPUT' && !e.target.isContentEditable){ e.preventDefault(); playBtn.click(); }
 });
 
 /* ================= 컨트롤 ================= */
@@ -3831,7 +3831,7 @@ document.getElementById('redoBtn').onclick = redo;
 document.addEventListener('keydown', e=>{
   if(!(e.metaKey || e.ctrlKey)) return;
   // 제목 입력창 등에서는 브라우저 기본 복사/붙여넣기·실행취소를 그대로 둔다.
-  if(e.target.tagName==='INPUT' || e.target.tagName==='SELECT') return;
+  if(e.target.tagName==='INPUT' || e.target.tagName==='SELECT' || e.target.isContentEditable) return;
   const k = e.key.toLowerCase();
   if(k === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if(k === 'y'){ e.preventDefault(); redo(); }
@@ -5180,7 +5180,10 @@ document.getElementById('autoAdvBtn').onclick = e=>{
   e.currentTarget.classList.toggle('on', autoAdv);
 };
 document.addEventListener('keydown', e=>{
-  if(e.target.tagName==='INPUT' || e.target.tagName==='SELECT') return;
+  // BPM 직접 입력(<b contenteditable>)처럼 <input>/<select>가 아닌 편집 가능한 요소도
+  // 있어서 태그명만 보면 놓친다 — 그 안에서 1·2를 치면 커서 이동으로 가로채져 숫자가
+  // 아예 안 써지던 버그(2026-09-06 리포트로 발견). isContentEditable도 같이 본다.
+  if(e.target.tagName==='INPUT' || e.target.tagName==='SELECT' || e.target.isContentEditable) return;
   // ⌘Backspace — 선택한 마디 전체를 한 번에 지운다(그리드/리얼드럼 어느 탭에서든).
   if(e.metaKey && e.key==='Backspace'){ e.preventDefault(); clearMeasure(); return; }
   if(e.metaKey || e.ctrlKey || e.altKey) return;  // ⌘Z 등과 안 겹치게
