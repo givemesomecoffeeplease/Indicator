@@ -3290,7 +3290,11 @@ function tick(){
       recordArmAt = null;
       syncRecordBtn();
     }
-    const last = practiceRun ? rangeEnd : measures.length-1;
+    // 연습 모드일 때만 rangeEnd를 보고 있었음 — 그냥 재생에서 "구간" 지정 + 반복재생을
+    // 켜도 반복이 안 걸리고(구간 끝을 안 보고 곡 끝까지 그냥 흘러감) 버그로 리포트됨.
+    // startPlay의 세 분기(연습/구간 지정/일반) 전부 이미 rangeEnd를 맞게 채워두므로
+    // (구간 없으면 rangeEnd=measures.length-1로 예전과 동일) 항상 rangeEnd만 보면 된다.
+    const last = rangeEnd;
     if(curM > last){
       if(practiceRun) onCycleEnd(tEnd);
       if(looping){ curM = rangeStart; }  // 일반 재생도 이제 rangeStart(선택 마디)를 씀 — 루프도 거기로
