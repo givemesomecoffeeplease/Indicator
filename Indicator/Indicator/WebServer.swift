@@ -1557,13 +1557,24 @@ class WebServer {
         // 곡 내 절대 위치(초) 기준으로 통일 — 섹션 경계(마커)와 무관하게 연속 진행
         let lastState=null,lastStateAt=0;
         let tapCtx={song:null,cursor:1,prevAbs:0};
+        // liveAbsSec 단방향 가드 — 메시지 도착 간격이 네트워크 지연 등으로 들쭉날쭉하면
+        // "마지막 수신 후 Date.now() 경과분만큼 보간"한 값이 다음 실제 서버값을 살짝
+        // 앞질렀다가, 그 실제값이 도착하는 순간 되돌아가며 재생헤드가 왔다갔다하는 것처럼
+        // 보인다(0.3초 미만 되돌아감만 지터로 간주해 막는다 — 그 이상은 실제 되감기이므로 통과).
+        let liveGuard={key:null,abs:0};
 
         // SSE 상태 + 수신 후 경과 시간으로 현재 재생 위치를 보간, 곡 내 절대 초로 환산
         function liveAbsSec(info){
           if(!lastState||!info)return null;
           const e=lastState.sectionElapsedSec??0;
           const elapsed=lastState.isPlaying?e+(Date.now()-lastStateAt)/1000:e;
-          return(info.sec.startInSong||0)+elapsed;
+          const abs=(info.sec.startInSong||0)+elapsed;
+          const key=info.song+'|'+info.secIdx;
+          if(lastState.isPlaying&&liveGuard.key===key&&abs<liveGuard.abs&&abs>liveGuard.abs-0.3){
+            return liveGuard.abs;
+          }
+          liveGuard={key,abs};
+          return abs;
         }
         function playingSecInfo(){
           if(!lastState)return null;

@@ -392,6 +392,14 @@
   .cell.art-open.art-accent{box-shadow:inset 0 0 0 2.5px var(--white), inset 0 0 0 5.5px #14170A;}
   .cell.playcol{box-shadow:0 0 0 2px var(--white) inset;}
   .cell.art-open.playcol{box-shadow:inset 0 0 0 3.5px #14170A, 0 0 0 2px var(--white) inset;}
+  /* 플램(장식음) — 칸 왼쪽 위에 작은 삼각 깃발 마크. 다른 아티큘레이션 표시(테두리·도넛)와
+     겹쳐도 헷갈리지 않게 별개 자리(코너)에 둔다 */
+  .cell.has-flam::before{
+    content:'';position:absolute;top:0;left:0;width:0;height:0;
+    border-style:solid;border-width:9px 9px 0 0;border-color:var(--white) transparent transparent transparent;
+    border-top-left-radius:9px;opacity:.9;
+  }
+  #flamToggle.sel{background:var(--white);color:#14121A;border-color:var(--white);}
 
   /* ── 표기(아티큘레이션) 팔레트 ──────────── */
   .artrow{display:flex;align-items:center;gap:6px;overflow-x:auto;overscroll-behavior-x:none;scrollbar-width:none;}
@@ -1241,6 +1249,16 @@
             <path d="M8 13.5 16 20"></path><path d="M16 13.5 8 20"></path>
           </svg>오픈<span class="wide">&nbsp;하이햇</span>
         </button>
+        <!-- 플램은 표기(art)와 성격이 다르다 — 기본/고스트/액센트 음 어디에나 겹쳐 붙을 수 있는
+             장식음이라, 배타적 선택(selArt)이 아니라 독립 토글(flamMode)로 둔다.
+             켠 상태에서 이미 음이 있는 칸을 누르면 그 칸에 플램만 켜짐/꺼짐 (음 자체는 안 바뀜). -->
+        <button id="flamToggle" data-flam-toggle title="이미 찍힌 음에 플램(장식음)을 붙이거나 뗍니다">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <ellipse cx="15" cy="17" rx="3.2" ry="2.4" fill="currentColor" stroke="none"></ellipse>
+            <path d="M17.6 15.5 17.6 6"></path>
+            <path d="M14 9 19 6.5"></path>
+          </svg>플램
+        </button>
       </div>
     </div>
 
@@ -1626,7 +1644,10 @@ function normTs(src){
 function emptyMeasure(div, ts){
   const useTs = normTs(ts);
   const m = {ts: useTs, div: div || defaultDiv(useTs[0])};
-  INSTR.forEach(i => m[i.id] = new Array(voiceLen(m, i.voice)).fill(0));
+  INSTR.forEach(i => {
+    m[i.id] = new Array(voiceLen(m, i.voice)).fill(0);
+    m[i.id+'Flam'] = new Array(voiceLen(m, i.voice)).fill(0);   // 플램(장식음) — 표기(art)와 별개 플래그
+  });
   return m;
 }
 
@@ -1643,22 +1664,26 @@ function setDiv(m, b, voice, d){
   const from = beatOffset(m, voice, b);
   let lost = false;
   INSTR.filter(i=>i.voice===voice).forEach(i=>{
-    const arr = m[i.id];
-    const oldVals = arr.splice(from, old);
-    const newVals = new Array(d).fill(0);
-    if(d % old === 0){                              // 세분화 — 무손실
-      const factor = d / old;
-      oldVals.forEach((v,k)=>{ newVals[k*factor] = v; });
-    } else if(old % d === 0){                        // 합치기 — 대표 칸만 살고 나머지는 손실 판정
-      const factor = old / d;
-      for(let k=0; k<d; k++){
-        newVals[k] = oldVals[k*factor];
-        for(let j=1; j<factor; j++){ if(oldVals[k*factor+j]) lost = true; }
+    // 플램 배열도 본 배열과 완전히 같은 방식으로 잘라 옮긴다 — 둘의 길이·인덱스가
+    // 항상 같아야 렌더링에서 어긋나지 않는다(따로 계산하면 규칙이 두 벌이 되어 버그가 나기 쉽다)
+    [i.id, i.id+'Flam'].forEach(key=>{
+      const arr = m[key];
+      const oldVals = arr.splice(from, old);
+      const newVals = new Array(d).fill(0);
+      if(d % old === 0){                              // 세분화 — 무손실
+        const factor = d / old;
+        oldVals.forEach((v,k)=>{ newVals[k*factor] = v; });
+      } else if(old % d === 0){                        // 합치기 — 대표 칸만 살고 나머지는 손실 판정
+        const factor = old / d;
+        for(let k=0; k<d; k++){
+          newVals[k] = oldVals[k*factor];
+          for(let j=1; j<factor; j++){ if(oldVals[k*factor+j]) lost = true; }
+        }
+      } else {                                          // 배수 관계 아님 — 대응 불가, 전부 지움
+        if(oldVals.some(v=>v)) lost = true;
       }
-    } else {                                          // 배수 관계 아님 — 대응 불가, 전부 지움
-      if(oldVals.some(v=>v)) lost = true;
-    }
-    arr.splice(from, 0, ...newVals);
+      arr.splice(from, 0, ...newVals);
+    });
   });
   m.div[b][VK[voice]] = d;
   return lost ? 'lost' : true;
@@ -1958,6 +1983,13 @@ function buildGrid(){
         c.dataset.ins = ins.id; c.dataset.step = s; c.dataset.v = ins.voice;
         c.dataset.b = b; c.dataset.k = k;
         c.addEventListener('pointerdown', e=>{
+          if(flamMode){
+            // 플램은 드래그로 한 번에 여러 칸에 켜지면 실수하기 쉬워서 탭 하나당 한 칸만 — painting 안 씀
+            if(e.pointerType !== 'mouse'){ pend = {id:ins.id, s, x:e.clientX, y:e.clientY, flam:true}; return; }
+            e.preventDefault();
+            toggleFlam(ins.id, s) && commit();
+            return;
+          }
           if(e.pointerType !== 'mouse'){
             // 스크롤일 수도 있다. 확정을 pointerup까지 미룬다
             pend = {id:ins.id, s, x:e.clientX, y:e.clientY};
@@ -1970,6 +2002,7 @@ function buildGrid(){
           if(paintVal) previewSound(ins.id, paintVal);
         });
         c.addEventListener('pointerenter', ()=>{
+          if(flamMode) return;
           if(painting && setCell(ins.id, s, paintVal)) strokeDirty = true;
         });
         gb.appendChild(c);
@@ -1988,6 +2021,11 @@ window.addEventListener('pointermove', e=>{
 }, {passive:true});
 window.addEventListener('pointerup', ()=>{
   if(painting){ painting = false; if(strokeDirty){ commit(); strokeDirty = false; } }
+  if(pend && pend.flam){
+    toggleFlam(pend.id, pend.s) && commit();
+    pend = null;
+    return;
+  }
   if(pend){
     const v = nextVal(pend.id, pend.s);
     if(setCell(pend.id, pend.s, v)) commit();
@@ -2071,6 +2109,7 @@ function setCell(insId, step, val){
   // (내용은 이미 앞 마디에서 복사돼 있던 그대로) 독립된 음표로 바로 이어서 편집한다.
   if(measures[selMeasure].repeatPrev) delete measures[selMeasure].repeatPrev;
   measures[selMeasure][insId][step] = val;
+  if(!val) measures[selMeasure][insId+'Flam'][step] = 0;   // 음 자체가 꺼지면 플램도 같이 지운다 — 음 없는 플램은 무의미
   refreshGrid(); renderScore(); refreshStepDots(); refreshEditBtns();
   return true;
 }
@@ -2087,6 +2126,7 @@ function refreshGrid(){
     c.classList.toggle('art-ghost', v===ART.GHOST);
     c.classList.toggle('art-open', v===ART.OPEN);
     c.classList.toggle('art-accent', v===ART.ACCENT);
+    c.classList.toggle('has-flam', !!measures[selMeasure][c.dataset.ins+'Flam'][+c.dataset.step]);
   });
 }
 function refreshChips(){
@@ -2608,6 +2648,9 @@ function drawVoiceBeat(m, mx, top, b, voice){
       if(n.dot){
         SVGT.appendChild(el('circle',{cx:n.x+(ghost?px+4.5:10),cy:y - (y%LG===0? LG/2 : 0),r:1.9,fill:INK}));
       }
+      // 플램(장식음) — 본 음 바로 앞에 작은 임음표(꼬리 하나)를 그린다. 표준 타악보 표기와
+      // 같은 자리(주음 왼쪽 위, 스템 방향은 주음과 같은 쪽)
+      if(m[id+'Flam'] && m[id+'Flam'][n.s]) drawFlam(n.x, y, up);
     });
     const yEnd = up ? Math.max(...n.ys) : Math.min(...n.ys);
     SVGT.appendChild(el('line',{x1:n.x+stemDx,y1:yEnd + (up?-1:1),x2:n.x+stemDx,y2:beamY,stroke:INK,'stroke-width':1.6}));
@@ -2677,6 +2720,16 @@ function drawVoiceBeat(m, mx, top, b, voice){
   }
 }
 
+/* 플램 — 주 음표 바로 앞에 붙는 작은 임음표(꼬리 하나 달린 8분음표 모양, 슬래시로 단순화).
+   x,y는 **주 음표**의 좌표(스템 방향과 같은 쪽으로 살짝 띄워서 그린다). */
+function drawFlam(x, y, up){
+  const gx = x - 10, gy = y + (up ? 2.5 : -2.5);
+  SVGT.appendChild(el('ellipse',{cx:gx, cy:gy, rx:3.1, ry:2.3, fill:INK, transform:`rotate(-18 ${gx} ${gy})`}));
+  const sx = gx + (up ? 2.6 : -2.6);
+  const sy2 = gy + (up ? -13 : 13);
+  SVGT.appendChild(el('line',{x1:sx,y1:gy - (up?1:-1),x2:sx,y2:sy2,stroke:INK,'stroke-width':1.1}));
+  SVGT.appendChild(el('line',{x1:sx-3.5,y1:sy2 + (up?5:-5),x2:sx+4.5,y2:sy2,stroke:INK,'stroke-width':1.6,'stroke-linecap':'round'}));
+}
 function drawFlags(x, y, up, count){
   for(let i=0;i<count;i++){
     const oy = up ? y + i*6 : y - i*6;
@@ -3666,12 +3719,30 @@ document.addEventListener('keydown', e=>{
 })();
 
 /* 표기(아티큘레이션) 팔레트 */
-document.querySelectorAll('#artRow button').forEach(b=>{
+document.querySelectorAll('#artRow button[data-art]').forEach(b=>{
   b.onclick = ()=>{
     selArt = +b.dataset.art;
-    document.querySelectorAll('#artRow button').forEach(x=>x.classList.toggle('sel', x===b));
+    document.querySelectorAll('#artRow button[data-art]').forEach(x=>x.classList.toggle('sel', x===b));
   };
 });
+
+/* 플램 토글 — art 팔레트와 별개 독립 모드. 켜져 있는 동안은 그리드를 눌러도 음(art)이
+   안 바뀌고, 이미 음이 있는 칸에만 플램 유무를 토글한다(빈 칸은 무시 — 음 없는 플램은
+   무의미하므로 조용히 무시하고 안내 토스트만 띄운다). */
+let flamMode = false;
+const flamToggleBtn = document.getElementById('flamToggle');
+if(flamToggleBtn) flamToggleBtn.onclick = ()=>{
+  flamMode = !flamMode;
+  flamToggleBtn.classList.toggle('sel', flamMode);
+};
+function toggleFlam(insId, step){
+  const m = measures[selMeasure];
+  if(!m[insId][step]){ toast('먼저 음을 찍은 다음 플램을 붙여주세요'); return false; }
+  if(m.repeatPrev) delete m.repeatPrev;
+  m[insId+'Flam'][step] = m[insId+'Flam'][step] ? 0 : 1;
+  refreshGrid(); renderScore(); refreshStepDots();
+  return true;
+}
 
 /* 프리셋 */
 const PRESETS = {
@@ -3798,13 +3869,13 @@ function applyBrush(pat){
   const voice = byId[id].voice;
   let skipped = 0;
   for(let mi = from; mi < to; mi++){
-    const m = measures[mi], arr = m[id];
+    const m = measures[mi], arr = m[id], flamArr = m[id+'Flam'];
     for(let b = 0; b < beatCount(m); b++){
       const d = divOf(m, b, voice), off = beatOffset(m, voice, b);
       if(d === 4){
-        for(let k=0;k<4;k++) arr[off+k] = pat[k] === '1' ? ART.NORM : ART.OFF;
+        for(let k=0;k<4;k++){ arr[off+k] = pat[k] === '1' ? ART.NORM : ART.OFF; flamArr[off+k] = 0; }
       } else if(d === 2){
-        for(let k=0;k<2;k++) arr[off+k] = pat[k*2] === '1' ? ART.NORM : ART.OFF;
+        for(let k=0;k<2;k++){ arr[off+k] = pat[k*2] === '1' ? ART.NORM : ART.OFF; flamArr[off+k] = 0; }
       } else skipped++;
     }
   }
@@ -4473,6 +4544,10 @@ function normalizeMeasures(src){
         const n = (v === true) ? ART.NORM : (v|0);
         m[i.id][s] = (n >= 0 && n <= ART.OPEN) ? n : ART.OFF;
       }
+      const flamRow = mm[i.id+'Flam'];
+      if(Array.isArray(flamRow)){
+        for(let s=0; s<len; s++) m[i.id+'Flam'][s] = flamRow[s] ? 1 : 0;
+      }
     });
     return m;
   });
@@ -4667,7 +4742,7 @@ function clearAtCursor(){
   ['hand','foot'].forEach(voice=>{
     const idx = cursorIdx(voice);
     INSTR.filter(i=>i.voice===voice).forEach(ins=>{
-      if(m[ins.id][idx]){ m[ins.id][idx] = 0; changed = true; }
+      if(m[ins.id][idx]){ m[ins.id][idx] = 0; m[ins.id+'Flam'][idx] = 0; changed = true; }
     });
   });
   if(changed){ refreshGrid(); renderScore(); refreshStepDots(); commit(); }
@@ -4678,7 +4753,7 @@ function clearMeasure(){
   if(!m) return;
   let changed = false;
   INSTR.forEach(ins=>{
-    m[ins.id].forEach((v,i)=>{ if(v){ m[ins.id][i] = 0; changed = true; } });
+    m[ins.id].forEach((v,i)=>{ if(v){ m[ins.id][i] = 0; m[ins.id+'Flam'][i] = 0; changed = true; } });
   });
   if(changed){
     refreshGrid(); renderScore(); refreshStepDots(); commit();

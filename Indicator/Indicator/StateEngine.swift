@@ -56,6 +56,7 @@ class StateEngine {
     // ── 표시 위치 단방향 가드 (MTC 지터로 화면이 되돌아가는 것 방지) ──
     private var lastSentBarFloat: Double = 0     // 마지막으로 내보낸 barFloat
     private var lastSentElapsedSec: Double = 0   // 마지막으로 내보낸 섹션 경과 초
+    private var lastSentBarPosition: Double = 0  // 마지막으로 내보낸 절대 마디 위치(barPosition, /drum·/chart 라이브 하이라이트용)
 
     // ── 코드 beat-snap ────────────────────────────────────
     private var currentChordIdx: Int = -1
@@ -122,6 +123,7 @@ class StateEngine {
             cdShown            = 0
             lastSentBarFloat   = 0
             lastSentElapsedSec = 0
+            lastSentBarPosition = 0
             onJump?()
         }
         prevMTCTime  = mtcTime
@@ -237,8 +239,15 @@ class StateEngine {
             sectionEndMTC: bounds.end, barsBack: barsBack)
     }
 
-    // 섹션 끝 지났는지 확인 (onBeat에서 호출)
+    // 섹션 끝 지났는지 확인 (onBeat·update에서 호출)
+    // 정지 중엔 절대 실행하지 않는다 — mtcTime은 MTC 스트림으로만 갱신되므로 정지 중엔
+    // "마지막으로 재생했던 위치"에 멈춰 있다. 그 옛 시간으로 지금 섹션 종료를 판정하면,
+    // 정지 위치가 그 옛 시간보다 앞쪽 섹션일 때 "벌써 끝났다"고 오판해 다음 섹션으로
+    // 넘겼다가, 바로 다음 폴링에서 transportBar 기반 판정이 원래 섹션으로 되돌리고,
+    // 되돌아간 순간 다시 같은 오판이 반복되어 두 섹션 사이를 무한히 왔다갔다하게 된다
+    // (실측: transportBar=1 고정인데 currentSection이 매 폴링마다 계속 바뀌는 것으로 확인).
     private func checkSectionEnd() {
+        guard mtcIsPlaying else { return }
         guard let bounds = sectionBounds(idx: currentSectionIdx) else { return }
         if mtcTime > bounds.end + 0.1 {
             let markers = markersInCurrentSong()
@@ -432,7 +441,21 @@ class StateEngine {
         // 로직을 정지해 놓고 특정 마디에 갖다 둔 뒤 "여기를 1마디로"를 누르는 워크플로를 위함.
         // MTC는 재생 중에만 전송되므로, 정지 중엔 mtcTime이 마지막 재생 위치에 멈춰 있어 못 쓴다.
         state.mtcSeconds = mtcIsPlaying ? mtcTime : (snapshot.transportMTC > 0 ? snapshot.transportMTC : mtcTime)
-        state.barPosition = ScheduleStore.shared.barPositionAt(mtcSeconds: state.mtcSeconds)
+        // 단방향 가드: 위 currentBarFloat·sectionElapsedSec와 같은 이유 — MTC 원시값이
+        // 재생 중 아주 살짝(수 ms) 뒤로 튀는 지터가 있으면, 마디 경계 바로 앞에서는
+        // 이 값 하나로 마디 인덱스를 계산하는 /drum·/chart 라이브 하이라이트가 한 마디 뒤로
+        // 갔다가 다시 앞으로 오는 것처럼 깜빡인다. 재생 중엔 뒤로 가지 않게 막고,
+        // 정지 중이거나 실제 점프(위 jumped 리셋) 직후에는 그대로 통과시킨다.
+        if let raw = ScheduleStore.shared.barPositionAt(mtcSeconds: state.mtcSeconds) {
+            if mtcIsPlaying && raw < lastSentBarPosition {
+                state.barPosition = lastSentBarPosition
+            } else {
+                lastSentBarPosition = raw
+                state.barPosition = raw
+            }
+        } else {
+            state.barPosition = nil
+        }
         let markers = snapshot.markers
         guard !markers.isEmpty else { return state }
 
