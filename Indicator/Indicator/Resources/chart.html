@@ -4916,18 +4916,17 @@ function padHit(id){
      그 박을 셋잇단으로 정한 건 사용자이므로 이게 맞는 동작이다. */
   if(recording && playing){
     const c = ac();
-    // 마디마다 박 수·박 길이(분모)가 다를 수 있어 누적 실제 시간으로 훑어야 한다.
-    // (BEATS 고정 시절엔 마디 하나 = 4박 * beatDur()로 단순 나눗셈이 됐지만,
-    //  이제는 마디별 beatDurFor(m)*beatCount(m)를 더해가며 위치를 찾는다.)
-    const durs = measures.map(m=>beatDurFor(m)*beatCount(m));
-    const span = durs.reduce((a,b)=>a+b, 0) || beatDur()*BEATS;
-    let elapsed = (c.currentTime - playStart) % span; if(elapsed < 0) elapsed += span;
-    let mi = 0;
-    while(mi < measures.length-1 && elapsed >= durs[mi]){ elapsed -= durs[mi]; mi++; }
+    // ⚠️ 예전엔 (지금 시각 - playStart)를 "곡 전체 길이"로 나눈 나머지를 곡 맨 처음(마디 0)부터
+    // 다시 훑어서 위치를 찾고 있었음 — 재생을 항상 1마디부터 시작한다는 전제라, 구간을
+    // 선택해서(또는 리드인으로 그보다 앞 마디부터) 녹음을 시작하면 실제 재생 위치와
+    // 전혀 무관한 엉뚱한 마디에 노트가 찍혔음(2026-09-06 리포트로 발견 — "이상한 데 찍힌다").
+    // tick()이 매 프레임 정확히 관리하는 curM(지금 마디)·mStartT(그 마디가 시작된 실제 시각)를
+    // 그대로 가져다 쓰면 재계산 자체가 필요 없다 — 이미 맞는 값이 있는데 따로 구할 이유가 없다.
+    let mi = curM;
     const bd = beatDurFor(measures[mi]);
-    let bp = elapsed / bd;                        // 마디 안 박 위치(실수)
+    let bp = (c.currentTime - mStartT) / bd;      // 마디 안 박 위치(실수)
     const voice = byId[id].voice;
-    let b = Math.floor(bp);
+    let b = Math.max(0, Math.min(beatCount(measures[mi]) - 1, Math.floor(bp)));
     const d = divOf(measures[mi], b, voice);
     let k = Math.round((bp - b) * d);
     if(k >= d){                                  // 다음 박(또는 다음 마디) 머리로 넘어간다
