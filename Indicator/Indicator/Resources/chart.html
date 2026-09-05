@@ -1224,7 +1224,13 @@
              태그라인까지 밀린다. 비우기·삭제 옆이 의미로도 맞고 자리도 있다 -->
         <!-- 2026-08-13: `새 악보` → `곡 목록`. 새로 만들기는 시트 안으로 들어갔다.
              자리를 안 늘리려고 있던 슬롯을 그대로 쓴다 (도구 줄이 폰에서 이미 세 줄) -->
-        <button id="libBtn" class="btn sm" style="display:none">곡 목록</button>
+        <!-- 2026-09-06: 다시 노출. 지금까지 이 버튼(과 "+ 새 곡")으로 가는 유일한 길이
+             앱을 열 때 딱 한 번 뜨는 "지난 작업을 이어서 열었습니다" 토스트뿐이었음 —
+             그 토스트를 놓치면 새 곡을 시작할 방법이 아예 없어서(항상 지난 작업이 자동으로
+             다시 열림), "다른 곡 채보를 시작하려는데 이전 내용이 계속 남아있다"는 리포트로
+             발견. 상시 노출해 "곡 목록 → + 새 곡"으로 언제든 빈 마디 1개로 시작할 수 있게 함
+             (기존 작업은 지워지지 않고 곡 목록에 그대로 남아 나중에 다시 열 수 있음). -->
+        <button id="libBtn" class="btn sm">곡 목록</button>
       </div>
       <!-- 표기(기본/고스트/액센트/오픈하이햇)는 그리드·리얼드럼 어디서 찍든 같은 의미라
            두 탭 공통 영역에 둔다 — 입력 단위(4/8/16비트)만 리얼드럼 전용(커서 이동 개념이라
@@ -3667,12 +3673,18 @@ function setDynamic(type){
 document.getElementById('crescM').onclick = ()=> setDynamic('cresc');
 document.getElementById('decrescM').onclick = ()=> setDynamic('decresc');
 document.getElementById('clrM').onclick = ()=>{
-  measures[selMeasure] = emptyMeasure(null, measures[selMeasure].ts);
+  // 여러 마디를 선택한 채로 눌러도 그 범위 전부 비워야 한다 — selMeasure 한 마디만
+  // 비우던 버그(2026-09-06 리포트로 발견). 각 마디의 박자표는 유지한 채 내용만 지운다.
+  for(let i=selA(); i<=selB(); i++) measures[i] = emptyMeasure(null, measures[i].ts);
   refreshAll(); commit();
 };
 document.getElementById('delM').onclick = ()=>{
-  if(measures.length===1){ measures[0]=emptyMeasure(null, measures[0].ts); }
-  else { measures.splice(selMeasure,1); selMeasure = Math.max(0, selMeasure-1); }
+  // 비우기와 같은 이유로 선택 범위 전체를 지운다(마디 자체를 없애 뒤 마디들이 당겨짐).
+  // 전체를 다 지우면(범위가 곡 전체) 빈 마디 1개만 남긴다 — 곡이 통째로 사라지면 안 됨.
+  const a = selA(), b = selB();
+  if(a===0 && b===measures.length-1){ measures = [emptyMeasure(null, measures[0].ts)]; }
+  else { measures.splice(a, b-a+1); }
+  selMeasure = Math.min(a, measures.length-1); selEnd = selMeasure;
   cursorB = 0; cursorK = 0;
   refreshAll(); commit();
 };
@@ -3726,9 +3738,12 @@ document.querySelectorAll('#artRow button[data-art]').forEach(b=>{
   };
 });
 
-/* 플램 토글 — art 팔레트와 별개 독립 모드. 켜져 있는 동안은 그리드를 눌러도 음(art)이
-   안 바뀌고, 이미 음이 있는 칸에만 플램 유무를 토글한다(빈 칸은 무시 — 음 없는 플램은
-   무의미하므로 조용히 무시하고 안내 토스트만 띄운다). */
+/* 플램 토글 — art 팔레트와 별개 독립 모드. 켜져 있는 동안 그리드를 누르면:
+   - 빈 칸이면 지금 표기 팔레트 값으로 음을 새로 찍으면서 플램도 같이 켠다(한 번에 됨 —
+     "플램부터 켜고 음을 찍는" 자연스러운 순서를 그대로 지원. 처음엔 "먼저 음을 찍어야
+     플램이 붙는다"로 만들었다가, 그 순서로 쓰면 아무 반응이 없어 보인다는 걸 실사용에서
+     발견해 수정함, 2026-09-06)
+   - 이미 음이 있는 칸이면 음은 그대로 두고 플램 유무만 토글한다. */
 let flamMode = false;
 const flamToggleBtn = document.getElementById('flamToggle');
 if(flamToggleBtn) flamToggleBtn.onclick = ()=>{
@@ -3737,10 +3752,10 @@ if(flamToggleBtn) flamToggleBtn.onclick = ()=>{
 };
 function toggleFlam(insId, step){
   const m = measures[selMeasure];
-  if(!m[insId][step]){ toast('먼저 음을 찍은 다음 플램을 붙여주세요'); return false; }
   if(m.repeatPrev) delete m.repeatPrev;
+  if(!m[insId][step]) m[insId][step] = artFor(insId, selArt) || ART.NORM;
   m[insId+'Flam'][step] = m[insId+'Flam'][step] ? 0 : 1;
-  refreshGrid(); renderScore(); refreshStepDots();
+  refreshGrid(); renderScore(); refreshStepDots(); refreshEditBtns();
   return true;
 }
 
