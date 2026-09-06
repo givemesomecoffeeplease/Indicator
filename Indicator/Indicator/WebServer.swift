@@ -1557,9 +1557,33 @@ class WebServer {
         mainEl.addEventListener('dragleave',e=>{if(!mainEl.contains(e.relatedTarget))mainEl.classList.remove('drop-hover');});
         mainEl.addEventListener('drop',e=>{
           e.preventDefault();e.stopPropagation();mainEl.classList.remove('drop-hover');
-          const file=[...e.dataTransfer.files].find(f=>f.name.endsWith('.html'));
-          if(!file){showMsg('.html 파일만 가져올 수 있어요');return;}
-          handleImportFile(file,curSong||null);
+          // 가사(.html 백업)와 드럼 채보(.drum.json 등 .json)를 같은 자리에 그냥 끌어놓기만
+          // 하면 확장자로 알아서 구분해 처리한다(2026-09-06 요청) — 드럼 쪽은 곡별 업로드
+          // 버튼과 완전히 같은 검증·저장 로직을 그대로 재사용(한 곳만 고치면 되게).
+          const files=[...e.dataTransfer.files];
+          const htmlFile=files.find(f=>f.name.endsWith('.html'));
+          if(htmlFile){ handleImportFile(htmlFile,curSong||null); return; }
+          const jsonFile=files.find(f=>f.name.endsWith('.json'));
+          if(jsonFile){
+            if(!curSong){ showMsg('먼저 곡을 선택해주세요'); return; }
+            const r=new FileReader();
+            r.onload=()=>{
+              let chart;
+              try{ chart=JSON.parse(r.result); }
+              catch(err){ showMsg('읽을 수 있는 파일이 아니에요.'); return; }
+              if(!chart||!Array.isArray(chart.measures)){ showMsg('드럼 채보(.drum.json) 파일이 맞는지 확인해주세요.'); return; }
+              const song=curSong;
+              fetch('/save-drum-chart',{method:'POST',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({song,chart})})
+                .then(r=>r.json()).then(res=>{
+                  showMsg(res.ok?'드럼 채보를 저장했어요.':'드럼 채보 저장에 실패했어요.');
+                  if(res.ok) selectSong(song);   // 채보 상태(있음/없음) 표시를 새로 반영
+                }).catch(()=>showMsg('드럼 채보 저장에 실패했어요.'));
+            };
+            r.readAsText(jsonFile);
+            return;
+          }
+          showMsg('.html(가사) 또는 .json(드럼 채보) 파일만 가져올 수 있어요');
         });
         document.addEventListener('dragover',e=>{e.preventDefault();});
         document.addEventListener('drop',e=>{e.preventDefault();});
