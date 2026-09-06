@@ -1135,6 +1135,11 @@
     <button id="pdfBtn" class="btn ghost sm">PDF</button>
     <button id="saveBtn" class="btn ghost sm">저장</button>
     <button id="loadBtn" class="btn ghost sm">열기</button>
+    <!-- URL에 ?song=곡이름으로 열렸을 때만 보임(initLinkedSong) — /edit의 "드럼 악보 수정"에서
+         옴. 파일 다운로드 없이 곧바로 그 곡의 서버 저장분(DrumChartStore)에 덮어쓴다.
+         기존 "저장"(파일로 내려받기)은 그대로 둠 — 사용자가 개인 관리 폴더에도 따로
+         보관한다고 해서 둘 다 필요(2026-09-06). -->
+    <button id="serverSaveBtn" class="btn ink sm" style="display:none">서버에 저장</button>
     <input type="file" id="fileInput" accept=".json,application/json" hidden="">
   </div>
 </div>
@@ -5695,7 +5700,46 @@ refreshEditBtns(); refreshRangeBtn();
 _cur = snapshot();          // 히스토리 기준점
 refreshUndoBtns();
 
-if(_restored){
+/* /edit → /chart 곡 연결 (2026-09-06) — /edit의 "드럼 악보 수정" 버튼이
+   /chart?song=곡이름 으로 새 탭을 열면, 로직을 아예 안 열어도 그 곡의 서버 저장분
+   (DrumChartStore)을 바로 불러와 편집하고 "서버에 저장"으로 곧장 반영할 수 있다.
+   예배 당일 통합 클릭 프로젝트를 재생 중일 때 개별 곡 로직 파일을 따로 열어야 했던
+   번거로움을 없애기 위한 것. */
+let linkedSongName = null;
+function initLinkedSong(song){
+  fetch('/api/drumChart?song='+encodeURIComponent(song)).then(r=>r.json()).then(d=>{
+    linkedSongName = song;
+    const btn = document.getElementById('serverSaveBtn');
+    if(btn) btn.style.display = '';
+    if(STORAGE_OK && lib.cur) newSong();   // 파일 열기와 같은 원칙 — 지금 곡을 덮어쓰지 않고 새로 들어온다
+    if(looksLikeScore(d)){
+      measures = normalizeMeasures(d.measures);
+      if(d.bpm){ bpm = d.bpm; bpmRange.value = bpm; document.getElementById('bpmVal').textContent = bpm; }
+      toast(`"${song}" 곡의 서버 저장분을 불러왔습니다.`);
+    } else {
+      blankDoc();
+      toast(`"${song}" 곡에는 아직 업로드된 채보가 없어요 — 새로 만들어서 "서버에 저장"을 눌러주세요.`);
+    }
+    selMeasure = 0; selEnd = 0; cursorB = 0; cursorK = 0;
+    titleEl.value = (typeof d.title === 'string' && d.title) ? d.title : song;
+    refreshAll(); commit();
+    _cur = snapshot(); histPast.length = 0; histFuture.length = 0; refreshUndoBtns();
+  }).catch(()=> toast('서버에서 악보를 불러오지 못했어요.'));
+}
+document.getElementById('serverSaveBtn').onclick = ()=>{
+  if(!linkedSongName) return;
+  const chart = { title: titleEl.value, bpm, measures };
+  fetch('/save-drum-chart', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({song: linkedSongName, chart})})
+    .then(r=>r.json()).then(res=>{
+      toast(res.ok ? `"${linkedSongName}" 곡 서버에 저장했습니다.` : '서버 저장에 실패했어요.');
+    }).catch(()=> toast('서버 저장에 실패했어요.'));
+};
+
+const _songParam = new URLSearchParams(location.search).get('song');
+if(_songParam){
+  initLinkedSong(_songParam);
+} else if(_restored){
   scrollScoreTo(selMeasure, true);
   // 복구했다는 사실과 **다음 길**을 같이 준다. 자동 저장을 처음 겪는 사람에게
   // 이 한 줄이 없으면 "왜 지난번 게 그대로 있지?"가 된다.

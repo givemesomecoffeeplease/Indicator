@@ -124,6 +124,10 @@ class WebServer {
         case ("GET", "/band"):                        handleBand(conn)
         case ("GET", "/singer"):                      handleSinger(conn)
         case ("GET", "/chart"):                        handleChart(conn)
+        // /edit의 "드럼 악보 수정" 버튼이 /chart?song=곡이름으로 열 때 쓴다. 위 exact match는
+        // 쿼리스트링이 붙으면 경로 문자열이 달라져 매칭에 실패, 이 라우트가 없어 랜딩 페이지로
+        // 새는 버그가 있었음(2026-09-06, 기능 추가하며 발견) — /api/drumChart와 같은 방식(hasPrefix)으로 수정.
+        case _ where method == "GET" && path.hasPrefix("/chart?"): handleChart(conn)
         case ("GET", "/drum"):                         handleDrum(conn)
         case ("GET", "/notation.js"):                  handleNotationJs(conn)
         case ("GET", "/api/sections"):                handleSections(conn)
@@ -770,6 +774,13 @@ class WebServer {
             const drumInp=document.createElement('input');
             drumInp.type='file';drumInp.accept='.json,.mai.json,.drum.json';drumInp.style.display='none';
             drumBtn.onclick=()=>drumInp.click();
+            // 예배 당일엔 여러 곡을 합친 통합 클릭 로직 프로젝트를 열어두고 진행하는데, 그 중
+            // 특정 곡 악보를 고쳐야 할 때마다 그 곡의 개별 로직 프로젝트를 따로 열어야 했던
+            // 번거로움 — /chart를 곡과 연결해서 바로 열면 로직을 아예 안 열어도 편집 가능
+            // (2026-09-06 요청). 새 탭으로 열어 /edit 화면은 그대로 유지.
+            const drumEditBtn=document.createElement('button');
+            drumEditBtn.className='btn btn-sm btn-sec';drumEditBtn.textContent='드럼 악보 수정';
+            drumEditBtn.onclick=()=>window.open('/chart?song='+encodeURIComponent(song),'_blank');
             drumInp.onchange=()=>{
               const f=drumInp.files[0];if(!f)return;
               const r=new FileReader();
@@ -791,7 +802,7 @@ class WebServer {
             fetch('/api/drumChart?song='+encodeURIComponent(song)).then(r=>r.json()).then(d=>{
               drumStatus.textContent = (d && Array.isArray(d.measures)) ? '드럼 채보: 있음' : '드럼 채보: 없음';
             }).catch(()=>{ drumStatus.textContent='드럼 채보: 없음'; });
-            drumWrap.appendChild(drumStatus);drumWrap.appendChild(drumBtn);drumWrap.appendChild(drumInp);
+            drumWrap.appendChild(drumStatus);drumWrap.appendChild(drumEditBtn);drumWrap.appendChild(drumBtn);drumWrap.appendChild(drumInp);
             titleEl.appendChild(drumWrap);
           }
           renderSections(song);
