@@ -99,7 +99,10 @@ class LogicPoller {
     // MARK: - 프로젝트 전환 감지
     // 스캔 당시의 프로젝트명(트랙 창 제목)을 기억해두고, 정지 중 폴링에서 주기적으로
     // 비교 — 다른 프로젝트가 열려 있으면 옛 스캔 데이터로 오동작하므로 재스캔 경고
-    private var scannedProjectTitle: String?
+    // 디스크에서 복원한 스캔 데이터의 projectTitle로 앱 시작 시 채울 수 있어야 해서
+    // (그래야 이번 세션에서 스캔을 한 번도 안 해도 프로젝트 전환 감지가 바로 동작함)
+    // private가 아니라 외부(AppDelegate)에서 대입 가능해야 한다.
+    var scannedProjectTitle: String?
     private var projectCheckCounter = 0
     private var projectMismatchNotified = false
 
@@ -575,7 +578,8 @@ class LogicPoller {
             timeSigs:  timeSigs,
             keySigs:   keySigs,
             scannedAt: Date(),
-            fps:       SMPTEConfig.fps
+            fps:       SMPTEConfig.fps,
+            projectTitle: scannedProjectTitle
         )
         DispatchQueue.main.async { ScheduleStore.shared.save(schedule: schedule) }
         debugLog("[Scan] 완료: 마커 \(markers.count)개, 템포 \(tempos.count)개, 박자 \(timeSigs.count)개, 조표 \(keySigs.count)개, fps \(SMPTEConfig.fps)")

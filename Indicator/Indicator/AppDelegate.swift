@@ -128,8 +128,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webServer.start(port: 8888)
 
         // 디스크에서 복원된 스캔 데이터가 있으면 즉시 스냅샷 반영 (목록 창 닫혀 있어도 뷰어 동작)
-        if ScheduleStore.shared.current != nil {
+        if let restored = ScheduleStore.shared.current {
             logicPoller.forceUpdate()
+            // 프로젝트 전환 감지 기준값도 같이 복원 — 이게 없으면 이번 세션에서 스캔을
+            // 한 번도 새로 안 하는 한(디스크 데이터를 그대로 쓰는 흔한 경우) 프로젝트를
+            // 바꿔도 감지가 아예 안 됐음("로직 프로젝트 파일이 바뀌었는데도 감지 못한다"
+            // 리포트로 발견 — LogicPoller 안 메모리 변수라 재시작하면 매번 사라졌었음).
+            logicPoller.scannedProjectTitle = restored.projectTitle
         }
     }
 

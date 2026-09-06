@@ -35,6 +35,13 @@ struct ScannedSchedule: Codable {
     var keySigs: [ScannedKeySig]
     var scannedAt: Date
     var fps: Double = 25.0   // 스캔 당시 SMPTE 프레임레이트 (MTC 수신 fps와 불일치 시 재스캔 필요)
+    // 스캔 당시 열려 있던 프로젝트명(트랙 창 제목). 프로젝트 전환 감지의 기준값인데
+    // 예전엔 LogicPoller 안 메모리 변수(scannedProjectTitle)에만 있어서 앱을 재시작하면
+    // 사라졌음 — 디스크에 저장된 스캔 데이터를 불러와도 "지금 이 프로젝트가 스캔 당시와
+    // 같은지" 비교할 기준이 없어, 앱을 새로 켠 세션에서는 실제로 프로젝트를 바꿔도
+    // 감지가 아예 안 되던 원인이었음(2026-09-06 리포트로 발견). 옛 파일엔 이 필드가
+    // 없을 수 있어 옵셔널로 둠(디코드 시 nil이면 그냥 기준 없이 시작 — 다음 스캔부터 채워짐).
+    var projectTitle: String? = nil
 }
 
 // 프로젝트 SMPTE 프레임레이트 공유 상태
