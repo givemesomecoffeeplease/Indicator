@@ -24,7 +24,9 @@
      가사가 한 줄로 잘려 보이던 문제 수정 — 슬라이드 전체(줄바꿈 포함)를 그대로 보여준다.
      세로로 쌓이는 만큼 폭도 넉넉히 줘서(60%) 짧은 마디 폭 안에 갇혀 줄바꿈이 과하게
      일어나지 않도록 함. */
-  .line .cap{margin-top:4px;display:flex;flex-direction:column;gap:2px;max-width:60%}
+  /* 2026-09-06: 섹션명·가사 캡션을 악보 아래→위로 이동(요청) — margin을 cap 쪽 아래로,
+     svg 쪽 위로 서로 바꿔 자리만 옮기고 간격은 그대로 유지 */
+  .line .cap{margin-bottom:4px;display:flex;flex-direction:column;gap:2px;max-width:60%}
   .line .cap .sec{font-size:16px;font-weight:700;color:#2a7a5c;white-space:nowrap}
   .line .cap .lyr{font-size:15px;color:#8a8578;white-space:pre-line;line-height:1.35}
   .line svg{display:block;width:100%;height:auto;margin-top:6px}
@@ -129,7 +131,7 @@ function appendSongBlock(songName, data, isFirst){
   const blockId = 'song' + (songSeq++);
   const dividerHtml = isFirst ? '' : `<div class="songDivider">${esc(songName)}</div>`;
   const linesHtml = data.lineGroups.map((g, gi)=>
-    `<div class="line" id="${blockId}_l${gi}"><svg xmlns="${SVG_NS}"></svg><div class="cap"></div></div>`
+    `<div class="line" id="${blockId}_l${gi}"><div class="cap"></div><svg xmlns="${SVG_NS}"></svg></div>`
   ).join('');
   linesEl.insertAdjacentHTML('beforeend', dividerHtml + linesHtml);
   const posCache = {};
