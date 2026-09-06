@@ -282,6 +282,14 @@ class WebServer {
            let chart = obj["chart"],
            let chartData = try? JSONSerialization.data(withJSONObject: chart) {
             saveDrumChart?(song, chartData)
+            // /drum이 이미 띄워져 있어도 그 자리에서 바로 반영되도록 — 예전엔 저장만 하고
+            // 아무 신호가 없어서, 공연 중 /chart로 급히 고쳐도 이미 열려있는 /drum 화면은
+            // 새로고침 전까지 옛 악보 그대로였음(2026-09-06 리포트로 발견). 가사가 이미 쓰는
+            // 'lyrics-updated'와 같은 SSE 채널에 곡 이름만 실어서 새 이벤트로 보낸다.
+            if let payload = try? JSONSerialization.data(withJSONObject: ["song": song]),
+               let json = String(data: payload, encoding: .utf8) {
+                broadcaster.send("event: drum-updated\ndata: \(json)\n\n")
+            }
             send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")
         } else {
             send(conn, body: Data("{\"ok\":false}".utf8), contentType: "application/json")

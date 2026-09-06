@@ -258,6 +258,28 @@ function applyState(st){
   setHighlight(curMeasureIdx);
 }
 
+// /chart에서 "서버에 저장"을 누르면 서버가 'drum-updated'를 쏜다(가사의 'lyrics-updated'와
+// 같은 원리). 지금 화면에 떠 있는 곡이면 새로 받아와 다시 그린다 — 공연 중 급히 고친 게
+// 새로고침 없이 바로 반영되게 하기 위함(2026-09-06 요청). 화면에 없는 곡이면 할 일 없음
+// (그 곡 차례가 오면 어차피 fetchChartData가 새로 받아온다).
+function refreshSongIfShown(songName){
+  if(renderedSongs[0] && renderedSongs[0].songName === songName){
+    // 지금 재생 중인 곡 — 화면 순서가 꼬이지 않게 안전하게 처음부터 다시 그린다
+    // (appendSongBlock은 DOM 맨 뒤에 붙이는 방식이라, 자리 그대로 바꿔치기하면 이미
+    // 붙어있는 "다음 곡" 미리보기보다 뒤로 밀려 순서가 뒤집힘 — 드문 이벤트라 이 정도
+    // 다시 그리는 비용은 감수).
+    startFreshWith(songName);
+    return;
+  }
+  const nextIdx = renderedSongs.findIndex(s => s.songName === songName);
+  if(nextIdx === -1) return;   // 화면에 없는 곡 — 다음에 그 곡 차례가 오면 새로 받아옴
+  fetchChartData(songName).then(data=>{
+    if(!data) return;
+    removeSongBlock(renderedSongs[nextIdx]);
+    renderedSongs[nextIdx] = appendSongBlock(songName, data, false);
+  });
+}
+
 showEmpty('곡 재생을 기다리는 중…');
 // index.html/singer.html과 동일한 재연결 패턴 — 브라우저 기본 EventSource 자동 재연결만
 // 믿었더니, 화면을 오래 켜둬서(백그라운드 탭·절전 등) 연결이 조용히 끊긴 뒤 다시 안 살아나
@@ -271,6 +293,10 @@ showEmpty('곡 재생을 기다리는 중…');
       let st; try{ st = JSON.parse(e.data); }catch(err){ return; }
       applyState(st);
     };
+    es.addEventListener('drum-updated', e=>{
+      let d; try{ d = JSON.parse(e.data); }catch(err){ return; }
+      if(d && typeof d.song === 'string') refreshSongIfShown(d.song);
+    });
     es.onerror = ()=>{
       es.close();
       setTimeout(connect, reconnectDelay);

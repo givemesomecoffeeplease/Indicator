@@ -186,6 +186,10 @@ function drawVoiceBeat(m, mx, top, b, voice){
       if(n.dot){
         SVGT.appendChild(el('circle',{cx:n.x+(ghost?px+4.5:10),cy:y - (y%LG===0? LG/2 : 0),r:1.9,fill:INK}));
       }
+      // 플램(장식음) — chart.html 편집 화면과 반드시 같이 유지할 것(2026-09-06, 편집
+      // 화면에만 넣었다가 /drum에 아예 안 보이던 버그로 발견 — 이 파일과 chart.html의
+      // 자체 렌더링 엔진은 겉보기 결과가 항상 똑같아야 한다는 원칙을 이번에 놓쳤었음).
+      if(m[id+'Flam'] && m[id+'Flam'][n.s]) drawFlam(n.x, y, up);
     });
     const yEnd = up ? Math.max(...n.ys) : Math.min(...n.ys);
     SVGT.appendChild(el('line',{x1:n.x+stemDx,y1:yEnd + (up?-1:1),x2:n.x+stemDx,y2:beamY,stroke:INK,'stroke-width':1.6}));
@@ -236,6 +240,16 @@ function drawVoiceBeat(m, mx, top, b, voice){
     const x2 = onlyNum ? notes[notes.length-1].x : xAtPos(mx, b+1) - GEO.SLOT_W*0.7;
     tupletMark(x1, x2, y, up, div, !onlyNum);
   }
+}
+/* 플램 — chart.html의 동명 함수와 완전히 동일(같이 고칠 것). 주 음표 바로 앞에 붙는
+   작은 임음표(꼬리 하나 달린 8분음표 모양, 슬래시로 단순화). x,y는 주 음표 좌표. */
+function drawFlam(x, y, up){
+  const gx = x - 10, gy = y + (up ? 2.5 : -2.5);
+  SVGT.appendChild(el('ellipse',{cx:gx, cy:gy, rx:3.1, ry:2.3, fill:INK, transform:`rotate(-18 ${gx} ${gy})`}));
+  const sx = gx + (up ? 2.6 : -2.6);
+  const sy2 = gy + (up ? -13 : 13);
+  SVGT.appendChild(el('line',{x1:sx,y1:gy - (up?1:-1),x2:sx,y2:sy2,stroke:INK,'stroke-width':1.1}));
+  SVGT.appendChild(el('line',{x1:sx-3.5,y1:sy2 + (up?5:-5),x2:sx+4.5,y2:sy2,stroke:INK,'stroke-width':1.6,'stroke-linecap':'round'}));
 }
 function drawFlags(x, y, up, count){
   for(let i=0;i<count;i++){
