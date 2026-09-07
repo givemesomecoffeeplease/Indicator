@@ -12,6 +12,8 @@ class WebServer {
     private var singerContent: String = ""
     private var chartContent: String = ""
     private var drumContent: String = ""
+    // 청중용 가사 전체화면 뷰어(2026-09-08) — 검정 배경에 흰 가사만, 그 외 아무 것도 없음.
+    private var audienceContent: String = ""
     private var notationJs: String = ""
 
     // Wired up by AppDelegate after init
@@ -129,6 +131,7 @@ class WebServer {
         // 새는 버그가 있었음(2026-09-06, 기능 추가하며 발견) — /api/drumChart와 같은 방식(hasPrefix)으로 수정.
         case _ where method == "GET" && path.hasPrefix("/chart?"): handleChart(conn)
         case ("GET", "/drum"):                         handleDrum(conn)
+        case ("GET", "/audience"):                     handleAudience(conn)
         case ("GET", "/notation.js"):                  handleNotationJs(conn)
         case ("GET", "/api/sections"):                handleSections(conn)
         case _ where method == "GET" && path.hasPrefix("/api/drumChart"): handleGetDrumChart(conn, path: path)
@@ -172,6 +175,7 @@ class WebServer {
         <a class='btn singer' href='/singer'>싱어</a>
         <a class='btn band' href='/band'>밴드</a>
         <a class='btn band' href='/drum'>드럼</a>
+        <a class='btn band' href='/audience'>청중 화면</a>
         <p class='sub'>선택 후 홈 화면에 추가하면 다음엔 바로 열려요</p>
         </body></html>
         """
@@ -192,6 +196,10 @@ class WebServer {
 
     private func handleDrum(_ conn: NWConnection) {
         send(conn, body: drumContent.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
+    }
+
+    private func handleAudience(_ conn: NWConnection) {
+        send(conn, body: audienceContent.data(using: .utf8) ?? Data(), contentType: "text/html; charset=utf-8")
     }
 
     private func handleNotationJs(_ conn: NWConnection) {
@@ -1927,6 +1935,12 @@ class WebServer {
             notationJs = content
         } else {
             notationJs = "console.error('notation.js not found');"
+        }
+        if let url = Bundle.main.url(forResource: "audience", withExtension: "html"),
+           let content = try? String(contentsOf: url, encoding: .utf8) {
+            audienceContent = content
+        } else {
+            audienceContent = "<html><body><h1>audience.html not found</h1></body></html>"
         }
     }
 }

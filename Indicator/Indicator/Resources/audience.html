@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Indicator · Audience</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<style>
+  /* 청중이 보는 화면 — 검정 배경에 흰 가사만. 요청대로 그 외엔 아무 것도 안 넣는다
+     (섹션명·코드·다음 가사·BPM·진행률·헤더 전부 없음). 전체화면 버튼 하나만 예외로,
+     전체화면에 들어가는 순간 그것마저 사라진다. */
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#000}
+  body{
+    display:flex;align-items:center;justify-content:center;
+    overflow:hidden;user-select:none;-webkit-user-select:none;
+    font-family:-apple-system,'Apple SD Gothic Neo','Helvetica Neue',sans-serif;
+  }
+  #wrap{width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:5vh 6vw}
+  #lyric{
+    color:#fff;text-align:center;line-height:1.5;font-weight:700;
+    display:flex;flex-direction:column;align-items:center;gap:0.15em;
+  }
+  .lyric-line{font-size:8vw;white-space:pre;letter-spacing:.01em}
+  /* 전체화면 버튼 — 평소엔 오른쪽 아래에 아주 옅게, 전체화면 들어가면 완전히 숨김.
+     청중 눈에 계속 보이면 안 되니 은은하게(투명도 낮게) 두고, 손대면 진해짐 정도만. */
+  #fsBtn{
+    position:fixed;right:18px;bottom:18px;z-index:9;
+    width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.25);
+    background:rgba(255,255,255,.06);color:rgba(255,255,255,.45);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    transition:opacity .2s;
+  }
+  #fsBtn:active{background:rgba(255,255,255,.14);color:rgba(255,255,255,.8)}
+  #fsBtn svg{width:18px;height:18px}
+  body.is-fs #fsBtn{display:none}
+</style>
+</head>
+<body>
+<div id="wrap"><div id="lyric"></div></div>
+<button id="fsBtn" type="button" aria-label="전체화면">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M9 3H5a2 2 0 0 0-2 2v4"></path><path d="M15 3h4a2 2 0 0 1 2 2v4"></path>
+    <path d="M9 21H5a2 2 0 0 1-2-2v-4"></path><path d="M15 21h4a2 2 0 0 0 2-2v-4"></path>
+  </svg>
+</button>
+<script>
+  const $ = id => document.getElementById(id);
+
+  // ── 가사 캐시(다른 뷰어와 동일한 방식 — /edit이 내놓는 DATA를 그대로 읽는다) ──
+  let lyricSlides = {};   // songName -> [{secName, secIdx, abs, slide}, ...] (곡 시작 기준 절대 초 순 정렬)
+  let songSections = {};  // songName -> [{sec, startInSong, durationSec}, ...]
+  let lastKnownState = null;
+
+  // index.html/singer.html과 완전히 동일한 슬라이드 위치 계산 — 셋이 항상 같은 타이밍을
+  // 보여줘야 하므로(운영자가 보는 화면과 청중 화면이 다른 순간에 넘어가면 안 됨) 그대로 복사.
+  function resolveSlideSecs(slides, durationSec) {
+    const n = slides.length;
+    const out = new Array(n);
+    if (n === 0) return out;
+    out[0] = slides[0].startSec ?? 0;
+    let i = 1;
+    while (i < n) {
+      const v = slides[i] ? slides[i].startSec : null;
+      if (v != null) { out[i] = v; i++; continue; }
+      let j = i;
+      while (j < n && (slides[j] ? slides[j].startSec : null) == null) j++;
+      const endSec = j < n ? slides[j].startSec : (durationSec > 0 ? durationSec : out[i-1] + (n - i + 1) * 5);
+      const span = Math.max(0, endSec - out[i-1]);
+      const cnt = j - i + 1;
+      for (let k = i; k < j; k++) out[k] = out[i-1] + span * (k - i + 1) / cnt;
+      i = j;
+    }
+    for (let k = 1; k < n; k++) if (out[k] < out[k-1] + 0.05) out[k] = out[k-1] + 0.05;
+    return out;
+  }
+
+  async function fetchLyricCache() {
+    try {
+      const html = await fetch('/edit').then(r => r.text());
+      const startMark = 'const DATA=';
+      const endMark = ';//EXPORT_DATA_LINE';
+      const si = html.indexOf(startMark);
+      const ei = html.indexOf(endMark);
+      if (si < 0 || ei < 0 || ei <= si) return;
+      const data = JSON.parse(html.slice(si + startMark.length, ei));
+      lyricSlides = {};
+      songSections = {};
+      data.forEach(song => {
+        const arr = [];
+        songSections[song.song] = (song.sections || []).map(sec => ({ sec: sec.sec, startInSong: sec.startInSong || 0, durationSec: sec.durationSec || 0 }));
+        (song.sections || []).forEach(sec => {
+          const slides = (sec.slides && sec.slides.length) ? sec.slides : [];
+          const secs = resolveSlideSecs(slides, sec.durationSec || 0);
+          slides.forEach((slide, i) => {
+            arr.push({ abs: (sec.startInSong || 0) + secs[i], slide });
+          });
+        });
+        arr.sort((a, b) => a.abs - b.abs);
+        lyricSlides[song.song] = arr;
+      });
+      if (lastKnownState) applyState(lastKnownState);
+    } catch(e) {}
+  }
+
+  function findCurrentEntry(songName, absSec) {
+    const arr = lyricSlides[songName];
+    if (!arr || !arr.length) return null;
+    let best = arr[0];
+    for (const e of arr) { if (e.abs <= absSec) best = e; else break; }
+    return best;
+  }
+
+  // 가사 텍스트만 뽑는다 — 코드·고스트 자리는 청중 화면에 필요 없어서 전부 버림
+  // (간주 슬라이드는 어차피 보여줄 가사가 없으니 자연히 빈 화면이 됨, 의도한 동작).
+  function plainLines(tokens) {
+    if (!tokens || !tokens.length) return [];
+    const lines = [[]];
+    tokens.forEach(t => {
+      if (t.type === 'br') lines.push([]);
+      else if (t.type === 'char') lines[lines.length - 1].push(t.char === ' ' ? ' ' : (t.char || ''));
+    });
+    while (lines.length > 1 && lines[lines.length - 1].length === 0) lines.pop();
+    return lines.map(l => l.join(''));
+  }
+
+  let lastRenderedKey = null;
+  function renderLyric(slide, fallback) {
+    const lines = slide && !slide.isInstrumental ? plainLines(slide.tokens) : [];
+    const text = lines.length ? lines.join('\n') : (slide ? '' : (fallback || ''));
+    const key = text;
+    if (key === lastRenderedKey) return;   // 매 상태 갱신마다 다시 그리지 않게(깜빡임 방지)
+    lastRenderedKey = key;
+    const el = $('lyric');
+    el.innerHTML = '';
+    text.split('\n').forEach(line => {
+      const d = document.createElement('div');
+      d.className = 'lyric-line';
+      d.textContent = line;
+      el.appendChild(d);
+    });
+    fitLyric();
+  }
+
+  // index.html의 fitLyricLines와 같은 원리 — 컨테이너에 안 맞으면 공통 비율로 축소.
+  // 줄마다 따로 줄이면 한 슬라이드 안에서 글자 크기가 들쭉날쭉해진다.
+  function fitLyric() {
+    const lines = [...document.querySelectorAll('.lyric-line')];
+    if (!lines.length) return;
+    lines.forEach(l => l.style.fontSize = '');
+    const wrap = $('wrap');
+    const avail = wrap.clientWidth - 4;
+    const availH = wrap.clientHeight - 4;
+    if (avail <= 0 || availH <= 0) return;
+    const base = parseFloat(getComputedStyle(lines[0]).fontSize);
+    let ratio = 1;
+    lines.forEach(l => { if (l.scrollWidth > avail) ratio = Math.min(ratio, avail / l.scrollWidth); });
+    const totalH = $('lyric').scrollHeight;
+    if (totalH > 0) ratio = Math.min(ratio, availH / totalH);
+    if (ratio < 1) {
+      const size = Math.max(10, Math.floor(base * ratio * 0.97));
+      lines.forEach(l => l.style.fontSize = size + 'px');
+    }
+  }
+  window.addEventListener('resize', fitLyric);
+
+  function applyState(s) {
+    const songs = s.songs || [];
+    const songIdx = s.currentSongIndex ?? -1;
+    const songName = songs[songIdx] || '';
+    const secIdx = s.currentSectionIndexInSong ?? -1;
+    const secStart = songSections[songName]?.[secIdx]?.startInSong ?? 0;
+    const absSec = secStart + (s.sectionElapsedSec ?? 0);
+    const curEntry = findCurrentEntry(songName, absSec);
+    renderLyric(curEntry?.slide || null, s.lyricCue);
+  }
+
+  fetchLyricCache();
+
+  // ── SSE (다른 뷰어와 동일한 재연결+조용함 감시 패턴, 2026-09-08) ──
+  let es, reconnectDelay = 1000;
+  const SILENCE_MS = 90000;
+  let lastMsgAt = Date.now();
+  let silenceTimer = null;
+  function armSilenceWatch(){
+    clearInterval(silenceTimer);
+    silenceTimer = setInterval(() => {
+      if (Date.now() - lastMsgAt > SILENCE_MS) { es.close(); connect(); }
+    }, 10000);
+  }
+  function connect() {
+    es = new EventSource('/events');
+    lastMsgAt = Date.now();
+    es.onopen = () => { reconnectDelay = 1000; lastMsgAt = Date.now(); fetchLyricCache(); };
+    es.onmessage = e => { lastMsgAt = Date.now(); try { lastKnownState = JSON.parse(e.data); applyState(lastKnownState); } catch {} };
+    es.addEventListener('lyrics-updated', () => { lastMsgAt = Date.now(); fetchLyricCache(); });
+    es.onerror = () => { es.close(); setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 2, 10000); };
+    armSilenceWatch();
+  }
+  connect();
+
+  // ── 전체화면 ──
+  $('fsBtn').addEventListener('click', () => {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(()=>{});
+  });
+  document.addEventListener('fullscreenchange', () => {
+    document.body.classList.toggle('is-fs', !!document.fullscreenElement);
+  });
+</script>
+</body>
+</html>

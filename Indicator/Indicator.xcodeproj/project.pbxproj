@@ -21,6 +21,7 @@
 		BB00020D00000000000000AA /* chart.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010D00000000000000AA /* chart.html */; };
 		BB00020E00000000000000AA /* drum.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00010E00000000000000AA /* drum.html */; };
 		BB00020F00000000000000AA /* notation.js in Resources */ = {isa = PBXBuildFile; fileRef = BB00010F00000000000000AA /* notation.js */; };
+		BB00021000000000000000AA /* audience.html in Resources */ = {isa = PBXBuildFile; fileRef = BB00011000000000000000AA /* audience.html */; };
 		F808FA292FEDAB0700C36F76 /* LyricsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA282FEDAB0700C36F76 /* LyricsStore.swift */; };
 		F808FA2B2FEDAB0700C36F76 /* ScheduleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */; };
 		F808FA2D2FEDAB0700C36F76 /* DrumChartStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F808FA2C2FEDAB0700C36F76 /* DrumChartStore.swift */; };
@@ -42,6 +43,7 @@
 		BB00010D00000000000000AA /* chart.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = chart.html; sourceTree = "<group>"; };
 		BB00010E00000000000000AA /* drum.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = drum.html; sourceTree = "<group>"; };
 		BB00010F00000000000000AA /* notation.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = notation.js; sourceTree = "<group>"; };
+		BB00011000000000000000AA /* audience.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = audience.html; sourceTree = "<group>"; };
 		F808FA282FEDAB0700C36F76 /* LyricsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsStore.swift; sourceTree = "<group>"; };
 		F808FA2A2FEDAB0700C36F76 /* ScheduleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleStore.swift; sourceTree = "<group>"; };
 		F808FA2C2FEDAB0700C36F76 /* DrumChartStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrumChartStore.swift; sourceTree = "<group>"; };
@@ -102,6 +104,7 @@
 				BB00010D00000000000000AA /* chart.html */,
 				BB00010E00000000000000AA /* drum.html */,
 				BB00010F00000000000000AA /* notation.js */,
+				BB00011000000000000000AA /* audience.html */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -173,6 +176,7 @@
 				BB00020D00000000000000AA /* chart.html in Resources */,
 				BB00020E00000000000000AA /* drum.html in Resources */,
 				BB00020F00000000000000AA /* notation.js in Resources */,
+				BB00021000000000000000AA /* audience.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
