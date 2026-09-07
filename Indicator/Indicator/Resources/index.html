@@ -469,17 +469,33 @@
 
   // ── SSE ──
   let es, reconnectDelay = 1000;
+  // 조용함 감시 — Mac 잠듦/네트워크 순간 끊김 등으로 연결이 "겉보기엔 열려있지만 실제론
+  // 죽은" 상태가 돼도 onerror가 안 뜨는 경우가 있어(2026-09-08 "오래 두면 멈춰있다" 리포트로
+  // 확인), 정상 신호를 오래 못 받으면 스스로 재연결한다. 재생 중엔 상태가 계속 바뀌며
+  // 초당 최대 20번 신호가 오니 이 타이머가 절대 안 끝남 — 곡 중간엔 절대 안 끼어들고,
+  // 로직이 정지해 아무 신호도 없는 조용한 구간(화면도 안 변하는 중)에서만 조용히 재연결됨.
+  const SILENCE_MS = 90000;
+  let lastMsgAt = Date.now();
+  let silenceTimer = null;
+  function armSilenceWatch(){
+    clearInterval(silenceTimer);
+    silenceTimer = setInterval(() => {
+      if(Date.now() - lastMsgAt > SILENCE_MS) { es.close(); connect(); }
+    }, 10000);
+  }
   function connect() {
     es = new EventSource('/events');
-    es.onopen = () => { $('offline').classList.add('hidden'); reconnectDelay = 1000; fetchLyricCache(); };
-    es.onmessage = e => { try { lastKnownState = JSON.parse(e.data); applyState(lastKnownState); } catch {} };
-    es.addEventListener('lyrics-updated', () => { fetchLyricCache(); });
+    lastMsgAt = Date.now();
+    es.onopen = () => { $('offline').classList.add('hidden'); reconnectDelay = 1000; lastMsgAt = Date.now(); fetchLyricCache(); };
+    es.onmessage = e => { lastMsgAt = Date.now(); try { lastKnownState = JSON.parse(e.data); applyState(lastKnownState); } catch {} };
+    es.addEventListener('lyrics-updated', () => { lastMsgAt = Date.now(); fetchLyricCache(); });
     es.onerror = () => {
       $('offline').classList.remove('hidden');
       es.close();
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 10000);
     };
+    armSilenceWatch();
   }
 
   // ── 진행률 RAF ──

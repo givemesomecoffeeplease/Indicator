@@ -5807,10 +5807,24 @@ function hideLogicHighlight(){
 // 재연결한다.
 (function connectLogicSSE(){
   let es, reconnectDelay = 1000;
+  // 조용함 감시 — onerror만으로는 "겉보기엔 열려있지만 실제론 죽은" 연결을 못 잡는 경우가
+  // 있어(2026-09-08, /band·/singer 리포트로 확인) 같이 추가. 재생 중엔 신호가 계속 와서
+  // 절대 안 끼어들고, 로직 정지로 조용한 구간에서만 스스로 재연결한다.
+  const SILENCE_MS = 90000;
+  let lastMsgAt = Date.now();
+  let silenceTimer = null;
+  function armSilenceWatch(){
+    clearInterval(silenceTimer);
+    silenceTimer = setInterval(() => {
+      if(Date.now() - lastMsgAt > SILENCE_MS) { es.close(); connect(); }
+    }, 10000);
+  }
   function connect(){
     try{ es = new EventSource('/events'); }catch(e){ return; }
-    es.onopen = ()=>{ reconnectDelay = 1000; };
+    lastMsgAt = Date.now();
+    es.onopen = ()=>{ reconnectDelay = 1000; lastMsgAt = Date.now(); };
     es.onmessage = e=>{
+      lastMsgAt = Date.now();
       let st; try{ st = JSON.parse(e.data); }catch(err){ return; }
       if(typeof st.barPosition === 'number') lastKnownBarPos = st.barPosition;
       if(playing) { hideLogicHighlight(); return; }   // 채보 자체 재생 중엔 그쪽이 우선
@@ -5838,6 +5852,7 @@ function hideLogicHighlight(){
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 10000);
     };
+    armSilenceWatch();
   }
   connect();
 })();

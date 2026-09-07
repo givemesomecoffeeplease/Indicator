@@ -440,13 +440,26 @@
   fetchLyricCache();
 
   // ── SSE ──
-  let reconnectDelay = 1000;
+  let reconnectDelay = 1000, es;
+  // 조용함 감시 — index.html과 동일 이유(2026-09-08). 재생 중엔 신호가 계속 와서 절대
+  // 안 끼어들고, 로직 정지로 아무 신호도 없는 조용한 구간에서만 스스로 재연결한다.
+  const SILENCE_MS = 90000;
+  let lastMsgAt = Date.now();
+  let silenceTimer = null;
+  function armSilenceWatch(){
+    clearInterval(silenceTimer);
+    silenceTimer = setInterval(() => {
+      if(Date.now() - lastMsgAt > SILENCE_MS) { es.close(); connect(); }
+    }, 10000);
+  }
   function connect() {
-    const es = new EventSource('/events');
-    es.onopen = () => { reconnectDelay = 1000; $('offline').classList.add('hidden'); fetchLyricCache(); };
-    es.onmessage = e => { try { lastKnownState = JSON.parse(e.data); applyState(lastKnownState); } catch {} };
-    es.addEventListener('lyrics-updated', () => { fetchLyricCache(); });
+    es = new EventSource('/events');
+    lastMsgAt = Date.now();
+    es.onopen = () => { reconnectDelay = 1000; lastMsgAt = Date.now(); $('offline').classList.add('hidden'); fetchLyricCache(); };
+    es.onmessage = e => { lastMsgAt = Date.now(); try { lastKnownState = JSON.parse(e.data); applyState(lastKnownState); } catch {} };
+    es.addEventListener('lyrics-updated', () => { lastMsgAt = Date.now(); fetchLyricCache(); });
     es.onerror = () => { es.close(); setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 2, 10000); };
+    armSilenceWatch();
   }
   connect();
 

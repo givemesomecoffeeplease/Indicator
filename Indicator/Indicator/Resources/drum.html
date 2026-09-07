@@ -288,14 +288,29 @@ showEmpty('곡 재생을 기다리는 중…');
 // 악보가 멈춘 채로 안 보이는 문제가 있었음(2026-08-30). 직접 닫고 지수 백오프로 재연결한다.
 (function connectSSE(){
   let es, reconnectDelay = 1000;
+  // 조용함 감시 — onerror만으로는 "겉보기엔 열려있지만 실제론 죽은" 연결을 못 잡는 경우가
+  // 있어(2026-09-08, /band·/singer 리포트로 확인) 같이 추가. 재생 중엔 신호가 계속 와서
+  // 절대 안 끼어들고, 로직 정지로 조용한 구간에서만 스스로 재연결한다.
+  const SILENCE_MS = 90000;
+  let lastMsgAt = Date.now();
+  let silenceTimer = null;
+  function armSilenceWatch(){
+    clearInterval(silenceTimer);
+    silenceTimer = setInterval(() => {
+      if(Date.now() - lastMsgAt > SILENCE_MS) { es.close(); connect(); }
+    }, 10000);
+  }
   function connect(){
     try{ es = new EventSource('/events'); }catch(e){ return; }
-    es.onopen = ()=>{ reconnectDelay = 1000; };
+    lastMsgAt = Date.now();
+    es.onopen = ()=>{ reconnectDelay = 1000; lastMsgAt = Date.now(); };
     es.onmessage = e=>{
+      lastMsgAt = Date.now();
       let st; try{ st = JSON.parse(e.data); }catch(err){ return; }
       applyState(st);
     };
     es.addEventListener('drum-updated', e=>{
+      lastMsgAt = Date.now();
       let d; try{ d = JSON.parse(e.data); }catch(err){ return; }
       if(d && typeof d.song === 'string') refreshSongIfShown(d.song);
     });
@@ -304,6 +319,7 @@ showEmpty('곡 재생을 기다리는 중…');
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 10000);
     };
+    armSilenceWatch();
   }
   connect();
 })();
