@@ -8,9 +8,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#000000">
 <style>
-  /* 청중이 보는 화면 — 검정 배경에 흰 가사만. 요청대로 그 외엔 아무 것도 안 넣는다
-     (섹션명·코드·다음 가사·BPM·진행률·헤더 전부 없음). 전체화면 버튼 하나만 예외로,
-     전체화면에 들어가는 순간 그것마저 사라진다. */
+  /* 청중이 보는 화면 — 검정 배경에 흰 가사만. 요청대로 그 외엔 정말 아무 것도 안 넣는다
+     (섹션명·코드·다음 가사·BPM·진행률·헤더·버튼 전부 없음, 2026-09-09에 전체화면 버튼도 없앰).
+     전체화면은 화면 아무 데나 한 번 탭/클릭하면 들어가고(브라우저가 진짜 사용자 동작
+     없이는 전체화면을 허용 안 해서, 버튼 없이 들어가려면 이 방법뿐), 빠져나오는 건
+     브라우저 기본 Esc뿐 — 그 외엔 화면 어디를 눌러도 아무 반응이 없다(요청대로). */
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;background:#000}
   body{
@@ -24,28 +26,10 @@
     display:flex;flex-direction:column;align-items:center;gap:0.15em;
   }
   .lyric-line{font-size:8vw;white-space:pre;letter-spacing:.01em}
-  /* 전체화면 버튼 — 평소엔 오른쪽 아래에 아주 옅게, 전체화면 들어가면 완전히 숨김.
-     청중 눈에 계속 보이면 안 되니 은은하게(투명도 낮게) 두고, 손대면 진해짐 정도만. */
-  #fsBtn{
-    position:fixed;right:18px;bottom:18px;z-index:9;
-    width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.25);
-    background:rgba(255,255,255,.06);color:rgba(255,255,255,.45);
-    display:flex;align-items:center;justify-content:center;cursor:pointer;
-    transition:opacity .2s;
-  }
-  #fsBtn:active{background:rgba(255,255,255,.14);color:rgba(255,255,255,.8)}
-  #fsBtn svg{width:18px;height:18px}
-  body.is-fs #fsBtn{display:none}
 </style>
 </head>
 <body>
 <div id="wrap"><div id="lyric"></div></div>
-<button id="fsBtn" type="button" aria-label="전체화면">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M9 3H5a2 2 0 0 0-2 2v4"></path><path d="M15 3h4a2 2 0 0 1 2 2v4"></path>
-    <path d="M9 21H5a2 2 0 0 1-2-2v-4"></path><path d="M15 21h4a2 2 0 0 0 2-2v-4"></path>
-  </svg>
-</button>
 <script>
   const $ = id => document.getElementById(id);
 
@@ -201,14 +185,16 @@
   }
   connect();
 
-  // ── 전체화면 ──
-  $('fsBtn').addEventListener('click', () => {
+  // ── 전체화면: 버튼 없이, 화면 아무 데나 처음 한 번 누르면 들어간다 ──
+  // 브라우저는 진짜 사용자 동작(클릭/탭) 없이는 전체화면을 절대 허용 안 하므로, 화면
+  // 전체를 그 "한 번의 클릭"으로 쓴다. 한 번 들어가면 이 리스너는 스스로 떼어내서,
+  // 그 뒤로는 화면을 눌러도 아무 반응이 없다(요청대로 빠져나오는 길은 Esc뿐).
+  function enterFullscreenOnce(){
     const el = document.documentElement;
     if (el.requestFullscreen) el.requestFullscreen().catch(()=>{});
-  });
-  document.addEventListener('fullscreenchange', () => {
-    document.body.classList.toggle('is-fs', !!document.fullscreenElement);
-  });
+    document.removeEventListener('click', enterFullscreenOnce);
+  }
+  document.addEventListener('click', enterFullscreenOnce);
 </script>
 </body>
 </html>
