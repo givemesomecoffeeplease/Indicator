@@ -99,13 +99,27 @@ class ScheduleStore {
     }
 
     /// 특정 SMPTE 시간이 몇 번째 마디인지 계산 (소수점 포함)
-    /// 가장 가까운 템포 변화 지점의 마디 위치 + 그 이후 경과 시간으로 계산
+    /// 가장 가까운 템포 변화 지점의 마디 위치 + 그 이후 경과 시간으로 계산.
+    /// 그 구간 안에서 박자표(ts)가 바뀔 수 있으므로, ts 변경 지점마다 구간을 나눠 각자의
+    /// 박자표로 마디 수를 누적한다 — 통짜로 "지금 박자표" 하나만 쓰면 변박 직후 구간이
+    /// 통째로 잘못된 분모로 계산돼 재생 위치가 어긋난다(2026-09-13, 변박 채보 추적 버그로 발견).
     func barPositionAt(mtcSeconds: Double) -> Double? {
         guard let tempos = current?.tempos, !tempos.isEmpty else { return nil }
         let t = tempos.last(where: { $0.mtcSeconds <= mtcSeconds }) ?? tempos[0]
-        let bpb = Double(beatsPerBarAt(mtcSeconds: mtcSeconds)?.beatsPerBar ?? 4)
-        let barsElapsed = (mtcSeconds - t.mtcSeconds) * t.bpm / 60.0 / bpb
-        return t.barPosition + barsElapsed
+        let boundaries = (current?.timeSigs ?? [])
+            .map { $0.mtcSeconds }
+            .filter { $0 > t.mtcSeconds && $0 < mtcSeconds }
+            .sorted()
+        var cursor = t.mtcSeconds
+        var bars = 0.0
+        for b in boundaries {
+            let bpb = Double(beatsPerBarAt(mtcSeconds: cursor)?.beatsPerBar ?? 4)
+            bars += (b - cursor) * t.bpm / 60.0 / bpb
+            cursor = b
+        }
+        let bpbLast = Double(beatsPerBarAt(mtcSeconds: mtcSeconds)?.beatsPerBar ?? 4)
+        bars += (mtcSeconds - cursor) * t.bpm / 60.0 / bpbLast
+        return t.barPosition + bars
     }
 
     /// 두 SMPTE 시간 사이의 마디 수 (정수)

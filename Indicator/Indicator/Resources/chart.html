@@ -5699,6 +5699,7 @@ refreshGrid(); renderScore(); refreshStepDots();
 refreshEditBtns(); refreshRangeBtn();
 _cur = snapshot();          // 히스토리 기준점
 refreshUndoBtns();
+setMode('drum');   // 첫 화면을 그리드 대신 리얼드럼으로 (2026-09-13 요청)
 
 /* /edit → /chart 곡 연결 (2026-09-06) — /edit의 "드럼 악보 수정" 버튼이
    /chart?song=곡이름 으로 새 탭을 열면, 로직을 아예 안 열어도 그 곡의 서버 저장분
