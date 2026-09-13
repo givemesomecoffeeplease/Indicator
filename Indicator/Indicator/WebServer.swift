@@ -1505,12 +1505,20 @@ class WebServer {
             let importedData;
             try{importedData=JSON.parse(html.slice(si+startMark.length,ei));}catch{showMsg('파싱 오류');return;}
             // /save 호출 없이 로컬 DATA만 업데이트 — 뷰어 적용 버튼으로만 서버에 반영
-            // 노트(세션/싱어)는 덮어쓰지 않고 병합: 파일에 값이 있으면 채우고, 없으면 기존 값 유지
+            // 완전 교체 방식(2026-09-13): 가져온 파일에 있는 섹션은 그 내용으로 덮어쓰고,
+            // 파일에 없는 섹션(구조가 바뀌어 빠진 경우 등)은 빈 상태로 초기화한다 —
+            // 예전엔 기존 값을 그대로 남겨둬서 옛 섹션이 유령처럼 남는 문제가 있었음.
             const importedSongs=new Set();
             const mergeSec=(destSec,srcSec)=>{
               destSec.slides=fixSlides(srcSec.slides);
-              destSec.sessionNote=srcSec.sessionNote||destSec.sessionNote||'';
-              destSec.singerNote=srcSec.singerNote||destSec.singerNote||'';
+              destSec.sessionNote=srcSec.sessionNote||'';
+              destSec.singerNote=srcSec.singerNote||'';
+              destSec.linked=false;
+            };
+            const clearSec=(destSec)=>{
+              destSec.slides=[];
+              destSec.sessionNote='';
+              destSec.singerNote='';
               destSec.linked=false;
             };
             // 카운트다운 설정은 즉시 저장 필드라 가져오기에서도 바로 서버에 반영
@@ -1531,10 +1539,12 @@ class WebServer {
               if(!srcSong){showMsg('데이터 없음');return;}
               const dest=DATA.find(s=>s.song===targetSongName);
               if(!dest){showMsg('현재 세트리스트에 없는 곡');return;}
+              const matched=new Set();
               srcSong.sections.forEach(srcSec=>{
                 const destSec=dest.sections.find(s=>s.sec===srcSec.sec&&(s.occIdx??0)===(srcSec.occIdx??0));
-                if(destSec)mergeSec(destSec,srcSec);
+                if(destSec){mergeSec(destSec,srcSec);matched.add(destSec);}
               });
+              dest.sections.forEach(destSec=>{if(!matched.has(destSec))clearSec(destSec);});
               mergeCountdown(dest,srcSong);
               mergeDrumChart(targetSongName,srcSong);
               importedSongs.add(targetSongName);
@@ -1542,10 +1552,12 @@ class WebServer {
               importedData.forEach(importSong=>{
                 const dest=DATA.find(s=>s.song===importSong.song);
                 if(!dest)return;
+                const matched=new Set();
                 importSong.sections.forEach(srcSec=>{
                   const destSec=dest.sections.find(s=>s.sec===srcSec.sec&&(s.occIdx??0)===(srcSec.occIdx??0));
-                  if(destSec)mergeSec(destSec,srcSec);
+                  if(destSec){mergeSec(destSec,srcSec);matched.add(destSec);}
                 });
+                dest.sections.forEach(destSec=>{if(!matched.has(destSec))clearSec(destSec);});
                 mergeCountdown(dest,importSong);
                 mergeDrumChart(importSong.song,importSong);
                 importedSongs.add(importSong.song);

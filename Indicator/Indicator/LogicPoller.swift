@@ -599,9 +599,11 @@ class LogicPoller {
 
             var collected: [ScannedMarker] = []
             var seenKeys = Set<String>()
+            var rawTotalSeen = 0
 
             func harvest() {
                 for m in extractMarkersMTC(from: table) {
+                    rawTotalSeen += 1
                     let key = "\(m.name)_\(m.mtcSeconds)"
                     if seenKeys.insert(key).inserted { collected.append(m) }
                 }
@@ -610,10 +612,10 @@ class LogicPoller {
             if let sb = scrollBar {
                 var origRef: CFTypeRef?
                 AXUIElementCopyAttributeValue(sb, kAXValueAttribute as CFString, &origRef)
-                // 0.1 간격으로 촘촘하게 스크롤 (66개처럼 많은 경우 0.25로는 누락 발생)
-                for pos in stride(from: 0.0, through: 1.0, by: 0.1) {
+                // 0.03 간격으로 더 촘촘하게 스크롤 (0.1 간격 사이에 마커가 끼어 누락되는 사례 발견, 2026-09-12)
+                for pos in stride(from: 0.0, through: 1.0, by: 0.03) {
                     AXUIElementSetAttributeValue(sb, kAXValueAttribute as CFString, pos as CFTypeRef)
-                    Thread.sleep(forTimeInterval: 0.08)
+                    Thread.sleep(forTimeInterval: 0.06)
                     harvest()
                 }
                 // 1.0 확실히 포함 (마지막 마커 누락 방지)
@@ -627,7 +629,12 @@ class LogicPoller {
                 harvest()
             }
 
-            return collected.sorted { $0.mtcSeconds < $1.mtcSeconds }
+            let final = collected.sorted { $0.mtcSeconds < $1.mtcSeconds }
+            debugLog("[MarkerFinal] rawTotalSeen=\(rawTotalSeen) uniqueCount=\(final.count)")
+            for (i, m) in final.enumerated() {
+                debugLog("[MarkerFinal] \(i+1)/\(final.count) pos=\(m.mtcSeconds) name='\(m.name)'")
+            }
+            return final
         }
         return nil
     }
@@ -671,10 +678,16 @@ class LogicPoller {
             guard let nameChildren = axArray(of: cells[2], key: kAXChildrenAttribute),
                   let nameCell = nameChildren.first(where: {
                       (axString($0, key: kAXRoleAttribute) ?? "") == "AXCell"
-                  }) else { skipCount += 1; continue }
+                  }) else {
+                debugLog("[MarkerSkip] name AXCell 없음 pos=\(mtc) c2desc='\(axString(cells[2], key: kAXDescriptionAttribute) ?? "-")'")
+                skipCount += 1; continue
+            }
             let name = (axString(nameCell, key: kAXDescriptionAttribute) ?? "")
                 .trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty else { skipCount += 1; continue }
+            guard !name.isEmpty else {
+                debugLog("[MarkerSkip] 이름 비어있음 pos=\(mtc)")
+                skipCount += 1; continue
+            }
 
             markers.append(ScannedMarker(name: name, isSong: name.hasPrefix("#"), mtcSeconds: mtc, barHint: 0))
         }
