@@ -279,6 +279,25 @@ class WebServer {
         if let marker = (getMarkers?() ?? []).first(where: { $0.isSong && $0.displayName == song }),
            let sbp = ScheduleStore.shared.barPositionAt(mtcSeconds: marker.mtcSeconds) {
             obj["startBarPosition"] = sbp
+            // 스캔한 박자표 변화(예: 4/4 곡 중간의 2/4 마디)를 곡 시작 기준 마디 번호(0부터)로 내려준다 —
+            // /chart가 "스캔 박자표 적용"에 쓴다. 다음 #Song 마커 이후의 변화는 다른 곡이라 제외.
+            let nextSongBar = (getMarkers?() ?? [])
+                .filter { $0.isSong && $0.mtcSeconds > marker.mtcSeconds }
+                .compactMap { ScheduleStore.shared.barPositionAt(mtcSeconds: $0.mtcSeconds) }
+                .min() ?? Double.greatestFiniteMagnitude
+            var tsMap: [[String: Any]] = []
+            for ts in (ScheduleStore.shared.current?.timeSigs ?? []).sorted(by: { $0.mtcSeconds < $1.mtcSeconds }) {
+                guard let bp = ScheduleStore.shared.barPositionAt(mtcSeconds: ts.mtcSeconds) else { continue }
+                let idx = Int((bp - sbp).rounded())
+                if bp >= nextSongBar - 0.01 { continue }
+                tsMap.append(["bar": max(0, idx), "num": ts.numerator, "den": ts.denominator])
+            }
+            // 곡 시작 시점에 적용되는 박자표(곡 시작 전에 선언된 것)가 없으면 시작 위치 값을 보충
+            if tsMap.first.map({ ($0["bar"] as? Int ?? 0) > 0 }) ?? true,
+               let base = ScheduleStore.shared.beatsPerBarAt(mtcSeconds: marker.mtcSeconds) {
+                tsMap.insert(["bar": 0, "num": base.beatsPerBar, "den": base.beatUnit], at: 0)
+            }
+            obj["timeSigMap"] = tsMap
         }
         let data = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
         send(conn, body: data, contentType: "application/json; charset=utf-8")

@@ -1139,6 +1139,7 @@
          옴. 파일 다운로드 없이 곧바로 그 곡의 서버 저장분(DrumChartStore)에 덮어쓴다.
          기존 "저장"(파일로 내려받기)은 그대로 둠 — 사용자가 개인 관리 폴더에도 따로
          보관한다고 해서 둘 다 필요(2026-09-06). -->
+    <button id="scanTsBtn" class="btn sm" style="display:none" title="로직에서 스캔한 박자표 변화(예: 4/4 곡 중간의 2/4 마디)를 이 채보의 마디에 반영">스캔 박자표 적용</button>
     <button id="serverSaveBtn" class="btn ink sm" style="display:none">서버에 저장</button>
     <input type="file" id="fileInput" accept=".json,application/json" hidden="">
   </div>
@@ -5707,11 +5708,47 @@ setMode('drum');   // 첫 화면을 그리드 대신 리얼드럼으로 (2026-09
    예배 당일 통합 클릭 프로젝트를 재생 중일 때 개별 곡 로직 파일을 따로 열어야 했던
    번거로움을 없애기 위한 것. */
 let linkedSongName = null;
+let scanTsMap = null;   // /api/drumChart의 timeSigMap — [{bar(0부터), num, den}]
+function applyScanTs(silent){
+  if(!scanTsMap || !scanTsMap.length){
+    if(!silent) toast('스캔된 박자표 정보가 없어요. 인디케이터에서 스캔을 먼저 해주세요.');
+    return;
+  }
+  const need = Math.max(measures.length, scanTsMap[scanTsMap.length-1].bar + 1);
+  const want = [];
+  let ci = 0;
+  for(let i=0;i<need;i++){
+    while(ci+1 < scanTsMap.length && scanTsMap[ci+1].bar <= i) ci++;
+    want.push(normTs([scanTsMap[ci].num, scanTsMap[ci].den]));
+  }
+  let changing = 0, losing = 0;
+  for(let i=0;i<need;i++){
+    const m = measures[i];
+    const cur = m ? normTs(m.ts) : null;
+    if(!cur || cur[0]!==want[i][0] || cur[1]!==want[i][1]){
+      changing++;
+      if(m && measureHasNotes(m)) losing++;
+    }
+  }
+  if(!changing){ if(!silent) toast('이미 스캔한 박자표와 같아요.'); return; }
+  if(!silent && losing && !confirm(`스캔한 박자표로 맞추면 ${losing}개 마디의 음표가 지워집니다.\n계속할까요? (되돌리기 가능)`)) return;
+  for(let i=0;i<need;i++){
+    const m = measures[i];
+    const cur = m ? normTs(m.ts) : null;
+    if(!cur || cur[0]!==want[i][0] || cur[1]!==want[i][1]) measures[i] = emptyMeasure(null, want[i]);
+  }
+  refreshAll(); syncTotalM(); commit();
+  if(!silent) toast(`스캔한 박자표를 ${changing}개 마디에 반영했어요.`);
+}
+document.getElementById('scanTsBtn').onclick = ()=> applyScanTs(false);
 function initLinkedSong(song){
   fetch('/api/drumChart?song='+encodeURIComponent(song)).then(r=>r.json()).then(d=>{
     linkedSongName = song;
     const btn = document.getElementById('serverSaveBtn');
     if(btn) btn.style.display = '';
+    scanTsMap = Array.isArray(d.timeSigMap) ? d.timeSigMap : null;
+    const tsBtn = document.getElementById('scanTsBtn');
+    if(tsBtn) tsBtn.style.display = '';
     if(STORAGE_OK && lib.cur) newSong();   // 파일 열기와 같은 원칙 — 지금 곡을 덮어쓰지 않고 새로 들어온다
     if(looksLikeScore(d)){
       measures = normalizeMeasures(d.measures);
@@ -5719,6 +5756,7 @@ function initLinkedSong(song){
       toast(`"${song}" 곡의 서버 저장분을 불러왔습니다.`);
     } else {
       blankDoc();
+      applyScanTs(true);   // 새 채보면 스캔한 변박(2/4 등)을 처음부터 깔아둔다
       toast(`"${song}" 곡에는 아직 업로드된 채보가 없어요 — 새로 만들어서 "서버에 저장"을 눌러주세요.`);
     }
     selMeasure = 0; selEnd = 0; cursorB = 0; cursorK = 0;

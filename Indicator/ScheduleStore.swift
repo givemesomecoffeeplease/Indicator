@@ -117,7 +117,8 @@ class ScheduleStore {
             bars += (b - cursor) * t.bpm / 60.0 / bpb
             cursor = b
         }
-        let bpbLast = Double(beatsPerBarAt(mtcSeconds: mtcSeconds)?.beatsPerBar ?? 4)
+        // 마지막 구간의 박자표는 그 구간이 '시작될 때'(cursor) 것 — 변경 지점 정확히 위에서 질의해도 새 박자표로 튀지 않게
+        let bpbLast = Double(beatsPerBarAt(mtcSeconds: cursor)?.beatsPerBar ?? 4)
         bars += (mtcSeconds - cursor) * t.bpm / 60.0 / bpbLast
         return t.barPosition + bars
     }
