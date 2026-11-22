@@ -391,6 +391,9 @@ let seekStartedAt = 0, seekLatency = 0.5, lastSeekDoneAt = 0;
 vid.addEventListener('seeked', ()=>{
   seekLatency = Math.min(2.5, Math.max(0.1, (performance.now() - seekStartedAt)/1000));
   lastSeekDoneAt = performance.now();
+  // 이동 중에 도착한 최신 위치는 seekTo가 버린다 — 정지 상태에선 그 뒤로 새 메시지가 없어 영상이
+  // 엉뚱한 곳에 남으므로, 이동이 끝나는 순간 가장 최근 위치로 한 번 더 맞춘다.
+  if(lastSt) setTimeout(()=>syncVideo(lastSt), 0);
 });
 function seekTo(t, lead){
   if(vid.seeking) return;
