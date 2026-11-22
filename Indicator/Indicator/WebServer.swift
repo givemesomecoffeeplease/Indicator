@@ -92,16 +92,20 @@ class WebServer {
                 return 0
             }()
 
+            let rangeHeader: String? = headerStr.components(separatedBy: "\r\n")
+                .first(where: { $0.lowercased().hasPrefix("range:") })
+                .map { String($0.dropFirst("range:".count)).trimmingCharacters(in: .whitespaces) }
+
             let alreadyHave = bodyData.count
             if method == "POST", contentLength > alreadyHave {
                 // 남은 바디 추가 수신
                 let remaining = contentLength - alreadyHave
                 var accumulated = Data(bodyData)
                 self.receiveRemaining(conn, accumulated: accumulated, remaining: remaining) { fullBody in
-                    self.dispatch(conn, method: method, path: path, body: fullBody)
+                    self.dispatch(conn, method: method, path: path, body: fullBody, range: rangeHeader)
                 }
             } else {
-                self.dispatch(conn, method: method, path: path, body: Data(bodyData))
+                self.dispatch(conn, method: method, path: path, body: Data(bodyData), range: rangeHeader)
             }
         }
     }
@@ -120,7 +124,7 @@ class WebServer {
         }
     }
 
-    private func dispatch(_ conn: NWConnection, method: String, path: String, body: Data) {
+    private func dispatch(_ conn: NWConnection, method: String, path: String, body: Data, range: String? = nil) {
         switch (method, path) {
         case ("GET", "/events"):                      handleSSE(conn)
         case ("GET", "/band"):                        handleBand(conn)
@@ -136,6 +140,9 @@ class WebServer {
         case ("GET", "/api/sections"):                handleSections(conn)
         case _ where method == "GET" && path.hasPrefix("/api/drumChart"): handleGetDrumChart(conn, path: path)
         case ("POST", "/save-drum-chart"):            handleSaveDrumChart(conn, body: body)
+        case _ where method == "GET" && path.hasPrefix("/api/videoMeta"): handleVideoMeta(conn, path: path)
+        case _ where method == "GET" && path.hasPrefix("/api/video?"):    handleVideo(conn, path: path, range: range)
+        case ("POST", "/save-video-offset"):          handleSaveVideoOffset(conn, body: body)
         case ("GET", "/edit"):                        handleEdit(conn)
         case ("POST", "/save"):                       handleSave(conn, body: body)
         case ("POST", "/save-song-meta"):             handleSaveSongMeta(conn, body: body)
@@ -301,6 +308,105 @@ class WebServer {
         }
         let data = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
         send(conn, body: data, contentType: "application/json; charset=utf-8")
+    }
+
+    // MARK: - /api/video, /api/videoMeta, /save-video-offset
+    // 드럼 영상은 복사하지 않고 연결된 원본 파일을 그 자리에서 내려준다. 등록된 곡의 파일만
+    // 서빙하고 요청이 경로를 직접 지정할 수는 없다(서버에 인증이 없어서 임의 파일 읽기를 막기 위함).
+
+    private func videoMime(_ path: String) -> String {
+        switch (path as NSString).pathExtension.lowercased() {
+        case "mov": return "video/quicktime"
+        case "webm": return "video/webm"
+        default: return "video/mp4"
+        }
+    }
+
+    private func sendStatus(_ conn: NWConnection, _ line: String) {
+        let h = "HTTP/1.1 \(line)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        conn.send(content: h.data(using: .utf8), completion: .contentProcessed { _ in conn.cancel() })
+    }
+
+    private func handleVideoMeta(_ conn: NWConnection, path: String) {
+        var obj: [String: Any] = ["linked": false, "exists": false]
+        if let song = queryParam(path, "song"), !song.isEmpty, let e = VideoStore.shared.get(song: song) {
+            obj["linked"] = true
+            obj["exists"] = FileManager.default.isReadableFile(atPath: e.path)
+            obj["name"] = (e.path as NSString).lastPathComponent
+            obj["offset"] = e.offset
+            if let m = (getMarkers?() ?? []).first(where: { $0.isSong && $0.displayName == song }) {
+                obj["songStartMtc"] = m.mtcSeconds
+            }
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
+        send(conn, body: data, contentType: "application/json; charset=utf-8")
+    }
+
+    private func handleSaveVideoOffset(_ conn: NWConnection, body: Data) {
+        if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+           let song = obj["song"] as? String, let off = (obj["offset"] as? NSNumber)?.doubleValue,
+           VideoStore.shared.setOffset(song: song, offset: off) {
+            notifyVideoUpdated(song: song)
+            send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")
+        } else {
+            send(conn, body: Data("{\"ok\":false}".utf8), contentType: "application/json")
+        }
+    }
+
+    /// 연결·시작점이 바뀌면 열려 있는 /drum이 새로고침 없이 다시 읽도록 알린다.
+    func notifyVideoUpdated(song: String) {
+        if let payload = try? JSONSerialization.data(withJSONObject: ["song": song]),
+           let json = String(data: payload, encoding: .utf8) {
+            broadcaster.send("event: video-updated\ndata: \(json)\n\n")
+        }
+    }
+
+    private func handleVideo(_ conn: NWConnection, path: String, range: String?) {
+        guard let song = queryParam(path, "song"), let entry = VideoStore.shared.get(song: song),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: entry.path),
+              let size = (attrs[.size] as? NSNumber)?.int64Value, size > 0,
+              let fh = FileHandle(forReadingAtPath: entry.path) else {
+            sendStatus(conn, "404 Not Found"); return
+        }
+        var start: Int64 = 0
+        var end: Int64 = size - 1
+        var partial = false
+        if let r = range, r.lowercased().hasPrefix("bytes=") {
+            let spec = r.dropFirst("bytes=".count).split(separator: ",").first.map(String.init) ?? ""
+            let p = spec.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            if p.count == 2 {
+                if p[0].isEmpty, let n = Int64(p[1]), n > 0 { start = max(0, size - n) }
+                else if let a = Int64(p[0]) { start = a; if let b = Int64(p[1]) { end = min(b, size - 1) } }
+                partial = true
+            }
+        }
+        if start > end || start >= size {
+            fh.closeFile()
+            let h = "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */\(size)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            conn.send(content: h.data(using: .utf8), completion: .contentProcessed { _ in conn.cancel() })
+            return
+        }
+        let length = end - start + 1
+        var header = "HTTP/1.1 \(partial ? "206 Partial Content" : "200 OK")\r\nContent-Type: \(videoMime(entry.path))\r\nAccept-Ranges: bytes\r\nCache-Control: no-store\r\nContent-Length: \(length)\r\nConnection: close\r\n"
+        if partial { header += "Content-Range: bytes \(start)-\(end)/\(size)\r\n" }
+        header += "\r\n"
+        fh.seek(toFileOffset: UInt64(start))
+
+        // 큰 파일을 통째로 메모리에 올리지 않고 조각(256KB)씩 보낸다 — 브라우저가 탐색하며 연결을
+        // 끊으면 전송 오류로 여기서 파일을 닫고 끝낸다.
+        func pump(_ remaining: Int64) {
+            if remaining <= 0 { fh.closeFile(); conn.cancel(); return }
+            let chunk = fh.readData(ofLength: Int(min(remaining, 262_144)))
+            if chunk.isEmpty { fh.closeFile(); conn.cancel(); return }
+            conn.send(content: chunk, completion: .contentProcessed { err in
+                if err != nil { fh.closeFile(); conn.cancel(); return }
+                pump(remaining - Int64(chunk.count))
+            })
+        }
+        conn.send(content: header.data(using: .utf8), completion: .contentProcessed { err in
+            if err != nil { fh.closeFile(); conn.cancel(); return }
+            pump(length)
+        })
     }
 
     private func handleSaveDrumChart(_ conn: NWConnection, body: Data) {

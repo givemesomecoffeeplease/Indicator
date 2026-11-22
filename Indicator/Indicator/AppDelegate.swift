@@ -226,6 +226,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let chartItem = NSMenuItem(title: "드럼 스코어 편집 열기", action: #selector(openEditPage), keyEquivalent: "")
         chartItem.representedObject = "http://\(ip):8888/chart"
         menu.addItem(chartItem)
+        menu.addItem(NSMenuItem(title: "드럼 영상 연결…", action: #selector(linkDrumVideos), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "AX 트리 덤프 (디버그)", action: #selector(dumpAXTree), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "로그 파일 열기", action: #selector(openLogFile), keyEquivalent: ""))
@@ -363,6 +364,64 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+
+    // 드럼 영상 연결 — 파일을 복사하지 않고 경로만 곡 이름에 묶는다(영상은 예배 당일 클릭
+    // 프로젝트 폴더에 그대로 둠). 브라우저 드롭은 보안상 경로를 못 받아서 메뉴바 앱의 파일
+    // 선택창을 쓴다. 파일 이름에 곡 이름이 들어 있으면 자동으로 짝지어 주고, 못 맞춘 파일만
+    // 하나씩 곡을 골라 연결한다.
+    @objc private func linkDrumVideos() {
+        NSApp.activate(ignoringOtherApps: true)
+        var songs = Set((webServer.getMarkers?() ?? []).filter { $0.isSong }.map { $0.displayName })
+        songs.formUnion(LyricsStore.shared.songNames())
+        let songList = songs.sorted()
+        guard !songList.isEmpty else {
+            let a = NSAlert(); a.messageText = "연결할 곡이 없어요"
+            a.informativeText = "로직에서 스캔을 먼저 하거나 /edit에 곡이 보이는 상태에서 다시 시도해 주세요."
+            a.runModal(); return
+        }
+        let panel = NSOpenPanel()
+        panel.title = "드럼 영상 선택 (여러 개 선택 가능)"
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie]
+        guard panel.runModal() == .OK else { return }
+
+        func norm(_ s: String) -> String { String(s.lowercased().filter { $0.isLetter || $0.isNumber }) }
+        var linked: [String] = []
+        for url in panel.urls {
+            let stem = norm(url.deletingPathExtension().lastPathComponent)
+            var best: String? = nil
+            if stem.count >= 2 {
+                for song in songList {
+                    let n = norm(song)
+                    if n.isEmpty { continue }
+                    if stem.contains(n) || n.contains(stem) {
+                        if best == nil || n.count > norm(best!).count { best = song }
+                    }
+                }
+            }
+            var chosen = best
+            if chosen == nil {
+                let alert = NSAlert()
+                alert.messageText = "'\(url.lastPathComponent)'은(는) 어느 곡 영상인가요?"
+                alert.informativeText = "파일 이름으로 곡을 찾지 못했어요."
+                let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26))
+                popup.addItems(withTitles: songList)
+                alert.accessoryView = popup
+                alert.addButton(withTitle: "연결")
+                alert.addButton(withTitle: "건너뛰기")
+                if alert.runModal() == .alertFirstButtonReturn { chosen = popup.titleOfSelectedItem }
+            }
+            guard let song = chosen else { continue }
+            VideoStore.shared.link(song: song, path: url.path)
+            webServer.notifyVideoUpdated(song: song)
+            linked.append("\(song)  ←  \(url.lastPathComponent)")
+        }
+        let done = NSAlert()
+        done.messageText = linked.isEmpty ? "연결된 영상이 없어요" : "\(linked.count)개 연결했어요"
+        done.informativeText = linked.isEmpty ? "" : linked.joined(separator: "\n") + "\n\n시작점은 /drum 화면의 ⚙ 버튼에서 맞춰 주세요."
+        done.runModal()
+    }
 
     @objc private func refreshMarkers() {
         logicPoller.refreshMarkers()

@@ -27,3 +27,57 @@ class DrumChartStore {
         Array(charts.keys).sorted()
     }
 }
+
+// 드럼 영상 — 파일을 복사하지 않고 "경로"와 "시작점(영상 몇 초가 곡 1박인지)"만 곡 이름으로 보관한다.
+// 영상은 예배 당일 클릭 프로젝트 폴더에 이미 있는 파일을 그대로 쓰고(용량·복사 없음), 경로·시작점은
+// 앱을 껐다 켜도 남도록 디스크에 저장한다(채보와 달리 영상은 매번 다시 연결하기 번거로워서).
+class VideoStore {
+    static let shared = VideoStore()
+
+    struct Entry: Codable {
+        var path: String
+        var offset: Double
+    }
+
+    private var entries: [String: Entry] = [:]
+    private let lock = NSLock()
+
+    private var saveURL: URL? {
+        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let folder = dir.appendingPathComponent("Indicator")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("drum_videos.json")
+    }
+
+    init() {
+        guard let url = saveURL, let raw = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([String: Entry].self, from: raw) else { return }
+        entries = decoded
+    }
+
+    private func persist() {
+        guard let url = saveURL, let data = try? JSONEncoder().encode(entries) else { return }
+        try? data.write(to: url)
+    }
+
+    func get(song: String) -> Entry? {
+        lock.lock(); defer { lock.unlock() }
+        return entries[song]
+    }
+
+    // 같은 곡에 다시 연결하면 경로만 바꾸고 시작점은 그대로 둔다(같은 영상을 다시 받은 경우가 대부분)
+    func link(song: String, path: String) {
+        lock.lock(); defer { lock.unlock() }
+        entries[song] = Entry(path: path, offset: entries[song]?.offset ?? 0)
+        persist()
+    }
+
+    func setOffset(song: String, offset: Double) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard var e = entries[song], offset.isFinite else { return false }
+        e.offset = offset
+        entries[song] = e
+        persist()
+        return true
+    }
+}

@@ -35,12 +35,49 @@
   .songDivider{margin:30px 0 10px;padding-top:18px;border-top:2px dashed #d8d4c8;
     font-size:15px;font-weight:800;color:#3a3730;letter-spacing:.02em}
   #noLink{flex:1;display:flex;align-items:center;justify-content:center;color:#666;font-size:13px;padding:24px;text-align:center;background:#14141a}
+  /* 드럼 영상 보기 — 곡에 영상이 연결돼 있으면 악보 대신 영상을 보여준다(2026-11-22).
+     영상 위엔 컨트롤 막대를 안 둔다(공연 중 화면을 가리지 않게) — 구석의 옅은 버튼 둘뿐. */
+  #videoWrap{flex:1;display:none;position:relative;background:#000;min-height:0}
+  #vid{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+  .vbtn{position:absolute;z-index:5;border:none;border-radius:8px;background:rgba(255,255,255,.14);color:#fff;
+    font-size:13px;padding:7px 11px;opacity:.28;cursor:pointer}
+  .vbtn:hover,.vbtn:active{opacity:.9}
+  #viewToggle{top:10px;right:10px}
+  #offsetBtn{bottom:10px;right:10px}
+  #offsetPanel{position:absolute;z-index:6;left:12px;right:12px;bottom:52px;max-width:560px;margin-left:auto;
+    background:rgba(20,20,26,.94);color:#eee;border-radius:12px;padding:12px 14px;display:none;font-size:13px}
+  #offsetPanel .row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px}
+  #offsetPanel button{border:none;border-radius:7px;background:#2c2c38;color:#eee;padding:6px 10px;font-size:13px;cursor:pointer}
+  #offsetPanel button.main{background:#5dcaa5;color:#14141a;font-weight:700}
+  #offsetPanel input[type=range]{flex:1;min-width:140px}
+  #offsetMsg{color:#f0b26a;margin-top:6px;min-height:16px}
 </style>
 </head>
 <body>
 
 <div id="scoreWrap"><div id="lines"></div></div>
 <div id="noLink" style="display:none"></div>
+<div id="videoWrap">
+  <video id="vid" muted playsinline preload="auto"></video>
+  <button id="viewToggle" class="vbtn">악보</button>
+  <button id="offsetBtn" class="vbtn">⚙</button>
+  <div id="offsetPanel">
+    <div>시작점 <b id="offsetVal">0.00</b>초 <span style="color:#999">(영상의 이 시각이 곡 1박)</span></div>
+    <div class="row">
+      <button data-n="-1">−1초</button><button data-n="-0.1">−0.1</button>
+      <button data-n="0.1">+0.1</button><button data-n="1">+1초</button>
+      <label style="margin-left:6px"><input type="checkbox" id="followChk" checked> 로직 따라가기</label>
+    </div>
+    <div class="row" id="manualRow" style="display:none">
+      <input type="range" id="scrub" min="0" max="1" step="0.01" value="0">
+      <button data-s="-0.1">◀ 0.1</button><button data-s="0.1">0.1 ▶</button>
+    </div>
+    <div class="row" id="setRow" style="display:none">
+      <button class="main" id="setHere">지금 영상 위치 = 로직 현재 위치</button>
+    </div>
+    <div id="offsetMsg"></div>
+  </div>
+</div>
 
 <script src="/notation.js"></script>
 <script>
@@ -53,10 +90,12 @@ function showEmpty(msg){
   scoreWrapEl.style.display = 'none';
   noLinkEl.style.display = 'flex';
   noLinkEl.textContent = msg;
+  applyViewMode();
 }
 function showScore(){
   scoreWrapEl.style.display = '';
   noLinkEl.style.display = 'none';
+  applyViewMode();
 }
 
 // 곡 하나의 채보(/api/drumChart) + 섹션 목록(/api/sections)을 받아와 렌더링 가능한 형태로
@@ -211,6 +250,10 @@ function applyState(st){
   const songName = st.currentSongIndex >= 0 ? songs[st.currentSongIndex] : null;
   const upcomingName = st.currentSongIndex >= 0 ? songs[st.currentSongIndex + 1] : null;
 
+  lastSt = st;
+  if(songName && songName !== videoSong) loadVideoMeta(songName);
+  syncVideo(st);
+
   if(!songName){
     if(renderedSongs.length === 0) showEmpty('곡 재생을 기다리는 중…');
     return;
@@ -282,6 +325,145 @@ function refreshSongIfShown(songName){
   });
 }
 
+// ── 드럼 영상 ──────────────────────────────────────────────
+// 영상 시간 = (로직 현재 위치 − 곡 시작 마커) + 시작점. 시작점은 곡마다 한 번 맞춰 서버에 저장.
+// 시간 기준이라 곡 중간에 템포가 바뀌어도 어긋나지 않는다.
+const vidWrapEl = document.getElementById('videoWrap');
+const vid = document.getElementById('vid');
+const offsetPanel = document.getElementById('offsetPanel');
+let videoMeta = null;          // {song, offset, songStartMtc} — 영상이 있는 곡일 때만
+let videoSong = null;          // 지금 메타를 조회한/조회 중인 곡
+let viewMode = 'video';
+try{ viewMode = localStorage.getItem('drumViewMode') || 'video'; }catch(e){}
+let manualMode = false;
+let lastSt = null;
+
+function videoActive(){ return !!videoMeta && viewMode === 'video'; }
+function applyViewMode(){
+  const on = videoActive();
+  vidWrapEl.style.display = on ? 'flex' : 'none';
+  if(on){ scoreWrapEl.style.display = 'none'; noLinkEl.style.display = 'none'; }
+  const t = document.getElementById('viewToggle');
+  t.style.display = videoMeta ? '' : 'none';
+  t.textContent = viewMode === 'video' ? '악보' : '영상';
+  if(!on){ try{ vid.pause(); }catch(e){} offsetPanel.style.display = 'none'; }
+}
+document.getElementById('viewToggle').onclick = ()=>{
+  viewMode = viewMode === 'video' ? 'score' : 'video';
+  try{ localStorage.setItem('drumViewMode', viewMode); }catch(e){}
+  applyViewMode();
+  if(viewMode === 'score'){
+    if(songDataReady) showScore();
+    else { scoreWrapEl.style.display = 'none'; noLinkEl.style.display = 'flex'; }
+  }
+};
+
+function loadVideoMeta(songName){
+  videoSong = songName;
+  fetch('/api/videoMeta?song='+encodeURIComponent(songName)).then(r=>r.json()).then(m=>{
+    if(videoSong !== songName) return;
+    if(m && m.linked && m.exists){
+      const changed = !videoMeta || videoMeta.song !== songName;
+      const keepLocal = videoMeta && videoMeta.song === songName && (savingOffset || pendingOffset);   // 저장 중인 값을 서버의 옛 값으로 되돌리지 않는다
+      videoMeta = {song: songName, offset: keepLocal ? videoMeta.offset : (+m.offset || 0), songStartMtc: (typeof m.songStartMtc === 'number') ? m.songStartMtc : null};
+      document.getElementById('offsetVal').textContent = videoMeta.offset.toFixed(2);
+      if(changed){ vid.src = '/api/video?song='+encodeURIComponent(songName); vid.load(); }
+    } else {
+      videoMeta = null;
+      try{ vid.pause(); vid.removeAttribute('src'); vid.load(); }catch(e){}
+    }
+    applyViewMode();
+    if(lastSt) syncVideo(lastSt);
+  }).catch(()=>{});
+}
+
+function songElapsed(st){
+  if(!videoMeta || videoMeta.songStartMtc === null || typeof st.mtcSeconds !== 'number') return null;
+  return st.mtcSeconds - videoMeta.songStartMtc;
+}
+function seekTo(t){ if(!vid.seeking){ try{ vid.currentTime = Math.max(0, t); }catch(e){} } }
+
+function syncVideo(st){
+  if(!videoActive() || manualMode) return;
+  const el = songElapsed(st);
+  if(el === null) return;
+  let target = el + videoMeta.offset;
+  const dur = vid.duration;
+  if(target < 0){                       // 곡 시작 전 — 영상 첫 프레임에서 대기
+    if(!vid.paused) vid.pause();
+    if(vid.currentTime > 0.05) seekTo(0);
+    return;
+  }
+  if(isFinite(dur) && target >= dur - 0.05){   // 영상보다 곡이 길면 마지막 프레임에서 멈춤
+    if(!vid.paused) vid.pause();
+    seekTo(Math.max(0, dur - 0.05));
+    return;
+  }
+  if(st.isPlaying){
+    if(vid.paused){ seekTo(target); vid.play().catch(()=>{}); }
+    else if(Math.abs(vid.currentTime - target) > 0.3) seekTo(target);   // 자잘한 오차는 건드리지 않아야 끊기지 않는다
+  } else {
+    if(!vid.paused) vid.pause();
+    if(Math.abs(vid.currentTime - target) > 0.05) seekTo(target);
+  }
+}
+
+// ⚙ 시작점 패널
+const offsetMsg = document.getElementById('offsetMsg');
+function saveOffset(v){
+  if(!videoMeta) return;
+  if(isFinite(vid.duration) && v > vid.duration){ offsetMsg.textContent = '시작점이 영상 길이를 넘어요.'; return false; }
+  offsetMsg.textContent = '';
+  videoMeta.offset = v;
+  document.getElementById('offsetVal').textContent = v.toFixed(2);
+  pendingOffset = {song: videoMeta.song, offset: v};
+  flushOffset();
+  if(lastSt) syncVideo(lastSt);
+  return true;
+}
+// 빠르게 여러 번 눌러도 저장 요청이 순서가 뒤바뀌어 도착하지 않도록 한 번에 하나씩, 최신 값만 보낸다.
+let savingOffset = false, pendingOffset = null;
+function flushOffset(){
+  if(savingOffset || !pendingOffset) return;
+  savingOffset = true;
+  const body = JSON.stringify(pendingOffset); pendingOffset = null;
+  fetch('/save-video-offset',{method:'POST',headers:{'Content-Type':'application/json'},body})
+    .catch(()=>{ offsetMsg.textContent = '저장 실패'; })
+    .finally(()=>{ savingOffset = false; flushOffset(); });
+}
+document.getElementById('offsetBtn').onclick = ()=>{
+  offsetPanel.style.display = offsetPanel.style.display === 'block' ? 'none' : 'block';
+};
+offsetPanel.querySelectorAll('button[data-n]').forEach(b=>{
+  b.onclick = ()=>{ if(videoMeta) saveOffset(Math.round((videoMeta.offset + parseFloat(b.dataset.n))*100)/100); };
+});
+document.getElementById('followChk').onchange = e=>{
+  manualMode = !e.target.checked;
+  document.getElementById('manualRow').style.display = manualMode ? 'flex' : 'none';
+  document.getElementById('setRow').style.display = manualMode ? 'flex' : 'none';
+  if(manualMode){
+    vid.pause();
+    const sc = document.getElementById('scrub');
+    sc.max = isFinite(vid.duration) ? vid.duration : 1; sc.value = vid.currentTime;
+  } else if(lastSt) syncVideo(lastSt);
+};
+document.getElementById('scrub').oninput = e=>{ seekTo(parseFloat(e.target.value)); };
+offsetPanel.querySelectorAll('button[data-s]').forEach(b=>{
+  b.onclick = ()=>{
+    seekTo(vid.currentTime + parseFloat(b.dataset.s));
+    document.getElementById('scrub').value = vid.currentTime + parseFloat(b.dataset.s);
+  };
+});
+document.getElementById('setHere').onclick = ()=>{
+  const el = lastSt ? songElapsed(lastSt) : null;
+  if(el === null){ offsetMsg.textContent = '로직 위치/곡 시작을 아직 몰라요. 로직에서 곡을 위치시켜 주세요.'; return; }
+  const v = Math.round((vid.currentTime - el)*100)/100;
+  if(saveOffset(v)){
+    document.getElementById('followChk').checked = true;
+    document.getElementById('followChk').onchange({target:{checked:true}});
+  }
+};
+
 showEmpty('곡 재생을 기다리는 중…');
 // index.html/singer.html과 동일한 재연결 패턴 — 브라우저 기본 EventSource 자동 재연결만
 // 믿었더니, 화면을 오래 켜둬서(백그라운드 탭·절전 등) 연결이 조용히 끊긴 뒤 다시 안 살아나
@@ -313,6 +495,11 @@ showEmpty('곡 재생을 기다리는 중…');
       lastMsgAt = Date.now();
       let d; try{ d = JSON.parse(e.data); }catch(err){ return; }
       if(d && typeof d.song === 'string') refreshSongIfShown(d.song);
+    });
+    es.addEventListener('video-updated', e=>{
+      lastMsgAt = Date.now();
+      let d; try{ d = JSON.parse(e.data); }catch(err){ return; }
+      if(d && d.song === videoSong) loadVideoMeta(d.song);
     });
     es.onerror = ()=>{
       es.close();
