@@ -381,30 +381,64 @@ function songElapsed(st){
   if(!videoMeta || videoMeta.songStartMtc === null || typeof st.mtcSeconds !== 'number') return null;
   return st.mtcSeconds - videoMeta.songStartMtc;
 }
-function seekTo(t){ if(!vid.seeking){ try{ vid.currentTime = Math.max(0, t); }catch(e){} } }
+// 되감기(seek)는 비싸다 — 긴 키프레임 간격(예: 8초, 5K 해상도)이면 한 번에 0.5초 안팎이 걸린다. 오차가
+// 조금만 나도 되감으면 되감는 동안 로직은 계속 흘러서 끝나자마자 또 뒤처져 다시 되감는 악순환이
+// 되고 영상이 끊긴다(2026-11-22, 55번/15초 되감기로 확인). 그래서:
+//  · 작은 오차는 되감지 않고 재생 속도를 살짝 올리거나 내려서 따라잡고,
+//  · 큰 오차일 때만 되감되 그 사이 흐를 시간(직전 되감기에 실제로 걸린 시간)만큼 앞질러 가고,
+//  · 되감은 직후엔 잠시 다시 되감지 않는다.
+let seekStartedAt = 0, seekLatency = 0.5, lastSeekDoneAt = 0;
+vid.addEventListener('seeked', ()=>{
+  seekLatency = Math.min(2.5, Math.max(0.1, (performance.now() - seekStartedAt)/1000));
+  lastSeekDoneAt = performance.now();
+});
+function seekTo(t, lead){
+  if(vid.seeking) return;
+  seekStartedAt = performance.now();
+  try{ vid.currentTime = Math.max(0, t + (lead||0)); }catch(e){}
+}
+function setRate(r){ if(vid.playbackRate !== r) vid.playbackRate = r; }
+const HARD_SEEK_SEC = 1.0;     // 이보다 크게 어긋났을 때만 되감는다
+const SOFT_SYNC_SEC = 0.12;    // 이보다 작으면 그대로 둔다(그 사이는 속도 조절)
 
 function syncVideo(st){
   if(!videoActive() || manualMode) return;
   const el = songElapsed(st);
   if(el === null) return;
-  let target = el + videoMeta.offset;
+  const target = el + videoMeta.offset;
   const dur = vid.duration;
   if(target < 0){                       // 곡 시작 전 — 영상 첫 프레임에서 대기
     if(!vid.paused) vid.pause();
+    setRate(1);
     if(vid.currentTime > 0.05) seekTo(0);
     return;
   }
   if(isFinite(dur) && target >= dur - 0.05){   // 영상보다 곡이 길면 마지막 프레임에서 멈춤
     if(!vid.paused) vid.pause();
+    setRate(1);
     seekTo(Math.max(0, dur - 0.05));
     return;
   }
+  const diff = vid.currentTime - target;        // +면 영상이 앞섬, −면 뒤처짐
   if(st.isPlaying){
-    if(vid.paused){ seekTo(target); vid.play().catch(()=>{}); }
-    else if(Math.abs(vid.currentTime - target) > 0.3) seekTo(target);   // 자잘한 오차는 건드리지 않아야 끊기지 않는다
+    if(vid.paused){
+      // 정지 중에 이미 그 자리에 세워 둬서 보통은 되감을 필요 없이 그냥 재생하면 된다
+      if(Math.abs(diff) > 0.3) seekTo(target, seekLatency);
+      setRate(1);
+      vid.play().catch(()=>{});
+    } else if(vid.seeking){
+      return;
+    } else if(Math.abs(diff) > HARD_SEEK_SEC && performance.now() - lastSeekDoneAt > 1500){
+      seekTo(target, seekLatency);
+    } else if(Math.abs(diff) > SOFT_SYNC_SEC){
+      setRate(diff < 0 ? 1.08 : 0.92);
+    } else {
+      setRate(1);
+    }
   } else {
     if(!vid.paused) vid.pause();
-    if(Math.abs(vid.currentTime - target) > 0.05) seekTo(target);
+    setRate(1);
+    if(Math.abs(diff) > 0.1) seekTo(target);
   }
 }
 
