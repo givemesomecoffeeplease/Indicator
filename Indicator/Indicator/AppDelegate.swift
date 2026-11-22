@@ -122,6 +122,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webServer.saveDrumChart = { song, json in
             DrumChartStore.shared.set(song: song, json: json)
         }
+        webServer.pickVideo = { [weak self] song, done in
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                let panel = NSOpenPanel()
+                panel.title = "'\(song)' 드럼 영상 선택"
+                panel.allowsMultipleSelection = false
+                panel.canChooseDirectories = false
+                panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie]
+                guard panel.runModal() == .OK, let url = panel.url else { done(false); return }
+                VideoStore.shared.link(song: song, path: url.path)
+                self?.webServer.notifyVideoUpdated(song: song)
+                done(true)
+            }
+        }
 
         logicPoller.start()
         mtcReceiver.start()

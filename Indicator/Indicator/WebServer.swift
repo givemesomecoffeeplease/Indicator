@@ -31,6 +31,8 @@ class WebServer {
     // 드럼 채보(/chart에서 내보낸 .drum.json, /edit에서 곡별로 업로드) — 원본 JSON을 그대로 보관
     var getDrumChart: ((_ song: String) -> Data?)? = nil
     var saveDrumChart: ((_ song: String, _ json: Data) -> Void)? = nil
+    // /edit의 "영상 연결" 버튼 → 맥에서 파일 선택창을 띄워 그 곡에 연결(완료되면 연결 여부를 돌려줌)
+    var pickVideo: ((_ song: String, _ done: @escaping (Bool) -> Void) -> Void)? = nil
 
     func start(port: UInt16) {
         loadHTML()
@@ -143,6 +145,7 @@ class WebServer {
         case _ where method == "GET" && path.hasPrefix("/api/videoMeta"): handleVideoMeta(conn, path: path)
         case _ where method == "GET" && path.hasPrefix("/api/video?"):    handleVideo(conn, path: path, range: range)
         case ("POST", "/save-video-offset"):          handleSaveVideoOffset(conn, body: body)
+        case ("POST", "/pick-video"):                 handlePickVideo(conn, body: body)
         case ("GET", "/edit"):                        handleEdit(conn)
         case ("POST", "/save"):                       handleSave(conn, body: body)
         case ("POST", "/save-song-meta"):             handleSaveSongMeta(conn, body: body)
@@ -350,6 +353,16 @@ class WebServer {
             send(conn, body: Data("{\"ok\":true}".utf8), contentType: "application/json")
         } else {
             send(conn, body: Data("{\"ok\":false}".utf8), contentType: "application/json")
+        }
+    }
+
+    private func handlePickVideo(_ conn: NWConnection, body: Data) {
+        guard let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let song = obj["song"] as? String, !song.isEmpty, let pick = pickVideo else {
+            send(conn, body: Data("{\"ok\":false}".utf8), contentType: "application/json"); return
+        }
+        pick(song) { [weak self] ok in
+            self?.send(conn, body: Data((ok ? "{\"ok\":true}" : "{\"ok\":false}").utf8), contentType: "application/json")
         }
     }
 
@@ -945,6 +958,26 @@ class WebServer {
             }).catch(()=>{ drumStatus.textContent='드럼 채보: 없음'; });
             drumWrap.appendChild(drumStatus);drumWrap.appendChild(drumEditBtn);drumWrap.appendChild(drumBtn);drumWrap.appendChild(drumInp);
             titleEl.appendChild(drumWrap);
+            // 드럼 영상 — 채보를 대체하는 것이라 같은 곳(곡별 영역)에서 연결한다. 브라우저는 보안상
+            // 파일 경로를 못 받아서, 버튼이 맥 앱에 "이 곡 영상 고르는 창을 띄워 달라"고 요청한다
+            // (파일 선택창은 앱이 떠 있는 맥 화면에 뜬다). 영상은 복사하지 않고 경로만 연결.
+            const vidWrap=document.createElement('div');vidWrap.style.cssText='display:flex;align-items:center;gap:6px;margin-left:12px;font-size:13px;color:var(--sub)';
+            const vidStatus=document.createElement('span');vidStatus.textContent='드럼 영상: 확인 중…';
+            const vidBtn=document.createElement('button');vidBtn.className='btn btn-sm btn-sec';vidBtn.textContent='영상 연결';
+            const refreshVid=()=>fetch('/api/videoMeta?song='+encodeURIComponent(song)).then(r=>r.json()).then(m=>{
+              vidStatus.textContent = !m.linked ? '드럼 영상: 없음'
+                : (m.exists ? '드럼 영상: '+m.name+' (시작점 '+(+m.offset).toFixed(2)+'초)' : '드럼 영상: 파일을 찾을 수 없음 — 다시 연결해 주세요');
+              vidBtn.textContent = m.linked ? '영상 다시 연결' : '영상 연결';
+            }).catch(()=>{ vidStatus.textContent='드럼 영상: 없음'; });
+            vidBtn.onclick=()=>{
+              vidBtn.disabled=true;showMsg('맥에서 영상 파일을 골라주세요.');
+              fetch('/pick-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({song})})
+                .then(r=>r.json()).then(res=>{ if(res.ok) showMsg('드럼 영상을 연결했어요. 시작점은 /drum의 ⚙에서 맞춰주세요.'); return refreshVid(); })
+                .catch(()=>showMsg('영상 연결에 실패했어요.')).finally(()=>{ vidBtn.disabled=false; });
+            };
+            refreshVid();
+            vidWrap.appendChild(vidStatus);vidWrap.appendChild(vidBtn);
+            titleEl.appendChild(vidWrap);
           }
           renderSections(song);
         }
